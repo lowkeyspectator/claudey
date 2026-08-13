@@ -10,6 +10,8 @@ import { runSetupCommand } from './commands/setup.js';
 import { runStatusCommand } from './commands/status.js';
 import { runUninstallCommand } from './commands/uninstall.js';
 import { runUpdateCommand } from './commands/update.js';
+import { runClaudex } from './launchers/claudex.js';
+import { runClaudeAgy } from './launchers/claude-agy.js';
 import { ClaudexError, exitCodeFor } from '../core/errors.js';
 import { emitError, emitSuccess } from './output.js';
 import { parseManagementArgs } from './parse.js';
@@ -102,13 +104,16 @@ const DEFAULT_HANDLERS = Object.freeze({
   config: ({ command, options, context }) => runConfigCommand(command, options, context),
   cursor: ({ command, options, context }) => runCursorCommand(command, options, context),
   cursorMcpServe: ({ options, context }) => runCursorMcpServe(options, context),
-  uninstall: ({ options, context }) => runUninstallCommand(options, context)
+  uninstall: ({ options, context }) => runUninstallCommand(options, context),
+  claudex: ({ options, context }) => runClaudex(options?.rawArgv ?? [], process.env, context),
+  'claude-agy': ({ options, context }) => runClaudeAgy(options?.rawArgv ?? [], process.env, context)
 });
 
 function family(command) {
   const first = command[0];
   if (['start', 'stop', 'restart'].includes(first)) return 'lifecycle';
   if (first === 'cursor') return command[1] === 'mcp-serve' ? 'cursorMcpServe' : 'cursor';
+  if (first === 'launcher') return command[1];
   return first;
 }
 

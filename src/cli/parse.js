@@ -105,6 +105,10 @@ export function parseManagementArgs(argv, environment = process.env) {
   if (!first) throw usage('A management command is required.');
 
   const consume = (count, allowed) => parseOptionList(tokens.slice(count), options, allowed);
+  if (first === 'launcher') {
+    if (!second || !['claudex', 'claude-agy'].includes(second)) throw usage('launcher requires claudex or claude-agy.');
+    return { command: ['launcher', second], options: { rawArgv: tokens.slice(2) } };
+  }
   if (first === 'setup') consume(1, optionSets.setup);
   else if (first === 'install') consume(1, optionSets.install);
   else if (first === 'start') consume(1, optionSets.start);
