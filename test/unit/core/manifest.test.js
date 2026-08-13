@@ -150,6 +150,28 @@ test('writes only authenticated inventory through atomic replacement without sec
     ['files', 'hmac', 'installationId', 'managedRoots', 'platform', 'schemaVersion']);
 });
 
+test('rejects exact protected directory segments with minimal fixed paths without substring matching', async () => {
+  for (const relativePath of ['auth/account.json', 'oauth/account.json', 'config/settings.json']) {
+    let writes = 0;
+    await assert.rejects(() => writeManifest(unsignedManifest({
+      files: [{ relativePath, type: 'file', sha256: FILE_HASH }]
+    }), key(), ROOTS, {
+      assertLockHeld: async () => undefined,
+      atomicReplace: async () => { writes += 1; }
+    }), (error) => error?.code === 'SAFETY_REFUSAL', relativePath);
+    assert.equal(writes, 0, relativePath);
+  }
+
+  const admitted = await writeManifest(unsignedManifest({ files: [
+    { relativePath: 'releases/authentication-helper.exe', type: 'file', sha256: FILE_HASH },
+    { relativePath: 'releases/oauth2-support.dll', type: 'file', sha256: 'b'.repeat(64) },
+    { relativePath: 'releases/configuration-guide.txt', type: 'file', sha256: 'c'.repeat(64) }
+  ] }), key(), ROOTS, {
+    assertLockHeld: async () => undefined,
+    atomicReplace: async () => undefined
+  });
+  assert.equal(admitted.files.length, 3);
+});
 test('rejects adapter-protected roots and credential filenames without banning ordinary release files', async () => {
   const protectedPaths = {
     ...ROOTS,

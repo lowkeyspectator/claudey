@@ -156,7 +156,8 @@ function assertManifestShape(manifest) {
     assertRelativeManagedChild(record.relativePath, { platform: platformName(family) });
     const normalized = record.relativePath.replaceAll('\\', '/');
     const basename = normalized.slice(normalized.lastIndexOf('/') + 1);
-    if (/^(?:config\.ya?ml|oauth(?:\.[^.]+)?|oauth[-_.](?:token|credentials?|auth)(?:[-_.].*)?(?:\.[^.]+)?)$/iu.test(basename)) {
+    if (/(^|\/)(auth|oauth|config)(\/|$)/iu.test(normalized)
+      || /^(?:config\.ya?ml|oauth(?:\.[^.]+)?|oauth[-_.](?:token|credentials?|auth)(?:[-_.].*)?(?:\.[^.]+)?)$/iu.test(basename)) {
       throw safety('Credential and configuration paths are not removable inventory.');
     }
     const identity = family === 'windows' ? normalized.toLowerCase() : normalized;
