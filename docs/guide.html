@@ -3,8 +3,8 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Claudex - Complete Interactive Guide & User Manual</title>
-  <meta name="description" content="Official interactive setup guide and manual for Claudex: CLIProxyAPI manager for Codex, Antigravity OAuth, and Cursor Agent MCP bridge.">
+  <title>Claudex - Beginner's Complete Setup Guide & Operating Manual</title>
+  <meta name="description" content="Step-by-step beginner setup guide for Claudex: Install Node.js, Git, Claude Code, CLIProxyAPI, Codex & Google Antigravity OAuth, and Cursor Agent.">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Outfit:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
@@ -15,7 +15,6 @@
       --bg-card-hover: #1a1e32;
       --bg-term: #0a0c14;
       --border-color: rgba(255, 255, 255, 0.08);
-      --border-glow: rgba(0, 242, 254, 0.3);
       --accent-cyan: #00f2fe;
       --accent-blue: #4facfe;
       --accent-purple: #7000ff;
@@ -28,11 +27,7 @@
       --font-mono: 'JetBrains Mono', monospace;
     }
 
-    * {
-      box-sizing: border-box;
-      margin: 0;
-      padding: 0;
-    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
 
     body {
       background-color: var(--bg-dark);
@@ -46,19 +41,9 @@
       background-attachment: fixed;
     }
 
-    /* Container */
-    .container {
-      max-width: 1200px;
-      margin: 0 auto;
-      padding: 0 2rem;
-    }
+    .container { max-width: 1200px; margin: 0 auto; padding: 0 2rem; }
 
-    /* Header & Hero */
-    header {
-      padding: 4rem 0 3rem 0;
-      text-align: center;
-      position: relative;
-    }
+    header { padding: 4rem 0 3rem 0; text-align: center; position: relative; }
 
     .badge {
       display: inline-flex;
@@ -78,8 +63,7 @@
     }
 
     .badge-dot {
-      width: 8px;
-      height: 8px;
+      width: 8px; height: 8px;
       background-color: var(--accent-cyan);
       border-radius: 50%;
       box-shadow: 0 0 10px var(--accent-cyan);
@@ -102,30 +86,29 @@
     }
 
     .subtitle {
-      font-size: 1.25rem;
+      font-size: 1.2rem;
       color: var(--text-muted);
-      max-width: 700px;
+      max-width: 750px;
       margin: 0 auto 2.5rem auto;
-      font-weight: 400;
     }
 
-    /* Navigation Tabs */
-    .nav-tabs {
+    /* Step Timeline Pills */
+    .timeline-nav {
       display: flex;
       justify-content: center;
-      gap: 1rem;
+      gap: 0.75rem;
       margin-bottom: 3rem;
       flex-wrap: wrap;
     }
 
-    .tab-btn {
+    .step-pill {
       background: var(--bg-card);
       border: 1px solid var(--border-color);
       color: var(--text-muted);
-      padding: 0.75rem 1.5rem;
+      padding: 0.75rem 1.25rem;
       border-radius: 12px;
-      font-family: var(--font-body);
       font-weight: 600;
+      font-size: 0.9rem;
       cursor: pointer;
       transition: all 0.3s ease;
       display: flex;
@@ -133,17 +116,26 @@
       gap: 0.5rem;
     }
 
-    .tab-btn:hover, .tab-btn.active {
+    .step-pill:hover, .step-pill.active {
       color: #fff;
       background: var(--bg-card-hover);
       border-color: var(--accent-cyan);
       box-shadow: 0 0 20px rgba(0, 242, 254, 0.15);
     }
 
-    /* Section Styling */
-    section {
-      margin-bottom: 4rem;
+    .step-number {
+      background: rgba(0, 242, 254, 0.15);
+      color: var(--accent-cyan);
+      width: 24px;
+      height: 24px;
+      border-radius: 50%;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 0.8rem;
     }
+
+    section { margin-bottom: 4rem; }
 
     .section-title {
       font-size: 2rem;
@@ -154,12 +146,8 @@
       gap: 0.75rem;
     }
 
-    .section-desc {
-      color: var(--text-muted);
-      margin-bottom: 2rem;
-    }
+    .section-desc { color: var(--text-muted); margin-bottom: 2rem; }
 
-    /* Cards Grid */
     .grid {
       display: grid;
       grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
@@ -173,20 +161,7 @@
       padding: 1.75rem;
       transition: all 0.3s ease;
       position: relative;
-      overflow: hidden;
       backdrop-filter: blur(10px);
-    }
-
-    .card::before {
-      content: '';
-      position: absolute;
-      top: 0;
-      left: 0;
-      width: 100%;
-      height: 3px;
-      background: linear-gradient(90deg, var(--accent-cyan), var(--accent-purple));
-      opacity: 0;
-      transition: opacity 0.3s ease;
     }
 
     .card:hover {
@@ -195,40 +170,52 @@
       box-shadow: 0 12px 30px rgba(0, 0, 0, 0.4);
     }
 
-    .card:hover::before {
-      opacity: 1;
-    }
-
     .card-icon {
-      width: 48px;
-      height: 48px;
+      width: 44px; height: 44px;
       border-radius: 12px;
       background: rgba(0, 242, 254, 0.1);
+      display: flex; align-items: center; justify-content: center;
+      font-size: 1.4rem; color: var(--accent-cyan);
+      margin-bottom: 1rem;
+    }
+
+    .card h3 { font-size: 1.3rem; font-weight: 600; margin-bottom: 0.5rem; }
+    .card p { color: var(--text-muted); font-size: 0.95rem; margin-bottom: 1rem; }
+
+    /* OS Selector Sub-tabs */
+    .os-selector {
       display: flex;
-      align-items: center;
-      justify-content: center;
-      font-size: 1.5rem;
-      color: var(--accent-cyan);
-      margin-bottom: 1.25rem;
+      gap: 0.5rem;
+      margin-bottom: 1.5rem;
+      background: #0d0f1a;
+      padding: 0.35rem;
+      border-radius: 10px;
+      width: fit-content;
+      border: 1px solid var(--border-color);
     }
 
-    .card h3 {
-      font-size: 1.35rem;
-      font-weight: 600;
-      margin-bottom: 0.75rem;
-    }
-
-    .card p {
+    .os-btn {
+      background: transparent;
+      border: none;
       color: var(--text-muted);
-      font-size: 0.95rem;
-      margin-bottom: 1.25rem;
+      padding: 0.4rem 1rem;
+      border-radius: 8px;
+      font-weight: 600;
+      font-size: 0.85rem;
+      cursor: pointer;
+      transition: all 0.2s ease;
     }
 
-    /* Interactive Terminal & Code Blocks */
+    .os-btn.active {
+      background: var(--accent-cyan);
+      color: #000;
+    }
+
+    /* Terminal Box */
     .terminal-box {
       background: var(--bg-term);
       border: 1px solid var(--border-color);
-      border-radius: 14px;
+      border-radius: 12px;
       overflow: hidden;
       margin-top: 1rem;
       box-shadow: 0 10px 25px rgba(0, 0, 0, 0.5);
@@ -236,41 +223,24 @@
 
     .terminal-header {
       background: #141724;
-      padding: 0.6rem 1rem;
+      padding: 0.5rem 0.9rem;
       display: flex;
       align-items: center;
       justify-content: space-between;
       border-bottom: 1px solid var(--border-color);
     }
 
-    .terminal-dots {
-      display: flex;
-      gap: 6px;
-    }
-
-    .dot {
-      width: 10px;
-      height: 10px;
-      border-radius: 50%;
-    }
-
+    .terminal-dots { display: flex; gap: 6px; }
+    .dot { width: 10px; height: 10px; border-radius: 50%; }
     .dot-red { background: #ff5f56; }
     .dot-yellow { background: #ffbd2e; }
     .dot-green { background: #27c93f; }
-
-    .terminal-title {
-      font-family: var(--font-mono);
-      font-size: 0.8rem;
-      color: var(--text-muted);
-    }
+    .terminal-title { font-family: var(--font-mono); font-size: 0.78rem; color: var(--text-muted); }
 
     .terminal-body {
-      padding: 1.25rem;
+      padding: 1rem;
       font-family: var(--font-mono);
-      font-size: 0.9rem;
-      color: #00f2fe;
-      position: relative;
-      overflow-x: auto;
+      font-size: 0.88rem;
     }
 
     .command-line {
@@ -280,10 +250,7 @@
       gap: 1rem;
     }
 
-    .cmd-text {
-      color: #ffffff;
-      font-weight: 500;
-    }
+    .cmd-text { color: #ffffff; font-weight: 500; }
 
     .copy-btn {
       background: rgba(255, 255, 255, 0.08);
@@ -305,7 +272,20 @@
       border-color: var(--accent-cyan);
     }
 
-    /* Live Interactive Terminal Simulator */
+    .check-box {
+      background: rgba(16, 185, 129, 0.08);
+      border: 1px solid rgba(16, 185, 129, 0.3);
+      border-radius: 8px;
+      padding: 0.75rem 1rem;
+      margin-top: 0.75rem;
+      font-size: 0.85rem;
+      color: #34d399;
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+
+    /* Simulator */
     .sim-terminal {
       background: #06070a;
       border: 1px solid var(--border-color);
@@ -335,24 +315,26 @@
       transition: all 0.2s ease;
     }
 
-    .sim-btn:hover {
-      border-color: var(--accent-cyan);
-      color: var(--accent-cyan);
-    }
+    .sim-btn:hover { border-color: var(--accent-cyan); color: var(--accent-cyan); }
 
-    .sim-output {
-      color: #ffffff;
-      white-space: pre-wrap;
-      font-size: 0.88rem;
-      line-height: 1.5;
-    }
-
+    .sim-output { color: #ffffff; white-space: pre-wrap; font-size: 0.88rem; line-height: 1.5; }
     .highlight-green { color: var(--success); }
     .highlight-cyan { color: var(--accent-cyan); }
     .highlight-yellow { color: var(--warning); }
     .highlight-magenta { color: var(--accent-magenta); }
 
-    /* Footer */
+    /* FAQ accordion */
+    .faq-item {
+      background: var(--bg-card);
+      border: 1px solid var(--border-color);
+      border-radius: 12px;
+      padding: 1.25rem;
+      margin-bottom: 1rem;
+    }
+
+    .faq-q { font-weight: 600; font-size: 1.1rem; color: #fff; margin-bottom: 0.5rem; }
+    .faq-a { color: var(--text-muted); font-size: 0.95rem; }
+
     footer {
       border-top: 1px solid var(--border-color);
       padding: 3rem 0;
@@ -361,98 +343,217 @@
       font-size: 0.9rem;
     }
 
-    footer a {
-      color: var(--accent-cyan);
-      text-decoration: none;
-    }
-
-    footer a:hover {
-      text-decoration: underline;
-    }
+    footer a { color: var(--accent-cyan); text-decoration: none; }
+    footer a:hover { text-decoration: underline; }
   </style>
 </head>
 <body>
 
   <div class="container">
-    <!-- Header / Hero -->
     <header>
       <div class="badge">
         <span class="badge-dot"></span>
         Zero-Dependency Cross-Platform CLI Proxy
       </div>
-      <h1>Claudex Setup & Operating Guide</h1>
+      <h1>Claudex Complete Setup & Manual</h1>
       <p class="subtitle">
-        Safely connect Claude Code to OpenAI Codex and Google Antigravity models while bridging Cursor Agent through isolated MCP tools.
+        A step-by-step guide for absolute beginners: From installing Node.js, Git, and Claude Code to configuring Codex & Antigravity models.
       </p>
     </header>
 
-    <!-- Quick Navigation Tabs -->
-    <div class="nav-tabs">
-      <button class="tab-btn active" id="tab-btn-install" onclick="showSection('install')">🚀 Installation</button>
-      <button class="tab-btn" id="tab-btn-auth" onclick="showSection('auth')">🔑 Provider Auth</button>
-      <button class="tab-btn" id="tab-btn-launch" onclick="showSection('launch')">⚡ Launching Claude</button>
-      <button class="tab-btn" id="tab-btn-cursor" onclick="showSection('cursor')">🧩 Cursor MCP Bridge</button>
-      <button class="tab-btn" id="tab-btn-sim" onclick="showSection('sim')">🖥️ Interactive CLI Simulator</button>
+    <!-- Timeline Steps Navigation -->
+    <div class="timeline-nav">
+      <button class="step-pill active" id="btn-step-0" onclick="showStep(0)">
+        <span class="step-number">0</span> Prerequisites Setup
+      </button>
+      <button class="step-pill" id="btn-step-1" onclick="showStep(1)">
+        <span class="step-number">1</span> Download & Setup
+      </button>
+      <button class="step-pill" id="btn-step-2" onclick="showStep(2)">
+        <span class="step-number">2</span> OAuth Login
+      </button>
+      <button class="step-pill" id="btn-step-3" onclick="showStep(3)">
+        <span class="step-number">3</span> Launch Claude Code
+      </button>
+      <button class="step-pill" id="btn-step-4" onclick="showStep(4)">
+        <span class="step-number">4</span> Cursor Agent MCP
+      </button>
+      <button class="step-pill" id="btn-step-5" onclick="showStep(5)">
+        <span class="step-number">5</span> Interactive Simulator
+      </button>
+      <button class="step-pill" id="btn-step-6" onclick="showStep(6)">
+        <span class="step-number">6</span> FAQ & Troubleshooting
+      </button>
     </div>
 
-    <!-- Section 1: Installation & Setup -->
-    <section id="sec-install">
-      <h2 class="section-title">1. Bootstrap & Setup</h2>
-      <p class="section-desc">Get started on Windows, macOS, Linux, or WSL in seconds.</p>
+    <!-- STEP 0: PREREQUISITES -->
+    <section id="step-0">
+      <h2 class="section-title">Step 0: Install Required Prerequisites (For New Systems)</h2>
+      <p class="section-desc">If your system is completely fresh, follow these steps to install Node.js, Git, and Claude Code first.</p>
 
-      <div class="grid">
-        <!-- Windows Card -->
+      <!-- OS Selector Sub-tabs -->
+      <div class="os-selector">
+        <button class="os-btn active" id="os-win-btn" onclick="showOS('win')">Windows</button>
+        <button class="os-btn" id="os-mac-btn" onclick="showOS('mac')">macOS</button>
+        <button class="os-btn" id="os-linux-btn" onclick="showOS('linux')">Linux / WSL</button>
+      </div>
+
+      <!-- Windows Prerequisites -->
+      <div id="os-win-content" class="grid">
         <div class="card">
-          <div class="card-icon">🪟</div>
-          <h3>Windows (PowerShell)</h3>
-          <p>Installs native executable shims and configures per-user local environment without requiring Admin access.</p>
+          <div class="card-icon">1️⃣</div>
+          <h3>1. Install Node.js 22+</h3>
+          <p>Run Windows Package Manager command in PowerShell:</p>
           <div class="terminal-box">
-            <div class="terminal-header">
-              <div class="terminal-dots"><span class="dot dot-red"></span><span class="dot dot-yellow"></span><span class="dot dot-green"></span></div>
-              <span class="terminal-title">PowerShell</span>
-            </div>
+            <div class="terminal-header"><span class="terminal-title">PowerShell</span></div>
             <div class="terminal-body">
               <div class="command-line">
-                <span class="cmd-text">.\install.ps1</span>
-                <button class="copy-btn" id="btn-copy-win" onclick="copyText('.\\install.ps1', 'btn-copy-win')">Copy</button>
+                <span class="cmd-text">winget install OpenJS.NodeJS.LTS</span>
+                <button class="copy-btn" id="c1" onclick="copyText('winget install OpenJS.NodeJS.LTS', 'c1')">Copy</button>
               </div>
             </div>
           </div>
+          <div class="check-box">✓ Verify: <code>node --version</code> (Must be &ge; 22.20.0)</div>
         </div>
 
-        <!-- POSIX Card -->
         <div class="card">
-          <div class="card-icon">🐧 / 🍎</div>
-          <h3>macOS / Linux / WSL</h3>
-          <p>Verifies Node baseline, extracts authenticated CLIProxyAPI releases, and sets up path wrappers.</p>
+          <div class="card-icon">2️⃣</div>
+          <h3>2. Install Git</h3>
+          <p>Install Git for version control and repository management:</p>
           <div class="terminal-box">
-            <div class="terminal-header">
-              <div class="terminal-dots"><span class="dot dot-red"></span><span class="dot dot-yellow"></span><span class="dot dot-green"></span></div>
-              <span class="terminal-title">Bash / Zsh</span>
-            </div>
+            <div class="terminal-header"><span class="terminal-title">PowerShell</span></div>
             <div class="terminal-body">
               <div class="command-line">
-                <span class="cmd-text">./install.sh</span>
-                <button class="copy-btn" id="btn-copy-posix" onclick="copyText('./install.sh', 'btn-copy-posix')">Copy</button>
+                <span class="cmd-text">winget install Git.Git</span>
+                <button class="copy-btn" id="c2" onclick="copyText('winget install Git.Git', 'c2')">Copy</button>
               </div>
             </div>
           </div>
+          <div class="check-box">✓ Verify: <code>git --version</code></div>
+        </div>
+
+        <div class="card">
+          <div class="card-icon">3️⃣</div>
+          <h3>3. Install Claude Code</h3>
+          <p>Install the official Claude Code CLI tool globally via npm:</p>
+          <div class="terminal-box">
+            <div class="terminal-header"><span class="terminal-title">PowerShell</span></div>
+            <div class="terminal-body">
+              <div class="command-line">
+                <span class="cmd-text">npm install -g @anthropic-ai/claude-code</span>
+                <button class="copy-btn" id="c3" onclick="copyText('npm install -g @anthropic-ai/claude-code', 'c3')">Copy</button>
+              </div>
+            </div>
+          </div>
+          <div class="check-box">✓ Verify: <code>claude --version</code> (Must be &ge; 2.1.229)</div>
         </div>
       </div>
 
-      <div style="margin-top: 2rem;">
+      <!-- macOS Prerequisites -->
+      <div id="os-mac-content" class="grid" style="display: none;">
         <div class="card">
-          <h3>Running Setup Directly</h3>
-          <p>Initialize or update managed binaries, configuration, and launch gateway service on <code>127.0.0.1:8317</code>:</p>
+          <div class="card-icon">🍺</div>
+          <h3>1. Install Node.js & Git via Homebrew</h3>
           <div class="terminal-box">
-            <div class="terminal-header">
-              <div class="terminal-dots"><span class="dot dot-red"></span><span class="dot dot-yellow"></span><span class="dot dot-green"></span></div>
-              <span class="terminal-title">Terminal</span>
-            </div>
+            <div class="terminal-header"><span class="terminal-title">Terminal</span></div>
             <div class="terminal-body">
               <div class="command-line">
-                <span class="cmd-text">claudexctl setup</span>
-                <button class="copy-btn" id="btn-copy-setup" onclick="copyText('claudexctl setup', 'btn-copy-setup')">Copy</button>
+                <span class="cmd-text">brew install node git</span>
+                <button class="copy-btn" id="cm1" onclick="copyText('brew install node git', 'cm1')">Copy</button>
+              </div>
+            </div>
+          </div>
+          <div class="check-box">✓ Verify: <code>node -v</code> & <code>git -v</code></div>
+        </div>
+
+        <div class="card">
+          <div class="card-icon">🤖</div>
+          <h3>2. Install Claude Code</h3>
+          <div class="terminal-box">
+            <div class="terminal-header"><span class="terminal-title">Terminal</span></div>
+            <div class="terminal-body">
+              <div class="command-line">
+                <span class="cmd-text">npm install -g @anthropic-ai/claude-code</span>
+                <button class="copy-btn" id="cm2" onclick="copyText('npm install -g @anthropic-ai/claude-code', 'cm2')">Copy</button>
+              </div>
+            </div>
+          </div>
+          <div class="check-box">✓ Verify: <code>claude --version</code></div>
+        </div>
+      </div>
+
+      <!-- Linux Prerequisites -->
+      <div id="os-linux-content" class="grid" style="display: none;">
+        <div class="card">
+          <div class="card-icon">🐧</div>
+          <h3>1. Install Node.js 22 & Git (Ubuntu/Debian)</h3>
+          <div class="terminal-box">
+            <div class="terminal-header"><span class="terminal-title">Bash</span></div>
+            <div class="terminal-body">
+              <div class="command-line">
+                <span class="cmd-text">curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash - && sudo apt install -y nodejs git tar</span>
+                <button class="copy-btn" id="cl1" onclick="copyText('curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash - && sudo apt install -y nodejs git tar', 'cl1')">Copy</button>
+              </div>
+            </div>
+          </div>
+          <div class="check-box">✓ Verify: <code>node -v</code> & <code>git -v</code></div>
+        </div>
+
+        <div class="card">
+          <div class="card-icon">🤖</div>
+          <h3>2. Install Claude Code</h3>
+          <div class="terminal-box">
+            <div class="terminal-header"><span class="terminal-title">Bash</span></div>
+            <div class="terminal-body">
+              <div class="command-line">
+                <span class="cmd-text">sudo npm install -g @anthropic-ai/claude-code</span>
+                <button class="copy-btn" id="cl2" onclick="copyText('sudo npm install -g @anthropic-ai/claude-code', 'cl2')">Copy</button>
+              </div>
+            </div>
+          </div>
+          <div class="check-box">✓ Verify: <code>claude --version</code></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- STEP 1: DOWNLOAD & SETUP -->
+    <section id="step-1" style="display: none;">
+      <h2 class="section-title">Step 1: Clone Repository & Run Claudex Setup</h2>
+      <p class="section-desc">Download Claudex and run the automated setup command.</p>
+
+      <div class="grid">
+        <div class="card">
+          <div class="card-icon">📥</div>
+          <h3>1. Clone Repository</h3>
+          <div class="terminal-box">
+            <div class="terminal-header"><span class="terminal-title">Terminal</span></div>
+            <div class="terminal-body">
+              <div class="command-line" style="margin-bottom: 0.5rem;">
+                <span class="cmd-text">git clone https://github.com/ramsaijanapana/claude_code_cliProxy.git</span>
+                <button class="copy-btn" id="s1" onclick="copyText('git clone https://github.com/ramsaijanapana/claude_code_cliProxy.git', 's1')">Copy</button>
+              </div>
+              <div class="command-line">
+                <span class="cmd-text">cd claude_code_cliProxy</span>
+                <button class="copy-btn" id="s2" onclick="copyText('cd claude_code_cliProxy', 's2')">Copy</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-icon">⚙️</div>
+          <h3>2. Run Setup Script</h3>
+          <p>Run bootstrap script or setup command to install binary and start loopback gateway:</p>
+          <div class="terminal-box">
+            <div class="terminal-header"><span class="terminal-title">Windows / POSIX</span></div>
+            <div class="terminal-body">
+              <div class="command-line" style="margin-bottom: 0.5rem;">
+                <span class="cmd-text">.\install.ps1  # Windows</span>
+                <button class="copy-btn" id="s3" onclick="copyText('.\\install.ps1', 's3')">Copy</button>
+              </div>
+              <div class="command-line">
+                <span class="cmd-text">./install.sh   # macOS / Linux</span>
+                <button class="copy-btn" id="s4" onclick="copyText('./install.sh', 's4')">Copy</button>
               </div>
             </div>
           </div>
@@ -460,25 +561,22 @@
       </div>
     </section>
 
-    <!-- Section 2: Provider Auth -->
-    <section id="sec-auth" style="display: none;">
-      <h2 class="section-title">2. Provider Authentication</h2>
-      <p class="section-desc">Authenticate OpenAI Codex or Google Antigravity OAuth through CLIProxyAPI.</p>
+    <!-- STEP 2: OAUTH LOGIN -->
+    <section id="step-2" style="display: none;">
+      <h2 class="section-title">Step 2: Provider OAuth Login</h2>
+      <p class="section-desc">Authenticate with OpenAI Codex or Google Antigravity.</p>
 
       <div class="grid">
         <div class="card">
           <div class="card-icon">🧠</div>
-          <h3>Codex OAuth</h3>
-          <p>Initiate browser-based or device-code login for OpenAI Codex models.</p>
+          <h3>Codex OAuth Login</h3>
+          <p>Launches browser OAuth callback or device code flow for OpenAI Codex access:</p>
           <div class="terminal-box">
-            <div class="terminal-header">
-              <div class="terminal-dots"><span class="dot dot-red"></span><span class="dot dot-yellow"></span><span class="dot dot-green"></span></div>
-              <span class="terminal-title">Terminal</span>
-            </div>
+            <div class="terminal-header"><span class="terminal-title">Terminal</span></div>
             <div class="terminal-body">
               <div class="command-line">
                 <span class="cmd-text">claudexctl auth codex</span>
-                <button class="copy-btn" id="btn-copy-auth-codex" onclick="copyText('claudexctl auth codex', 'btn-copy-auth-codex')">Copy</button>
+                <button class="copy-btn" id="a1" onclick="copyText('claudexctl auth codex', 'a1')">Copy</button>
               </div>
             </div>
           </div>
@@ -486,17 +584,14 @@
 
         <div class="card">
           <div class="card-icon">🚀</div>
-          <h3>Google Antigravity OAuth</h3>
-          <p>Authenticate with Google Antigravity provider for Gemini and Claude models.</p>
+          <h3>Google Antigravity OAuth Login</h3>
+          <p>Launches browser OAuth callback for Google Antigravity models:</p>
           <div class="terminal-box">
-            <div class="terminal-header">
-              <div class="terminal-dots"><span class="dot dot-red"></span><span class="dot dot-yellow"></span><span class="dot dot-green"></span></div>
-              <span class="terminal-title">Terminal</span>
-            </div>
+            <div class="terminal-header"><span class="terminal-title">Terminal</span></div>
             <div class="terminal-body">
               <div class="command-line">
                 <span class="cmd-text">claudexctl auth antigravity</span>
-                <button class="copy-btn" id="btn-copy-auth-agy" onclick="copyText('claudexctl auth antigravity', 'btn-copy-auth-agy')">Copy</button>
+                <button class="copy-btn" id="a2" onclick="copyText('claudexctl auth antigravity', 'a2')">Copy</button>
               </div>
             </div>
           </div>
@@ -504,25 +599,25 @@
       </div>
     </section>
 
-    <!-- Section 3: Launching Claude Code -->
-    <section id="sec-launch" style="display: none;">
-      <h2 class="section-title">3. Launching Claude Code</h2>
-      <p class="section-desc">Run Claude Code with live-discovered models. Your global <code>claude</code> environment is never modified.</p>
+    <!-- STEP 3: LAUNCH CLAUDE CODE -->
+    <section id="step-3" style="display: none;">
+      <h2 class="section-title">Step 3: Launch Claude Code</h2>
+      <p class="section-desc">Launch Claude Code against live discovered models without altering your normal system <code>claude</code> executable.</p>
 
       <div class="grid">
         <div class="card">
           <div class="card-icon">✨</div>
-          <h3>Codex Launcher (<code>claudex</code>)</h3>
-          <p>Launches Claude Code routed to live Codex provider models.</p>
+          <h3>Launch via Codex (<code>claudex</code>)</h3>
           <div class="terminal-box">
-            <div class="terminal-header">
-              <div class="terminal-dots"><span class="dot dot-red"></span><span class="dot dot-yellow"></span><span class="dot dot-green"></span></div>
-              <span class="terminal-title">Terminal</span>
-            </div>
+            <div class="terminal-header"><span class="terminal-title">Terminal</span></div>
             <div class="terminal-body">
+              <div class="command-line" style="margin-bottom: 0.5rem;">
+                <span class="cmd-text">claudex</span>
+                <button class="copy-btn" id="l1" onclick="copyText('claudex', 'l1')">Copy</button>
+              </div>
               <div class="command-line">
-                <span class="cmd-text">claudex --model gpt-4o -- --print "Hello"</span>
-                <button class="copy-btn" id="btn-copy-claudex" onclick="copyText('claudex --model gpt-4o -- --print &quot;Hello&quot;', 'btn-copy-claudex')">Copy</button>
+                <span class="cmd-text">claudex --model gpt-4o -- --verbose</span>
+                <button class="copy-btn" id="l2" onclick="copyText('claudex --model gpt-4o -- --verbose', 'l2')">Copy</button>
               </div>
             </div>
           </div>
@@ -530,17 +625,17 @@
 
         <div class="card">
           <div class="card-icon">⚡</div>
-          <h3>Antigravity Launcher (<code>claude-agy</code>)</h3>
-          <p>Launches Claude Code routed to live Antigravity models.</p>
+          <h3>Launch via Antigravity (<code>claude-agy</code>)</h3>
           <div class="terminal-box">
-            <div class="terminal-header">
-              <div class="terminal-dots"><span class="dot dot-red"></span><span class="dot dot-yellow"></span><span class="dot dot-green"></span></div>
-              <span class="terminal-title">Terminal</span>
-            </div>
+            <div class="terminal-header"><span class="terminal-title">Terminal</span></div>
             <div class="terminal-body">
+              <div class="command-line" style="margin-bottom: 0.5rem;">
+                <span class="cmd-text">claude-agy</span>
+                <button class="copy-btn" id="l3" onclick="copyText('claude-agy', 'l3')">Copy</button>
+              </div>
               <div class="command-line">
-                <span class="cmd-text">claude-agy --model gemini-1.5-pro -- --verbose</span>
-                <button class="copy-btn" id="btn-copy-agy" onclick="copyText('claude-agy --model gemini-1.5-pro -- --verbose', 'btn-copy-agy')">Copy</button>
+                <span class="cmd-text">claude-agy --model gemini-1.5-pro</span>
+                <button class="copy-btn" id="l4" onclick="copyText('claude-agy --model gemini-1.5-pro', 'l4')">Copy</button>
               </div>
             </div>
           </div>
@@ -548,44 +643,52 @@
       </div>
     </section>
 
-    <!-- Section 4: Cursor MCP Bridge -->
-    <section id="sec-cursor" style="display: none;">
-      <h2 class="section-title">4. Cursor Agent MCP Bridge</h2>
-      <p class="section-desc">Expose Cursor Agent tools to Claude Code with safety boundaries.</p>
+    <!-- STEP 4: CURSOR AGENT MCP -->
+    <section id="step-4" style="display: none;">
+      <h2 class="section-title">Step 4: Optional Cursor Agent MCP Integration</h2>
+      <p class="section-desc">Expose Cursor Agent tools safely to Claude Code.</p>
 
       <div class="grid">
         <div class="card">
-          <h3>Read-Only Tools</h3>
-          <p><code>cursor_ask</code> and <code>cursor_plan</code> execute in disposable, isolated snapshots without touching your working repo.</p>
-        </div>
-        <div class="card">
-          <h3>Write Safety</h3>
-          <p>Write operations require explicit persistent opt-in plus 1-time 5-minute interactive TTY approvals bound to exact commit & SHA-256 digest.</p>
-        </div>
-      </div>
-
-      <div class="terminal-box" style="margin-top: 1.5rem;">
-        <div class="terminal-header">
-          <div class="terminal-dots"><span class="dot dot-red"></span><span class="dot dot-yellow"></span><span class="dot dot-green"></span></div>
-          <span class="terminal-title">Terminal - Enable Cursor Writes & Approve</span>
-        </div>
-        <div class="terminal-body">
-          <div class="command-line" style="margin-bottom: 0.5rem;">
-            <span class="cmd-text">claudexctl cursor writes enable --yes</span>
-            <button class="copy-btn" id="btn-copy-cursor-writes" onclick="copyText('claudexctl cursor writes enable --yes', 'btn-copy-cursor-writes')">Copy</button>
+          <h3>1. Enable Plugin & Login</h3>
+          <div class="terminal-box">
+            <div class="terminal-header"><span class="terminal-title">Terminal</span></div>
+            <div class="terminal-body">
+              <div class="command-line" style="margin-bottom: 0.5rem;">
+                <span class="cmd-text">claudexctl setup --with-cursor</span>
+                <button class="copy-btn" id="cur1" onclick="copyText('claudexctl setup --with-cursor', 'cur1')">Copy</button>
+              </div>
+              <div class="command-line">
+                <span class="cmd-text">claudexctl cursor login</span>
+                <button class="copy-btn" id="cur2" onclick="copyText('claudexctl cursor login', 'cur2')">Copy</button>
+              </div>
+            </div>
           </div>
-          <div class="command-line">
-            <span class="cmd-text">claudexctl cursor approve &lt;APPROVAL_ID&gt;</span>
-            <button class="copy-btn" id="btn-copy-cursor-app" onclick="copyText('claudexctl cursor approve ', 'btn-copy-cursor-app')">Copy</button>
+        </div>
+
+        <div class="card">
+          <h3>2. Write Safety & Approvals</h3>
+          <div class="terminal-box">
+            <div class="terminal-header"><span class="terminal-title">Terminal</span></div>
+            <div class="terminal-body">
+              <div class="command-line" style="margin-bottom: 0.5rem;">
+                <span class="cmd-text">claudexctl cursor writes enable --yes</span>
+                <button class="copy-btn" id="cur3" onclick="copyText('claudexctl cursor writes enable --yes', 'cur3')">Copy</button>
+              </div>
+              <div class="command-line">
+                <span class="cmd-text">claudexctl cursor approve &lt;APPROVAL_ID&gt;</span>
+                <button class="copy-btn" id="cur4" onclick="copyText('claudexctl cursor approve ', 'cur4')">Copy</button>
+              </div>
+            </div>
           </div>
         </div>
       </div>
     </section>
 
-    <!-- Section 5: Interactive Simulator -->
-    <section id="sec-sim" style="display: none;">
-      <h2 class="section-title">5. Interactive CLI Terminal Simulator</h2>
-      <p class="section-desc">Click buttons below to preview live Claudex management outputs right in your browser!</p>
+    <!-- STEP 5: SIMULATOR -->
+    <section id="step-5" style="display: none;">
+      <h2 class="section-title">Step 5: Interactive CLI Simulator</h2>
+      <p class="section-desc">Test simulated live CLI output in your browser:</p>
 
       <div class="sim-controls">
         <button class="sim-btn" onclick="runSim('status')">claudexctl status</button>
@@ -594,10 +697,30 @@
       </div>
 
       <div class="sim-terminal">
-        <div id="sim-output" class="sim-output">Click a button above to run a simulated CLI command...</div>
+        <div id="sim-output" class="sim-output">Click a button above to test a CLI command output simulation...</div>
       </div>
     </section>
 
+    <!-- STEP 6: FAQ & TROUBLESHOOTING -->
+    <section id="step-6" style="display: none;">
+      <h2 class="section-title">Step 6: FAQ & Troubleshooting</h2>
+      <p class="section-desc">Solutions for common beginner issues.</p>
+
+      <div class="faq-item">
+        <div class="faq-q">Q: PowerShell script execution is disabled on Windows?</div>
+        <div class="faq-a">Run <code>Set-ExecutionPolicy -Scope Process Bypass</code> in your PowerShell window before running <code>.\install.ps1</code>.</div>
+      </div>
+
+      <div class="faq-item">
+        <div class="faq-q">Q: Error: PORT_IN_USE (Port 8317 is occupied)?</div>
+        <div class="faq-a">Run <code>claudexctl config set port 8320 --yes</code> or specify a custom port during setup: <code>claudexctl setup --port 8320</code>.</div>
+      </div>
+
+      <div class="faq-item">
+        <div class="faq-q">Q: Does Claudex alter my system 'claude' command?</div>
+        <div class="faq-a">No! Claudex installs only <code>claudexctl</code>, <code>claudex</code>, and <code>claude-agy</code>. Your existing <code>claude</code> executable and configuration remain completely untouched.</div>
+      </div>
+    </section>
   </div>
 
   <footer>
@@ -608,16 +731,30 @@
   </footer>
 
   <script>
-    function showSection(sectionId) {
-      const sections = ['install', 'auth', 'launch', 'cursor', 'sim'];
-      sections.forEach(id => {
-        const el = document.getElementById('sec-' + id);
-        const btn = document.getElementById('tab-btn-' + id);
-        if (id === sectionId) {
-          el.style.display = 'block';
+    function showStep(stepNum) {
+      for (let i = 0; i <= 6; i++) {
+        const sec = document.getElementById('step-' + i);
+        const btn = document.getElementById('btn-step-' + i);
+        if (i === stepNum) {
+          sec.style.display = 'block';
           btn.classList.add('active');
         } else {
-          el.style.display = 'none';
+          sec.style.display = 'none';
+          btn.classList.remove('active');
+        }
+      }
+    }
+
+    function showOS(osKey) {
+      const osList = ['win', 'mac', 'linux'];
+      osList.forEach(key => {
+        const content = document.getElementById('os-' + key + '-content');
+        const btn = document.getElementById('os-' + key + '-btn');
+        if (key === osKey) {
+          content.style.display = 'grid';
+          btn.classList.add('active');
+        } else {
+          content.style.display = 'none';
           btn.classList.remove('active');
         }
       });
