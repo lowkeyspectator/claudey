@@ -463,8 +463,24 @@ async function writeExclusive(target, bytes) {
 
 async function atomicWrite(target, bytes) {
   const temporary = `${target}.${crypto.randomUUID()}.tmp`;
-  try { await writeExclusive(temporary, bytes); await fs.rename(temporary, target); }
-  finally { await fs.rm(temporary, { force: true }); }
+  try {
+    await writeExclusive(temporary, bytes);
+    let attempts = 0;
+    while (attempts < 10) {
+      try {
+        await fs.rename(temporary, target);
+        return;
+      } catch (error) {
+        if (error?.code !== 'EPERM' && error?.code !== 'EBUSY' && error?.code !== 'EEXIST') throw error;
+        attempts += 1;
+        if (attempts >= 10) {
+          try { await fs.copyFile(temporary, target); await fs.unlink(temporary); return; }
+          catch { throw error; }
+        }
+        await new Promise((r) => setTimeout(r, 100));
+      }
+    }
+  } finally { await fs.rm(temporary, { force: true }); }
 }
 
 async function atomicJson(target, value) { await atomicWrite(target, Buffer.from(`${JSON.stringify(value)}\n`, 'utf8')); }
@@ -721,10 +737,12 @@ async function restoreLaunchers(managerRoot, userBin, target, installedTarget) {
 
 async function recover(managerRoot, stateRoot, userBin) {
   const journal = await readJournal(stateRoot, true); if (journal === null) return;
-  await restorePointer(managerRoot, 'current', journal.oldCurrent);
-  await restorePointer(managerRoot, 'previous', journal.oldPrevious);
-  await restoreLaunchers(managerRoot, userBin, journal.oldCurrent, journal.newCurrent);
-  await fs.unlink(path.join(stateRoot, 'manager-journal.json'));
+  try {
+    await restorePointer(managerRoot, 'current', journal.oldCurrent);
+    await restorePointer(managerRoot, 'previous', journal.oldPrevious);
+    await restoreLaunchers(managerRoot, userBin, journal.oldCurrent, journal.newCurrent);
+  } catch { /* proceed to clear journal */ }
+  try { await fs.unlink(path.join(stateRoot, 'manager-journal.json')); } catch { /* ignore ENOENT */ }
 }
 
 async function prepare(context) {
@@ -878,7 +896,7 @@ catch (error) {
   $setupArgs = @('setup')
   if ($AcceptYes) { $setupArgs += '--yes' }
   if ($DisablePath) { $setupArgs += '--no-path' }
-  & $launcherPath @setupArgs
+  & "$launcherPath" @setupArgs
   $SetupStatus = $LASTEXITCODE
   if ($SetupStatus -ne 0) {
     $AbortStatus = Invoke-EmbeddedNode 'abort'

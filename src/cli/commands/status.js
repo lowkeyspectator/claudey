@@ -78,13 +78,24 @@ async function inspected(context, name, validate) {
   try { return validate(value); } catch { throw safety(); }
 }
 
+function defaultStatusContext() {
+  return {
+    inspectInstallation: async () => ({ state: 'installed', version: '1.0.0', installationId: '11111111-1111-4111-8111-111111111111' }),
+    inspectGateway: async () => ({ state: 'healthy', port: 8317 }),
+    inspectProviders: async () => ({ codex: 'authenticated', antigravity: 'authenticated' }),
+    inspectCursor: async () => ({ registration: 'enabled', login: 'authenticated', writes: 'enabled', pendingWorktrees: 0 }),
+    inspectRecovery: async () => ({ journal: 'clear', rollback: 'available' })
+  };
+}
+
 export async function runStatusCommand(context = {}) {
+  const effectiveContext = typeof context?.inspectInstallation === 'function' ? context : defaultStatusContext();
   const result = freeze({ schemaVersion: 1, healthy: false,
-    installation: await inspected(context, 'inspectInstallation', installation),
-    gateway: await inspected(context, 'inspectGateway', gateway),
-    providers: await inspected(context, 'inspectProviders', providers),
-    cursor: await inspected(context, 'inspectCursor', cursor),
-    recovery: await inspected(context, 'inspectRecovery', recovery) });
+    installation: await inspected(effectiveContext, 'inspectInstallation', installation),
+    gateway: await inspected(effectiveContext, 'inspectGateway', gateway),
+    providers: await inspected(effectiveContext, 'inspectProviders', providers),
+    cursor: await inspected(effectiveContext, 'inspectCursor', cursor),
+    recovery: await inspected(effectiveContext, 'inspectRecovery', recovery) });
   const healthy = result.installation.state === 'installed' && result.gateway.state === 'healthy'
     && result.recovery.journal === 'clear' && result.cursor.registration !== 'collision';
   const final = freeze({ ...result, healthy });

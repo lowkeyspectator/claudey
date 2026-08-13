@@ -197,7 +197,7 @@ test('checked-in bootstrap has fixed syntax, origin, options, static embedded No
   assert.match(source, /\$ProjectOrigin = 'https:\/\/github\.com\/ramsaijanapana\/claude_code_cliProxy'/u);
   for (const token of ["'-Version'", "'-Yes'", "'-NoPath'", "'-RollbackManager'", 'SetAccessRuleProtection',
     'ContainerInherit', 'ObjectInherit', 'FileShare]::None', 'ClaudexBootstrapDirectoryPin', 'CreateFileW',
-    'BackupSemanticsOpenReparse', '& $launcherPath @setupArgs']) assert.match(source, new RegExp(token.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+    'BackupSemanticsOpenReparse', '& "$launcherPath" @setupArgs']) assert.match(source, new RegExp(token.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
   assert.equal(/(?:npm install|npm ci|auth codex|auth antigravity|cursor login|cmd\.exe|\.cmd\b)/iu.test(source), false);
   assert.doesNotMatch(source, /(?:Start-Process[^\r\n]+-Verb\s+RunAs|require[^\r\n]+administrator)/iu);
   const embedded = /\$NodeProgram = @'\r?\n([\s\S]+?)\r?\n'@/u.exec(source);

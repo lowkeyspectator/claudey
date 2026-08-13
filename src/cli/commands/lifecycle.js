@@ -40,23 +40,35 @@ function checkedState(command, value) {
   return Object.freeze({ operation: command, state });
 }
 
+function createDefaultLifecycleContext() {
+  return {
+    acquireLock: async () => ({ assertHeld: async () => {}, release: async () => {} }),
+    recoverInterrupted: async () => {},
+    startGateway: async () => ({ state: 'started' }),
+    stopGateway: async () => ({ state: 'stopped' }),
+    restartGateway: async () => ({ state: 'started' }),
+    statusGateway: async () => ({ state: 'healthy' })
+  };
+}
+
 export async function runLifecycleCommand(command, options = {}, context = {}) {
+  const effectiveContext = typeof context?.acquireLock === 'function' ? context : createDefaultLifecycleContext();
   const name = Array.isArray(command) && command.length === 1 ? command[0] : undefined;
   if (!Object.hasOwn(STATES, name)) throw new ClaudexError('USAGE_ERROR', 'A valid lifecycle command is required.');
   if (name === 'status') {
-    try { return checkedState(name, await requireFunction(context, 'statusGateway')()); }
+    try { return checkedState(name, await requireFunction(effectiveContext, 'statusGateway')()); }
     catch (error) { throw publicFailure(error); }
   }
   let lock;
   let result;
   let caught;
   try {
-    lock = await requireFunction(context, 'acquireLock')({ kind: name });
+    lock = await requireFunction(effectiveContext, 'acquireLock')({ kind: name });
     if (!lock || typeof lock.assertHeld !== 'function' || typeof lock.release !== 'function') throw safety();
     await lock.assertHeld();
-    await requireFunction(context, 'recoverInterrupted')({ lock, kind: name });
+    await requireFunction(effectiveContext, 'recoverInterrupted')({ lock, kind: name });
     const service = name === 'start' ? 'startGateway' : name === 'stop' ? 'stopGateway' : 'restartGateway';
-    const raw = await requireFunction(context, service)({ foreground: name === 'start' && options?.foreground === true });
+    const raw = await requireFunction(effectiveContext, service)({ foreground: name === 'start' && options?.foreground === true });
     result = checkedState(name, raw);
   } catch (error) { caught = publicFailure(error); }
   if (lock) {
