@@ -1,0 +1,2 @@
+#!/bin/sh
+exec '__CLAUDEX_NODE__' '__CLAUDEX_MANAGER__' 'launcher' 'claude-agy' "$@"

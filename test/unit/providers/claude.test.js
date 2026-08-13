@@ -1,0 +1,249 @@
+import assert from 'node:assert/strict';
+import { EventEmitter } from 'node:events';
+import fs from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+import process from 'node:process';
+import test, { after } from 'node:test';
+
+import { resolveVerifiedExecutable } from '../../../src/core/executable.js';
+import { Secret } from '../../../src/core/secrets.js';
+import { ClaudexError } from '../../../src/core/errors.js';
+import * as claudeProvider from '../../../src/providers/claude.js';
+
+const { launchClaudeProvider, runClaudeProcess } = claudeProvider;
+
+function executableAdapter() {
+  const tagged = (stats) => { if (stats.reparseTag === undefined) Object.defineProperty(stats, 'reparseTag', { value: 0 }); return stats; };
+  return {
+    realpath: async (value) => { try { return await fs.realpath(value); } catch (error) { if (error?.code === 'EPERM') return value; throw error; } },
+    lstat: async (value) => tagged(await fs.lstat(value)),
+    stat: async (value) => tagged(await fs.stat(value)),
+    openNoFollow: async (value) => {
+      const before = tagged(await fs.lstat(value));
+      if (before.isSymbolicLink()) throw Object.assign(new Error('link'), { code: 'ELOOP' });
+      const handle = await fs.open(value, 'r');
+      return { ...handle, noFollow: true, read: handle.read.bind(handle), close: handle.close.bind(handle), stat: async () => tagged(await handle.stat()) };
+    }
+  };
+}
+
+const fixtureRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'claudex-claude-unit-'));
+after(() => fs.rm(fixtureRoot, { recursive: true, force: true }));
+const CLAUDE = await resolveVerifiedExecutable({ command: 'claude', platform: 'win32', candidates: [{ path: process.execPath }], adapter: executableAdapter() });
+const TOKEN_BYTES = Buffer.alloc(32, 17);
+const TOKEN_TEXT = TOKEN_BYTES.toString('base64url');
+
+function fixture(overrides = {}) {
+  const calls = [];
+  const models = [
+    { id: 'zeta-live', object: 'model', created: 3, owned_by: 'codex' },
+    { id: 'gpt-5.6-sol', object: 'model', created: 1, owned_by: 'codex' }
+  ];
+  return {
+    calls,
+    value: {
+      provider: 'codex',
+      parsed: { model: 'gpt-5.6-sol', select: false, claudeArgs: [], nonInteractive: false },
+      claude: CLAUDE,
+      cwd: fixtureRoot,
+      isTTY: true,
+      baseEnvironment: {
+        PATH: 'safe-path', SystemRoot: 'C:\\Windows', HOME: 'C:\\Users\\person', TERM: 'xterm',
+        ANTHROPIC_BASE_URL: 'http://hostile', ANTHROPIC_AUTH_TOKEN: 'hostile-token', ANTHROPIC_API_KEY: 'hostile-key',
+        ANTHROPIC_MODEL: 'hostile-model', ANTHROPIC_DEFAULT_OPUS_MODEL: 'hostile-opus',
+        OPENAI_API_KEY: 'secret-canary', AWS_SECRET_ACCESS_KEY: 'secret-canary', OTEL_EXPORTER_OTLP_HEADERS: 'secret-canary'
+      },
+      ensureGateway: async () => {
+        calls.push('gateway');
+        return { host: '127.0.0.1', port: 8317, token: Secret.fromBytes(TOKEN_BYTES) };
+      },
+      listModels: async (provider) => { calls.push(`models:${provider}`); return { provider, status: 'available', models }; },
+      selectModel: async (request) => { calls.push({ select: request }); return request.models[0].id; },
+      runChild: async (invocation) => { calls.push({ invocation }); return { code: 0, signal: null }; },
+      ...overrides
+    }
+  };
+}
+
+test('verifies Claude, ensures the gateway, validates a current exact provider model, and spawns fixed discrete argv', async () => {
+  let running = false;
+  const f = fixture({
+    parsed: { model: 'gpt-5.6-sol', select: false, claudeArgs: ['--print', 'hello world'], nonInteractive: true },
+    selectModel: undefined,
+    ensureGateway: async () => {
+      if (!running) { f.calls.push('start-if-needed'); running = true; }
+      f.calls.push('gateway');
+      return { host: '127.0.0.1', port: 8317, token: Secret.fromBytes(TOKEN_BYTES) };
+    }
+  });
+  const result = await launchClaudeProvider(f.value);
+  assert.deepEqual(result, { provider: 'codex', model: 'gpt-5.6-sol', exitCode: 0, signal: null });
+  assert.deepEqual(f.calls.slice(0, 3), ['start-if-needed', 'gateway', 'models:codex']);
+  const invocation = f.calls[3].invocation;
+  assert.deepEqual(invocation.args.slice(-6), ['--model', 'gpt-5.6-sol', '--fallback-model', 'gpt-5.6-sol', '--print', 'hello world']);
+  assert.equal(invocation.shell, false);
+  assert.equal(invocation.stdio, 'inherit');
+  assert.equal(invocation.cwd, fixtureRoot);
+});
+
+test('uses a live interactive selector, offers the preferred source model first only when present, and revalidates its exact result', async () => {
+  const f = fixture({ parsed: { model: undefined, select: true, claudeArgs: [], nonInteractive: false } });
+  const result = await launchClaudeProvider(f.value);
+  assert.equal(result.model, 'gpt-5.6-sol');
+  assert.deepEqual(f.calls[2].select.models.map(({ id }) => id), ['gpt-5.6-sol', 'zeta-live']);
+
+  const hostile = fixture({
+    parsed: { model: undefined, select: true, claudeArgs: [], nonInteractive: false },
+    selectModel: async () => 'not-in-live-list'
+  });
+  await assert.rejects(launchClaudeProvider(hostile.value), (error) => error.code === 'MODEL_NOT_FOUND');
+  assert.equal(hostile.calls.some((call) => call?.invocation), false);
+});
+
+test('requires an explicit model in noninteractive mode and refuses noninteractive selection before any side effect', async () => {
+  for (const parsed of [
+    { model: undefined, select: false, claudeArgs: [], nonInteractive: true },
+    { model: undefined, select: true, claudeArgs: [], nonInteractive: true }
+  ]) {
+    const f = fixture({ parsed });
+    await assert.rejects(launchClaudeProvider(f.value), (error) => error.code === (parsed.select ? 'INTERACTION_REQUIRED' : 'MODEL_REQUIRED'));
+    assert.deepEqual(f.calls, []);
+  }
+});
+
+test('rejects unknown models and every forwarded model override before Claude spawn without provider fallback', async () => {
+  const forwarded = [
+    ['--model', 'other'], ['--model=other'], ['-m', 'other'], ['-m=other'], ['--MODEL', 'other'],
+    ['--fallback-model', 'other'], ['--fallback-model=other'], ['--FALLBACK-MODEL', 'other']
+  ];
+  for (const claudeArgs of forwarded) {
+    const f = fixture({ parsed: { model: 'gpt-5.6-sol', select: false, claudeArgs, nonInteractive: false } });
+    await assert.rejects(launchClaudeProvider(f.value), (error) => error.code === 'USAGE_ERROR');
+    assert.deepEqual(f.calls, []);
+  }
+  const missing = fixture({ parsed: { model: 'agy-only', select: false, claudeArgs: [], nonInteractive: false } });
+  await assert.rejects(launchClaudeProvider(missing.value), (error) => error.code === 'MODEL_NOT_FOUND' && error.details.provider === 'codex');
+  assert.equal(missing.calls.some((call) => call?.invocation), false);
+});
+
+test('preserves hostile Claude arguments byte-for-byte as discrete values after the authoritative model', async () => {
+  const hostile = ['', 'space value', 'üñïçødé', '"quoted"', 'slash\\', '-leading', ';', '&', '|', '`echo`', '$(echo)', '%VAR%', 'line\rreturn', 'line\nfeed'];
+  const f = fixture({ parsed: { model: 'gpt-5.6-sol', select: false, claudeArgs: hostile, nonInteractive: false } });
+  await launchClaudeProvider(f.value);
+  assert.deepEqual(f.calls.at(-1).invocation.args.slice(-hostile.length), hostile);
+});
+
+test('constructs only an internal child-scoped routing environment and leaves the parent object byte-for-byte unchanged', async () => {
+  const f = fixture();
+  const source = f.value.baseEnvironment;
+  const before = JSON.stringify(source);
+  let env;
+  const result = await launchClaudeProvider({
+    ...f.value,
+    runChild: async (invocation) => { env = { ...invocation.env }; return { code: 0, signal: null }; }
+  });
+  assert.deepEqual(env, {
+    PATH: 'safe-path', SystemRoot: 'C:\\Windows', HOME: 'C:\\Users\\person', TERM: 'xterm',
+    ANTHROPIC_BASE_URL: 'http://127.0.0.1:8317',
+    ANTHROPIC_AUTH_TOKEN: TOKEN_TEXT,
+    CLAUDE_CODE_SUBAGENT_MODEL: 'gpt-5.6-sol',
+    CLAUDE_CODE_ALWAYS_ENABLE_EFFORT: '1',
+    CLAUDE_CODE_MAX_TOOL_USE_CONCURRENCY: '3',
+    CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: '1',
+    ENABLE_TOOL_SEARCH: 'false'
+  });
+  assert.equal(JSON.stringify(source), before);
+  assert.equal(JSON.stringify(env).includes('secret-canary'), false);
+  assert.equal(Object.hasOwn(env, 'ANTHROPIC_API_KEY'), false);
+  assert.equal(Object.hasOwn(env, 'ANTHROPIC_MODEL'), false);
+  assert.equal(Object.hasOwn(env, 'ANTHROPIC_DEFAULT_OPUS_MODEL'), false);
+  assert.deepEqual(result, { provider: 'codex', model: 'gpt-5.6-sol', exitCode: 0, signal: null });
+  assert.deepEqual(Object.keys(claudeProvider).sort(), ['launchClaudeProvider', 'runClaudeProcess']);
+});
+
+test('sanitizes lifecycle and model-service diagnostics while preserving only stable public error classes', async () => {
+  for (const overrides of [
+    { ensureGateway: async () => { throw new ClaudexError('GATEWAY_UNHEALTHY', 'lifecycle secret-canary'); } },
+    { ensureGateway: async () => { throw new ClaudexError('PORT_IN_USE', 'listener secret-canary', { details: { private: 'secret-canary' } }); } },
+    { listModels: async () => { throw new ClaudexError('AUTH_REQUIRED', 'catalog secret-canary'); } },
+    { listModels: async () => { throw new ClaudexError('PROCESS_IDENTITY_MISMATCH', 'identity secret-canary'); } }
+  ]) {
+    const f = fixture(overrides);
+    await assert.rejects(launchClaudeProvider(f.value), (error) => ['GATEWAY_UNHEALTHY', 'PORT_IN_USE', 'AUTH_REQUIRED', 'PROCESS_IDENTITY_MISMATCH'].includes(error.code)
+      && !error.message.includes('secret-canary') && !JSON.stringify(error.details).includes('secret-canary'));
+  }
+});
+
+test('preserves the stable not-installed remediation and fails closed on hostile diagnostic accessors', async () => {
+  const missing = fixture({
+    ensureGateway: async () => { throw new ClaudexError('NOT_INSTALLED', 'install path secret-canary'); }
+  });
+  await assert.rejects(launchClaudeProvider(missing.value), (error) => error.code === 'NOT_INSTALLED'
+    && error.hint === 'Run claudexctl setup.' && !error.message.includes('secret-canary'));
+
+  const hostile = fixture({
+    ensureGateway: async () => { throw new Proxy({}, { get: () => { throw new Error('diagnostic secret-canary'); } }); }
+  });
+  await assert.rejects(launchClaudeProvider(hostile.value), (error) => error.code === 'GATEWAY_UNHEALTHY'
+    && !error.message.includes('secret-canary'));
+});
+
+test('rejects option-shaped live model identifiers before Claude spawn', async () => {
+  const f = fixture({
+    parsed: { model: '--danger', select: false, claudeArgs: [], nonInteractive: false },
+    listModels: async () => ({
+      provider: 'codex', status: 'available',
+      models: [{ id: '--danger', object: 'model', created: 1, owned_by: 'codex' }]
+    })
+  });
+  await assert.rejects(launchClaudeProvider(f.value), (error) => error.code === 'USAGE_ERROR');
+  assert.deepEqual(f.calls, []);
+});
+
+test('fails closed for forged/stale Claude identity, malformed gateway, token, model, cwd, or child result without leaking diagnostics', async () => {
+  const forged = Object.freeze({ ...CLAUDE });
+  const cases = [
+    { claude: forged },
+    { ensureGateway: async () => ({ host: 'localhost', port: 8317, token: Secret.fromBytes(TOKEN_BYTES) }) },
+    { ensureGateway: async () => ({ host: '127.0.0.1', port: 80, token: Secret.fromBytes(TOKEN_BYTES) }) },
+    { ensureGateway: async () => ({ host: '127.0.0.1', port: 8317, token: 'plain' }) },
+    { cwd: 'relative' },
+    { baseEnvironment: new Proxy({}, { ownKeys: () => { throw new Error('environment secret-canary'); } }) },
+    { runChild: async () => ({ code: 0 }) },
+    { runChild: async () => new Proxy({}, { get: () => { throw new Error('result secret-canary'); } }) },
+    { runChild: async () => { throw new Error('private secret-canary'); } }
+  ];
+  for (const overrides of cases) {
+    const f = fixture(overrides);
+    await assert.rejects(launchClaudeProvider(f.value), (error) => ['PREREQUISITE_MISSING', 'GATEWAY_UNHEALTHY', 'SAFETY_REFUSAL'].includes(error.code)
+      && !error.message.includes('secret-canary'));
+  }
+});
+
+test('process runner inherits stdio, relays signals, scrubs its mutable token environment, and returns exact termination', async () => {
+  const parent = new EventEmitter();
+  const child = new EventEmitter();
+  child.kill = (signal) => { child.signal = signal; return true; };
+  const env = { ANTHROPIC_AUTH_TOKEN: TOKEN_TEXT, PATH: 'safe' };
+  const spawns = [];
+  let rawSpawnEnvironment;
+  const operation = runClaudeProcess({ executablePath: process.execPath, args: ['x'], cwd: fixtureRoot, env, shell: false, stdio: 'inherit' }, {
+    parent,
+    spawnProcess: (file, args, options) => {
+      rawSpawnEnvironment = options.env;
+      spawns.push({ file, args, options: { ...options, env: { ...options.env } } });
+      queueMicrotask(() => parent.emit('SIGINT'));
+      queueMicrotask(() => child.emit('exit', null, 'SIGINT'));
+      return child;
+    }
+  });
+  const result = await operation;
+  assert.deepEqual(result, { code: null, signal: 'SIGINT' });
+  assert.equal(child.signal, 'SIGINT');
+  assert.equal(Object.hasOwn(env, 'ANTHROPIC_AUTH_TOKEN'), false);
+  assert.equal(spawns[0].options.env.ANTHROPIC_AUTH_TOKEN, TOKEN_TEXT);
+  assert.equal(Object.hasOwn(rawSpawnEnvironment, 'ANTHROPIC_AUTH_TOKEN'), false);
+  assert.equal(parent.listenerCount('SIGINT'), 0);
+  assert.equal(parent.listenerCount('SIGTERM'), 0);
+});
