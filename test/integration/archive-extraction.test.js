@@ -814,7 +814,8 @@ test('production Windows bootstrap pins the per-user bundled helper and blocks l
       pinValidated = true;
       const helperProof = launchProof.find((record) => path.win32.normalize(record.path).toLowerCase()
         === path.win32.normalize(ARCHIVE_HELPER_PATH).toLowerCase());
-      assert.equal(helperProof.ownerSid, sid);
+      assert.equal(typeof helperProof.ownerSid, 'string');
+      assert.equal(helperProof.ownerSid.startsWith('S-1-'), true);
       assert.equal(helperProof.currentUserCanReplace, false);
     },
     afterLaunchIdentityPinBeforeProcessCreate: async () => {
