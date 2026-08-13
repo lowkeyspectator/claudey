@@ -94,6 +94,12 @@ test('prepared and staged interruption cleanup runs in reverse order without tou
   await recoverTransaction(journalAt('prepared'), prepared.actions, options);
   assert.deepEqual(withoutLocks(prepared.events), ['remove-staging', 'clear-journal']);
 
+  const releaseStaged = recorder();
+  await recoverTransaction(journalAt('release-staged'), releaseStaged.actions, options);
+  assert.deepEqual(withoutLocks(releaseStaged.events), [
+    'remove-config-temp', 'remove-staging', 'clear-journal'
+  ]);
+
   const staged = recorder();
   await recoverTransaction(journalAt('config-staged'), staged.actions, options);
   assert.deepEqual(withoutLocks(staged.events), ['remove-config-temp', 'remove-staging', 'clear-journal']);

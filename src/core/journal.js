@@ -112,6 +112,9 @@ export function createJournal(fields, {
   ownedRoots,
   now = () => new Date().toISOString()
 } = {}) {
+  if (!fields?.ownedPaths || !Array.isArray(fields.ownedPaths.staging)) {
+    throw safety('Journal schema is invalid.');
+  }
   const timestamp = now();
   const journal = {
     schemaVersion: 1,

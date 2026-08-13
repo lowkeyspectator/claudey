@@ -95,7 +95,7 @@ export async function recoverTransaction(journal, actions, options = {}) {
     return { status: 'cleaned' };
   }
   if (journal.phase === 'release-staged') {
-    await removeStaged({ config: false });
+    await removeStaged();
     await clear();
     return { status: 'cleaned' };
   }

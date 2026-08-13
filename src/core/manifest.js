@@ -155,7 +155,8 @@ function assertManifestShape(manifest) {
     }
     assertRelativeManagedChild(record.relativePath, { platform: platformName(family) });
     const normalized = record.relativePath.replaceAll('\\', '/');
-    if (/(^|\/)(auth|oauth|config)(\/|$)/iu.test(normalized) || /^config\.ya?ml$/iu.test(normalized)) {
+    const basename = normalized.slice(normalized.lastIndexOf('/') + 1);
+    if (/^(?:config\.ya?ml|oauth(?:\.[^.]+)?|oauth[-_.](?:token|credentials?|auth)(?:[-_.].*)?(?:\.[^.]+)?)$/iu.test(basename)) {
       throw safety('Credential and configuration paths are not removable inventory.');
     }
     const identity = family === 'windows' ? normalized.toLowerCase() : normalized;
@@ -177,6 +178,29 @@ function assertFixedRoots(manifest, fixedPaths) {
   }
 }
 
+function pathIsWithinOrEqual(root, target, family) {
+  const pathApi = pathApiFor(family);
+  const normalizedRoot = pathApi.normalize(root);
+  const normalizedTarget = pathApi.normalize(target);
+  const relative = pathApi.relative(normalizedRoot, normalizedTarget);
+  return relative === '' || (relative !== '..' && !relative.startsWith(`..${pathApi.sep}`) && !pathApi.isAbsolute(relative));
+}
+
+function assertProtectedInventory(manifest, fixedPaths) {
+  const family = manifest.platform.family;
+  const filesystemPlatform = platformName(family);
+  const managerRoot = manifest.managedRoots.managerRoot;
+  const protectedRoots = [fixedPaths.configRoot, fixedPaths.authRoot, ...(fixedPaths.protectedRoots ?? [])]
+    .filter((root) => typeof root === 'string')
+    .filter((root) => !equivalentPath(root, managerRoot, family))
+    .filter((root) => pathIsWithinOrEqual(managerRoot, root, family));
+  for (const record of manifest.files) {
+    const candidate = resolveManagedChild(managerRoot, record.relativePath, { platform: filesystemPlatform });
+    if (protectedRoots.some((root) => pathIsWithinOrEqual(root, candidate, family))) {
+      throw safety('Protected adapter roots are not removable inventory.');
+    }
+  }
+}
 function computeMac(manifest, manifestKey, cryptoApi) {
   return secretBytes(manifestKey, 'Manifest key', (bytes) => (
     (cryptoApi.createHmac ?? crypto.createHmac)('sha256', bytes).update(canonicalManifestBytes(manifest)).digest()
@@ -206,6 +230,7 @@ export function verifyManifest(manifest, manifestKey, { fixedPaths, cryptoApi = 
     throw safety('Manifest authentication failed.');
   }
   assertFixedRoots(manifest, fixedPaths);
+  assertProtectedInventory(manifest, fixedPaths);
   freezeRecursively(manifest);
   VERIFIED.add(manifest);
   return manifest;
@@ -223,6 +248,7 @@ export async function writeManifest(manifest, manifestKey, paths, deps = {}) {
   await deps.assertLockHeld();
   const signed = signManifest(manifest, manifestKey, deps.cryptoApi ?? crypto);
   assertFixedRoots(signed, paths);
+  assertProtectedInventory(signed, paths);
   const bytes = Buffer.from(`${JSON.stringify(sortRecursively(signed))}\n`, 'utf8');
   const replace = deps.atomicReplace ?? atomicReplace;
   await replace({ root: paths.stateRoot, child: MANIFEST_CHILD, bytes, mode: 0o600 }, deps.atomicDeps);
@@ -267,12 +293,57 @@ async function defaultInspectCandidate({ root, relativePath, platform }) {
   }
 }
 
+export async function removeVerifiedOwnedFile(manifest, relativePath, paths, {
+  platform = process.platform,
+  assertLockHeld,
+  inspectCandidate = defaultInspectCandidate,
+  unlink = fs.unlink
+} = {}) {
+  if (!VERIFIED.has(manifest)) throw safety('Owned-file removal requires an authenticated manifest.');
+  assertFixedRoots(manifest, paths);
+  assertProtectedInventory(manifest, paths);
+  if (typeof assertLockHeld !== 'function') throw safety('Owned-file removal requires the installation lock.');
+  if (typeof inspectCandidate !== 'function' || typeof unlink !== 'function') {
+    throw safety('Owned-file removal requires safe inspection and unlink services.');
+  }
+  const family = manifest.platform.family;
+  const filesystemPlatform = platformName(family);
+  assertRelativeManagedChild(relativePath, { platform: filesystemPlatform });
+  const requestedIdentity = family === 'windows'
+    ? relativePath.replaceAll('\\', '/').toLowerCase()
+    : relativePath.replaceAll('\\', '/');
+  const record = manifest.files.find((file) => {
+    const identity = family === 'windows'
+      ? file.relativePath.replaceAll('\\', '/').toLowerCase()
+      : file.relativePath.replaceAll('\\', '/');
+    return identity === requestedIdentity;
+  });
+  if (!record) throw safety('Owned-file removal target is absent from authenticated inventory.');
+  const target = resolveManagedChild(paths.managerRoot, record.relativePath, { platform: filesystemPlatform });
+  await assertLockHeld();
+  const state = await inspectCandidate({
+    root: paths.managerRoot,
+    relativePath: record.relativePath,
+    target,
+    platform,
+    expectedSha256: record.sha256
+  });
+  if (!state?.exists) return { action: 'preserve', reason: 'missing', path: target };
+  if (state.type !== 'file' || !equivalentPath(state.canonicalPath, target, family)
+    || state.sha256 !== record.sha256) {
+    return { action: 'preserve', reason: 'modified', path: target };
+  }
+  await assertLockHeld();
+  await unlink(state.canonicalPath);
+  return { action: 'removed', reason: 'unchanged', path: target };
+}
 export async function planOwnedRemoval(manifest, paths, {
   platform = process.platform,
   inspectCandidate = defaultInspectCandidate
 } = {}) {
   if (!VERIFIED.has(manifest)) throw safety('Removal requires an authenticated manifest.');
   assertFixedRoots(manifest, paths);
+  assertProtectedInventory(manifest, paths);
   const family = manifest.platform.family;
   const filesystemPlatform = family === 'windows' ? 'win32' : 'posix';
   const plan = [];

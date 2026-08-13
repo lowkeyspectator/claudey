@@ -68,6 +68,13 @@ test('closed journal schema rejects foreign paths, unknown fields, IDs, hashes, 
   }
 });
 
+test('malformed staging input fails with the stable safety code before copying', () => {
+  for (const staging of [undefined, null, 'C:\\managed\\staging', {}]) {
+    assert.throws(() => createJournal(fields({
+      ownedPaths: { ...fields().ownedPaths, staging }
+    }), options), (error) => error?.code === 'SAFETY_REFUSAL');
+  }
+});
 test('corrupt records are quarantined by hand-derived hash and reason only', () => {
   const result = parseJournal(Buffer.from('not-json'), options);
   assert.deepEqual(result, {

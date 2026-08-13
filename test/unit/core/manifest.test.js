@@ -7,6 +7,7 @@ import {
   deriveApprovalKey,
   loadOrCreateInstallationSecrets,
   planOwnedRemoval,
+  removeVerifiedOwnedFile,
   verifyManifest,
   writeManifest
 } from '../../../src/core/manifest.js';
@@ -149,6 +150,40 @@ test('writes only authenticated inventory through atomic replacement without sec
     ['files', 'hmac', 'installationId', 'managedRoots', 'platform', 'schemaVersion']);
 });
 
+test('rejects adapter-protected roots and credential filenames without banning ordinary release files', async () => {
+  const protectedPaths = {
+    ...ROOTS,
+    configRoot: 'C:\\Users\\Casey\\AppData\\Local\\claudexctl\\settings',
+    authRoot: 'C:\\Users\\Casey\\AppData\\Local\\claudexctl\\credentials',
+    protectedRoots: ['C:\\Users\\Casey\\AppData\\Local\\claudexctl\\private-state']
+  };
+  const unsafePaths = [
+    'settings/user.json',
+    'credentials/account.json',
+    'private-state/pending.json',
+    'releases/7.2.130/config.yaml',
+    'releases/7.2.130/oauth-token.json'
+  ];
+  for (const relativePath of unsafePaths) {
+    let writes = 0;
+    await assert.rejects(() => writeManifest(unsignedManifest({
+      files: [{ relativePath, type: 'file', sha256: FILE_HASH }]
+    }), key(), protectedPaths, {
+      assertLockHeld: async () => undefined,
+      atomicReplace: async () => { writes += 1; }
+    }), (error) => error?.code === 'SAFETY_REFUSAL', relativePath);
+    assert.equal(writes, 0, relativePath);
+  }
+
+  const admitted = await writeManifest(unsignedManifest({ files: [
+    { relativePath: 'releases/7.2.130/config-helper.exe', type: 'file', sha256: FILE_HASH },
+    { relativePath: 'releases/7.2.130/oauth-support.dll', type: 'file', sha256: 'b'.repeat(64) }
+  ] }), key(), protectedPaths, {
+    assertLockHeld: async () => undefined,
+    atomicReplace: async () => undefined
+  });
+  assert.equal(admitted.files.length, 2);
+});
 test('plans removal only for authenticated unchanged files and preserves modified or missing files', async () => {
   const manifest = verifyManifest(signedManifest(), key(), { fixedPaths: ROOTS });
   const states = [
@@ -172,6 +207,69 @@ test('plans removal only for authenticated unchanged files and preserves modifie
   }
 });
 
+test('owned-file removal rechecks the planned target under lock and never unlinks a swapped file', async () => {
+  const manifest = verifyManifest(signedManifest(), key(), { fixedPaths: ROOTS });
+  const unchanged = {
+    exists: true,
+    canonicalPath: 'C:\\Users\\Casey\\AppData\\Local\\claudexctl\\releases\\7.2.130\\CLIProxyAPI.exe',
+    type: 'file',
+    sha256: FILE_HASH
+  };
+  const plan = await planOwnedRemoval(manifest, ROOTS, {
+    platform: 'win32', inspectCandidate: async () => unchanged
+  });
+  assert.equal(plan[0].action, 'remove');
+
+  for (const changed of [
+    { ...unchanged, sha256: 'b'.repeat(64) },
+    { ...unchanged, type: 'directory' },
+    { ...unchanged, canonicalPath: 'C:\\Users\\Casey\\AppData\\Local\\claudexctl\\foreign.exe' }
+  ]) {
+    const unlinked = [];
+    const result = await removeVerifiedOwnedFile(
+      manifest,
+      'releases/7.2.130/CLIProxyAPI.exe',
+      ROOTS,
+      {
+        platform: 'win32',
+        assertLockHeld: async () => undefined,
+        inspectCandidate: async () => changed,
+        unlink: async (target) => { unlinked.push(target); }
+      }
+    );
+    assert.deepEqual(result, { action: 'preserve', reason: 'modified', path: unchanged.canonicalPath });
+    assert.deepEqual(unlinked, []);
+  }
+
+  let linkUnlinks = 0;
+  await assert.rejects(() => removeVerifiedOwnedFile(
+    manifest,
+    'releases/7.2.130/CLIProxyAPI.exe',
+    ROOTS,
+    {
+      platform: 'win32',
+      assertLockHeld: async () => undefined,
+      inspectCandidate: async () => { throw Object.assign(new Error('link swap'), { code: 'SAFETY_REFUSAL' }); },
+      unlink: async () => { linkUnlinks += 1; }
+    }
+  ), (error) => error?.code === 'SAFETY_REFUSAL');
+  assert.equal(linkUnlinks, 0);
+
+  const removed = [];
+  const result = await removeVerifiedOwnedFile(
+    manifest,
+    'releases/7.2.130/CLIProxyAPI.exe',
+    ROOTS,
+    {
+      platform: 'win32',
+      assertLockHeld: async () => undefined,
+      inspectCandidate: async () => unchanged,
+      unlink: async (target) => { removed.push(target); }
+    }
+  );
+  assert.deepEqual(result, { action: 'removed', reason: 'unchanged', path: unchanged.canonicalPath });
+  assert.deepEqual(removed, [unchanged.canonicalPath]);
+});
 test('refuses unauthenticated inventories and propagates a live link-swap safety refusal', async () => {
   await assert.rejects(() => planOwnedRemoval(signedManifest(), ROOTS, {
     platform: 'win32', inspectCandidate: async () => ({ exists: false })
