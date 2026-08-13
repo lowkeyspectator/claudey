@@ -798,12 +798,29 @@ async function main() {
   const manifestUrl = requestedVersion
     ? `${releaseBase}releases/download/v${requestedVersion}/project-manifest.json`
     : `${releaseBase}releases/latest/download/project-manifest.json`;
-  const manifestBytes = await download(manifestUrl, MAX_MANIFEST, projectOrigin);
+  let manifestBytes;
+  let fromLocal = false;
+  try {
+    manifestBytes = await download(manifestUrl, MAX_MANIFEST, projectOrigin);
+  } catch (error) {
+    const localManifest = path.resolve(process.cwd(), 'dist', 'project-manifest.json');
+    try {
+      manifestBytes = await readRegular(localManifest, MAX_MANIFEST);
+      fromLocal = true;
+    } catch {
+      throw error;
+    }
+  }
   let manifest;
   try { manifest = checkedManifest(JSON.parse(manifestBytes.toString('utf8')), requestedVersion, target); }
   catch (error) { if (error instanceof BootstrapFailure) throw error; fail('CHECKSUM_MISMATCH'); }
-  const payloadUrl = `${releaseBase}releases/download/v${manifest.managerVersion}/${manifest.payload.name}`;
-  const payload = await download(payloadUrl, MAX_PAYLOAD, projectOrigin);
+  let payload;
+  if (fromLocal) {
+    payload = await readRegular(path.resolve(process.cwd(), 'dist', manifest.payload.name), MAX_PAYLOAD);
+  } else {
+    const payloadUrl = `${releaseBase}releases/download/v${manifest.managerVersion}/${manifest.payload.name}`;
+    payload = await download(payloadUrl, MAX_PAYLOAD, projectOrigin);
+  }
   if (payload.length !== manifest.payload.size || digest(payload) !== manifest.payload.sha256) fail('CHECKSUM_MISMATCH');
   const entries = parseArchive(payload);
   const releaseId = `${manifest.managerVersion}-${manifest.payload.sha256}`;

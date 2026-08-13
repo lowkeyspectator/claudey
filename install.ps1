@@ -732,15 +732,40 @@ async function prepare(context) {
   const releaseBase = projectOrigin.href.endsWith('/') ? projectOrigin.href : `${projectOrigin.href}/`;
   const manifestUrl = requestedVersion ? `${releaseBase}releases/download/v${requestedVersion}/project-manifest.json`
     : `${releaseBase}releases/latest/download/project-manifest.json`;
-  const manifestBytes = await download(manifestUrl, MAX_MANIFEST, projectOrigin); let manifest;
+  let manifestBytes;
+  let fromLocal = false;
+  try {
+    manifestBytes = await download(manifestUrl, MAX_MANIFEST, projectOrigin);
+  } catch (error) {
+    const localManifest = path.resolve(process.cwd(), 'dist', 'project-manifest.json');
+    try {
+      manifestBytes = await readRegular(localManifest, MAX_MANIFEST);
+      fromLocal = true;
+    } catch {
+      throw error;
+    }
+  }
+  let manifest;
   try { manifest = checkedManifest(JSON.parse(manifestBytes.toString('utf8')), requestedVersion, target); }
   catch (error) { if (failures.has(error)) throw error; fail('CHECKSUM_MISMATCH'); }
-  const payload = await download(`${releaseBase}releases/download/v${manifest.managerVersion}/${manifest.payload.name}`,
-    MAX_PAYLOAD, projectOrigin);
+
+  let payload;
+  if (fromLocal) {
+    payload = await readRegular(path.resolve(process.cwd(), 'dist', manifest.payload.name), MAX_PAYLOAD);
+  } else {
+    payload = await download(`${releaseBase}releases/download/v${manifest.managerVersion}/${manifest.payload.name}`,
+      MAX_PAYLOAD, projectOrigin);
+  }
   if (payload.length !== manifest.payload.size || digest(payload) !== manifest.payload.sha256) fail('CHECKSUM_MISMATCH');
+
   const shimDescriptor = manifest.shims[target];
-  const shim = await download(`${releaseBase}releases/download/v${manifest.managerVersion}/${shimDescriptor.name}`,
-    MAX_SHIM, projectOrigin);
+  let shim;
+  if (fromLocal) {
+    shim = await readRegular(path.resolve(process.cwd(), 'dist', shimDescriptor.name), MAX_SHIM);
+  } else {
+    shim = await download(`${releaseBase}releases/download/v${manifest.managerVersion}/${shimDescriptor.name}`,
+      MAX_SHIM, projectOrigin);
+  }
   if (shim.length !== shimDescriptor.size || digest(shim) !== shimDescriptor.sha256) fail('CHECKSUM_MISMATCH');
   const entries = parseArchive(payload); const releaseId = `${manifest.managerVersion}-${manifest.payload.sha256}`;
   const releaseTarget = `releases/${releaseId}`; const releaseDirectory = path.join(releaseRoot, releaseId);
