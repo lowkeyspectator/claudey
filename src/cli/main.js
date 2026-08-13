@@ -147,13 +147,14 @@ function errorEnvelope(error) {
 
 export async function run(argv = process.argv.slice(2), environment = process.env, io = process, container = {}) {
   const json = argv.includes('--json');
+  const noColor = argv.includes('--no-color');
   try {
     const result = await main(argv, environment, container);
-    emitSuccess(result, { json }, io);
+    emitSuccess(result, { json, noColor }, io);
     return 0;
   } catch (error) {
     const normalized = errorEnvelope(error);
-    emitError(normalized, { json }, io);
+    emitError(normalized, { json, noColor }, io);
     return exitCodeFor(normalized);
   }
 }
