@@ -18,6 +18,7 @@ const responses = {
   'probe json --json': '{"type":"probe","capability":"json","framing":"json-lines"}\n',
   'probe mode ask --json': '{"type":"probe","capability":"ask","supported":true}\n',
   'probe mode plan --json': '{"type":"probe","capability":"plan","supported":true}\n',
+  'probe mode worktree --json': '{"type":"probe","capability":"worktree","supported":true}\n',
   'probe sandbox read-only --json': '{"type":"probe","capability":"sandbox","supported":true}\n'
 };
 if (command === 'probe stdin --json') process.stdout.write(`${JSON.stringify({ type: 'probe', capability: 'stdin', echo: stdin })}\n`);
