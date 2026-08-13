@@ -1,0 +1,6 @@
+.worktrees/
+.superpowers/
+node_modules/
+coverage/
+dist/
+*.log
