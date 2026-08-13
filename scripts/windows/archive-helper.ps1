@@ -5,6 +5,9 @@ param(
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 $request = $null
+$requestStream = $null
+$archiveStream = $null
+$zip = $null
 $invariant = [Globalization.CultureInfo]::InvariantCulture
 [Threading.Thread]::CurrentThread.CurrentCulture = $invariant
 [Threading.Thread]::CurrentThread.CurrentUICulture = $invariant
@@ -65,10 +68,25 @@ function Relative-Forward([string]$Root, [string]$Target) {
     if (-not $Target.StartsWith($prefix, [StringComparison]::OrdinalIgnoreCase)) { throw 'Escape.' }
     return $Target.Substring($prefix.Length).Replace('\', '/')
 }
+function Get-DirectoryIdentity([string]$LiteralPath) {
+    $safe = Assert-NoReparse $LiteralPath
+    $item = Get-Item -LiteralPath $safe -Force
+    if (-not $item.PSIsContainer -or ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { throw 'Destination.' }
+    return [ordered]@{ path = $item.FullName; created = $item.CreationTimeUtc.Ticks }
+}
+
+function Assert-DirectoryIdentity([string]$LiteralPath, [object]$Identity) {
+    $current = Get-DirectoryIdentity $LiteralPath
+    if ($current.path -ne $Identity.path -or $current.created -ne $Identity.created) { throw 'Destination identity.' }
+    return $current.path
+}
 
 try {
     $safeRequest = Assert-PrivateRequest $RequestPath
-    $raw = [IO.File]::ReadAllText($safeRequest, $utf8)
+    $requestStream = [IO.File]::Open($safeRequest, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::Read)
+    [void](Assert-PrivateRequest $safeRequest)
+    $reader = [IO.StreamReader]::new($requestStream, $utf8, $false, 4096, $true)
+    try { $raw = $reader.ReadToEnd() } finally { $reader.Dispose() }
     $request = $raw | ConvertFrom-Json
     Assert-ExactProperties $request @('schemaVersion', 'requestId', 'operation', 'archivePath', 'destination', 'archiveSha256', 'entries')
     if ($request.schemaVersion -ne 1 -or
@@ -76,11 +94,16 @@ try {
         $request.operation -ne 'extractZip' -or $request.archiveSha256 -notmatch '^[a-f0-9]{64}$' -or @($request.entries).Count -gt 2048) { throw 'Request.' }
     $archive = Assert-NoReparse ([string]$request.archivePath)
     $destination = Assert-NoReparse ([string]$request.destination)
-    $destinationItem = Get-Item -LiteralPath $destination -Force
-    if (-not $destinationItem.PSIsContainer -or
-        @($destinationItem.EnumerateFileSystemInfos()).Count -ne 0 -or
-        ($destinationItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { throw 'Destination.' }
-    if ((Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLowerInvariant() -ne $request.archiveSha256) { throw 'Digest.' }
+    $destinationIdentity = Get-DirectoryIdentity $destination
+    if (@((Get-Item -LiteralPath $destination -Force).EnumerateFileSystemInfos()).Count -ne 0) { throw 'Destination.' }
+    $archiveStream = [IO.File]::Open($archive, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::Read)
+    $sha = [Security.Cryptography.SHA256]::Create()
+    try {
+        $archiveHash = ([BitConverter]::ToString($sha.ComputeHash($archiveStream))).Replace('-', '').ToLowerInvariant()
+    } finally { $sha.Dispose() }
+    if ($archiveHash -ne $request.archiveSha256) { throw 'Digest.' }
+    $archiveStream.Position = 0
+    [void](Assert-DirectoryIdentity $destination $destinationIdentity)
     foreach ($entry in @($request.entries)) {
         Assert-ExactProperties $entry @('path', 'type', 'size', 'sha256')
         if ($entry.path -notmatch '^[^\x00-\x1f\\/:]+(?:/[^\x00-\x1f\\/:]+)*$' -or
@@ -89,9 +112,42 @@ try {
             ($entry.type -eq 'file' -and $entry.sha256 -notmatch '^[a-f0-9]{64}$') -or
             ($entry.type -eq 'directory' -and $null -ne $entry.sha256)) { throw 'Entry.' }
     }
-    Add-Type -AssemblyName System.IO.Compression.FileSystem
-    [IO.Compression.ZipFile]::ExtractToDirectory($archive, $destination)
-    [void](Assert-NoReparse $destination)
+    Add-Type -AssemblyName System.IO.Compression
+    $zip = [IO.Compression.ZipArchive]::new($archiveStream, [IO.Compression.ZipArchiveMode]::Read, $true)
+    $zipEntries = @{}
+    foreach ($zipEntry in @($zip.Entries)) {
+        $zipPath = $zipEntry.FullName.Replace('\', '/').TrimEnd('/')
+        if ([string]::IsNullOrWhiteSpace($zipPath) -or $zipEntries.ContainsKey($zipPath)) { throw 'ZIP entries.' }
+        $zipEntries[$zipPath] = $zipEntry
+    }
+    foreach ($planned in @($request.entries | Sort-Object path)) {
+        [void](Assert-DirectoryIdentity $destination $destinationIdentity)
+        if (-not $zipEntries.ContainsKey($planned.path)) { throw 'ZIP entries.' }
+        $zipEntry = $zipEntries[$planned.path]
+        $target = [IO.Path]::GetFullPath((Join-Path $destination $planned.path.Replace('/', '\')))
+        [void](Relative-Forward $destination $target)
+        if ($planned.type -eq 'directory') {
+            if ($zipEntry.Length -ne 0) { throw 'ZIP directory.' }
+            [void][IO.Directory]::CreateDirectory($target)
+        } else {
+            $parent = [IO.Path]::GetDirectoryName($target)
+            [void](Assert-NoReparse $parent)
+            $inputStream = $zipEntry.Open()
+            $outputStream = [IO.File]::Open($target, [IO.FileMode]::CreateNew, [IO.FileAccess]::Write, [IO.FileShare]::None)
+            try {
+                $inputStream.CopyTo($outputStream)
+                $outputStream.Flush($true)
+            } finally {
+                $outputStream.Dispose()
+                $inputStream.Dispose()
+            }
+        }
+        [void](Assert-DirectoryIdentity $destination $destinationIdentity)
+        [void](Assert-NoReparse $target)
+    }
+    $zip.Dispose()
+    $archiveStream.Dispose()
+    [void](Assert-DirectoryIdentity $destination $destinationIdentity)
     $actual = @()
     $expanded = [long]0
     foreach ($item in @(Get-ChildItem -LiteralPath $destination -Recurse -Force | Sort-Object FullName)) {
@@ -99,23 +155,30 @@ try {
         if (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { throw 'Reparse.' }
         $relative = Relative-Forward $destination $item.FullName
         if ($item.PSIsContainer) {
-            $actual += [ordered]@{ path = $relative; type = 'directory'; size = 0; sha256 = $null }
+            $actual += [pscustomobject][ordered]@{ path = $relative; type = 'directory'; size = 0; sha256 = $null }
         } else {
-            $expanded = [Math]::AddChecked($expanded, [long]$item.Length)
+            $itemLength = [long]$item.Length
+            if ($itemLength -lt 0 -or $expanded -gt (536870912 - $itemLength)) { throw 'Expanded.' }
+            $expanded += $itemLength
             if ($expanded -gt 536870912) { throw 'Expanded.' }
-            $actual += [ordered]@{ path = $relative; type = 'file'; size = [long]$item.Length; sha256 = (Get-FileHash -LiteralPath $item.FullName -Algorithm SHA256).Hash.ToLowerInvariant() }
+            $actual += [pscustomobject][ordered]@{ path = $relative; type = 'file'; size = [long]$item.Length; sha256 = (Get-FileHash -LiteralPath $item.FullName -Algorithm SHA256).Hash.ToLowerInvariant() }
         }
     }
     $actual = @($actual | Sort-Object path)
     $expectedJson = @($request.entries | Sort-Object path) | ConvertTo-Json -Compress -Depth 5
     $actualJson = $actual | ConvertTo-Json -Compress -Depth 5
     if ($expectedJson -ne $actualJson) { throw 'Mismatch.' }
-    [void](Assert-NoReparse $destination)
+    [void](Assert-DirectoryIdentity $destination $destinationIdentity)
+    $requestStream.Dispose()
+    $requestStream = $null
     Write-Response ([ordered]@{
         ok = $true; schemaVersion = 1; requestId = $request.requestId
         result = [ordered]@{ canonicalDestination = $destination; entryCount = $actual.Count; expandedBytes = $expanded; entries = $actual }
     }) 0
 } catch {
+    if ($null -ne $requestStream) { $requestStream.Dispose() }
+    if ($null -ne $zip) { $zip.Dispose() }
+    if ($null -ne $archiveStream) { $archiveStream.Dispose() }
     $requestId = if ($null -ne $request -and $null -ne $request.requestId) { [string]$request.requestId } else { '' }
     Fail $requestId 'SAFETY_REFUSAL'
 }

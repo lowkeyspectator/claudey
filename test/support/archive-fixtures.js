@@ -108,8 +108,9 @@ function tarHeader(entry) {
   block.fill(0x20, 148, 156);
   block[156] = (entry.type ?? (entry.directory ? '5' : '0')).charCodeAt(0);
   writeTarText(block, 157, 100, entry.linkName ?? '');
-  writeTarText(block, 257, 6, 'ustar\0');
-  writeTarText(block, 263, 2, '00');
+  writeTarText(block, 257, 6, entry.magic ?? 'ustar\0');
+  writeTarText(block, 263, 2, entry.version ?? '00');
+  writeTarText(block, 265, 32, entry.userName ?? '');
   writeTarText(block, 345, 155, entry.prefix ?? '');
   const checksum = block.reduce((sum, byte) => sum + byte, 0);
   writeTarText(block, 148, 8, `${checksum.toString(8).padStart(6, '0')}\0 `);

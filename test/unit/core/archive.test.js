@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
-import { ARCHIVE_LIMITS, validateArchive } from '../../../src/core/archive.js';
+import { ARCHIVE_LIMITS, testArchiveLimitPolicy, validateArchive } from '../../../src/core/archive.js';
 import {
   buildGzip, buildTar, buildTarGz, buildZip, paxRecord, validTarEntries, validZipEntries
 } from '../../support/archive-fixtures.js';
@@ -141,8 +141,12 @@ test('rejects ZIP central/local disagreement, critical flags, unsupported method
 test('rejects ZIP64 sentinels and declared payload metadata outside the archive', async (t) => {
   const zip64 = buildZip([{ name: 'CLIProxyAPI.exe', content: 'x', size: 0xffffffff }]);
   const outside = buildZip([{ name: 'CLIProxyAPI.exe', content: 'x', compressedSize: 100 }]);
+  const descriptor = buildZip([{ name: 'CLIProxyAPI.exe', flags: 0x808, localFlags: 0x808, content: 'x' }]);
+  const inconsistentDescriptor = buildZip([{ name: 'CLIProxyAPI.exe', flags: 0x808, localFlags: 0x808, content: 'x', compressedSize: 0 }]);
   await assert.rejects(() => validateBytes(t, zip64, 'zip', 'CLIProxyAPI.exe'), unsafe);
   await assert.rejects(() => validateBytes(t, outside, 'zip', 'CLIProxyAPI.exe'), unsafe);
+  await assert.rejects(() => validateBytes(t, descriptor, 'zip', 'CLIProxyAPI.exe'), unsafe);
+  await assert.rejects(() => validateBytes(t, inconsistentDescriptor, 'zip', 'CLIProxyAPI.exe'), unsafe);
 });
 
 test('rejects invalid GZIP framing/trailer, TAR truncation/checksum/end markers, and trailing members', async (t) => {
@@ -192,6 +196,16 @@ test('accepts only bounded PAX path and size records and reapplies path safety a
     const bytes = buildTarGz([{ name: 'PaxHeader', type: 'x', content }, { name: 'placeholder', content: 'candidate' }]);
     await assert.rejects(() => validateBytes(t, bytes, 'tar.gz', 'CLIProxyAPI'), unsafe);
   }
+  const paxSize = buildTarGz([
+    { name: 'PaxHeader', type: 'x', content: paxRecord('size', '9') },
+    { name: 'CLIProxyAPI', content: 'candidate', mode: 0o755 }
+  ]);
+  assert.equal((await validateBytes(t, paxSize, 'tar.gz', 'CLIProxyAPI')).candidate.size, 9);
+  const paxDisagreement = buildTarGz([
+    { name: 'PaxHeader', type: 'x', content: paxRecord('size', '8') },
+    { name: 'CLIProxyAPI', content: 'candidate', mode: 0o755 }
+  ]);
+  await assert.rejects(() => validateBytes(t, paxDisagreement, 'tar.gz', 'CLIProxyAPI'), unsafe);
 });
 
 test('enforces checked count, expanded, per-entry, compressed, and ratio boundaries', async (t) => {
@@ -226,4 +240,66 @@ test('publishes the exact fixed limits', () => {
     pathBytes: 4096,
     componentBytes: 255
   });
+});
+test('fixed production ceilings cannot be raised by caller overrides', async (t) => {
+  const bytes = buildZip(validZipEntries);
+  for (const [key, value] of Object.entries(ARCHIVE_LIMITS)) {
+    await assert.rejects(() => validateBytes(t, bytes, 'zip', 'CLIProxyAPI.exe', {
+      limits: { [key]: value + 1 }
+    }), unsafe, key);
+  }
+});
+
+test('checks exact numeric boundaries through a metadata-only internal seam', () => {
+  assert.deepEqual(testArchiveLimitPolicy([{ size: 268435456 }, { size: 268435456 }], 5368710), {
+    entryCount: 2, expandedBytes: 536870912
+  });
+  for (const input of [
+    { entries: Array.from({ length: 2049 }, () => ({ size: 0 })), compressed: 1 },
+    { entries: [{ size: 268435457 }], compressed: 268435457 },
+    { entries: [{ size: 268435456 }, { size: 268435456 }, { size: 1 }], compressed: 5368710 },
+    { entries: [{ size: 101 }], compressed: 1 },
+    { entries: [{ size: 1 }], compressed: 0 },
+    { entries: [{ size: Number.MAX_SAFE_INTEGER }], compressed: 1 }
+  ]) assert.throws(() => testArchiveLimitPolicy(input.entries, input.compressed), unsafe);
+  assert.doesNotThrow(() => testArchiveLimitPolicy(Array.from({ length: 2048 }, () => ({ size: 0 })), 1));
+  assert.doesNotThrow(() => testArchiveLimitPolicy([{ size: 100 }], 1));
+});
+
+test('validates the complete supported ustar header and refuses hidden link metadata', async (t) => {
+  for (const hostile of [
+    { name: 'CLIProxyAPI', content: 'candidate', mode: 0o755, magic: 'bad\0\0\0' },
+    { name: 'CLIProxyAPI', content: 'candidate', mode: 0o755, version: '99' },
+    { name: 'CLIProxyAPI', content: 'candidate', mode: 0o755, linkName: 'outside' },
+    { name: 'CLIProxyAPI', content: 'candidate', mode: 0o755, userName: 'owner' }
+  ]) await assert.rejects(() => validateBytes(t, buildTarGz([hostile]), 'tar.gz', 'CLIProxyAPI'), unsafe);
+});
+
+test('parses PAX record lengths as bytes and canonicalizes multibyte collisions', async (t) => {
+  const multibyte = buildTarGz([
+    { name: 'PaxHeader', type: 'x', content: paxRecord('path', 'd\u00edr/CLIProxyAPI') },
+    { name: 'placeholder', content: 'candidate', mode: 0o755 }
+  ]);
+  assert.equal((await validateBytes(t, multibyte, 'tar.gz', 'CLIProxyAPI')).candidate.path, 'd\u00edr/CLIProxyAPI');
+  const collision = buildTarGz([
+    { name: 'PaxHeader', type: 'x', content: paxRecord('path', '\u03a3/CLIProxyAPI') },
+    { name: 'placeholder', content: 'candidate', mode: 0o755 },
+    { name: '\u03c3/CLIProxyAPI', content: 'x', mode: 0o755 }
+  ]);
+  await assert.rejects(() => validateBytes(t, collision, 'tar.gz', 'CLIProxyAPI', { targetPlatform: 'win32' }), unsafe);
+});
+
+test('ZIP DOS attributes use a strict allowlist for files and directories', async (t) => {
+  for (const entry of [
+    { name: 'CLIProxyAPI.exe', content: 'candidate', versionMadeBy: 20, externalAttributes: 0x400 },
+    { name: 'dir/', directory: true, versionMadeBy: 20, externalAttributes: 0x410 },
+    { name: 'CLIProxyAPI.exe', content: 'candidate', versionMadeBy: 20, externalAttributes: 0x420 },
+    { name: 'CLIProxyAPI.exe', content: 'candidate', versionMadeBy: 0x031e, externalAttributes: 0x81a40400 },
+    { name: 'dir/', directory: true, versionMadeBy: 0x031e, externalAttributes: 0x41ed0410 }
+  ]) await assert.rejects(() => validateBytes(t, buildZip([entry]), 'zip', 'CLIProxyAPI.exe'), unsafe);
+});
+
+test('plan destinations remain relative until bound to the exact extraction directory', async (t) => {
+  const plan = await validateBytes(t, buildTarGz(validTarEntries), 'tar.gz', 'CLIProxyAPI');
+  assert.equal(plan.entries.every((entry) => !Object.hasOwn(entry, 'destination')), true);
 });

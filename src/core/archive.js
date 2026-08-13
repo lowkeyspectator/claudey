@@ -28,7 +28,7 @@ const ZIP_CENTRAL_HEADER_BYTES = 46;
 const TAR_BLOCK_BYTES = 512;
 const ZIP_ALLOWED_FLAGS = 0x0800;
 const FIXED_POWERSHELL_PATH = 'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe';
-const BUNDLED_ARCHIVE_HELPER_PATH = fileURLToPath(new URL('../../scripts/windows/archive-helper.ps1', import.meta.url));
+export const ARCHIVE_HELPER_PATH = fileURLToPath(new URL('../../scripts/windows/archive-helper.ps1', import.meta.url));
 const FIXED_POSIX_TAR_PATHS = new Set(['/usr/bin/tar', '/bin/tar']);
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const validatedPlans = new WeakSet();
@@ -66,7 +66,12 @@ function normalizeLimits(input) {
     for (const key of Object.keys(input)) if (!LIMIT_KEYS.includes(key)) throw unsafe('The archive limits contain an unknown field.');
   }
   const limits = { ...ARCHIVE_LIMITS, ...input };
-  for (const key of LIMIT_KEYS) checkedInteger(limits[key], `${key} limit`, { positive: true });
+  for (const key of LIMIT_KEYS) {
+    checkedInteger(limits[key], `${key} limit`, { positive: true });
+    if (limits[key] > ARCHIVE_LIMITS[key]) {
+      throw unsafe(`The archive ${key} limit cannot exceed its fixed ceiling.`);
+    }
+  }
   return Object.freeze(limits);
 }
 
@@ -107,6 +112,10 @@ function decodeUtf8(bytes, label) {
     throw unsafe(`The archive ${label} is not valid UTF-8.`, cause);
   }
 }
+function windowsCollisionSegment(segment) {
+  return segment.normalize('NFC').toUpperCase().toLowerCase().replace(/[. ]+$/u, '').replaceAll('\u03c2', '\u03c3');
+}
+
 
 function archivePathPolicy(rawPath, type, targetPlatform, limits) {
   if (typeof rawPath !== 'string' || rawPath.length === 0 || Buffer.byteLength(rawPath, 'utf8') > limits.pathBytes
@@ -131,7 +140,7 @@ function archivePathPolicy(rawPath, type, targetPlatform, limits) {
   const canonical = normalizedSegments.join('/');
   const collisionSegments = normalizedSegments.map((segment) => {
     if (targetPlatform !== 'win32') return segment;
-    const folded = segment.toLocaleLowerCase('und').replace(/[. ]+$/u, '');
+    const folded = windowsCollisionSegment(segment);
     if (folded.length === 0 || /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/i.test(folded)) {
       throw unsafe('An archive entry path is reserved on Windows.');
     }
@@ -167,6 +176,13 @@ function checkAggregateLimits(entries, compressedBytes, limits) {
   }
   return expandedBytes;
 }
+export function testArchiveLimitPolicy(entries, compressedBytes, overrides) {
+  const limits = normalizeLimits(overrides);
+  return Object.freeze({
+    entryCount: entries.length,
+    expandedBytes: checkAggregateLimits(entries, compressedBytes, limits)
+  });
+}
 
 function addPlannedEntry(state, rawEntry) {
   const normalized = archivePathPolicy(rawEntry.rawPath, rawEntry.type, state.targetPlatform, state.limits);
@@ -174,7 +190,7 @@ function addPlannedEntry(state, rawEntry) {
   state.destinations.set(normalized.collisionKey, rawEntry.type);
   for (let index = 1; index < normalized.segments.length; index += 1) {
     const ancestor = normalized.segments.slice(0, index).map((segment) => state.targetPlatform === 'win32'
-      ? segment.toLocaleLowerCase('und').replace(/[. ]+$/u, '')
+      ? windowsCollisionSegment(segment)
       : segment).join('/');
     if (state.destinations.get(ancestor) === 'file') throw unsafe('An archive file overlaps a descendant destination.');
   }
@@ -182,14 +198,8 @@ function addPlannedEntry(state, rawEntry) {
     const prefix = `${normalized.collisionKey}/`;
     for (const key of state.destinations.keys()) if (key.startsWith(prefix)) throw unsafe('An archive file overlaps a descendant destination.');
   }
-  const destination = path.resolve(state.stagingRoot, ...normalized.segments);
-  const relative = path.relative(state.stagingRoot, destination);
-  if (relative === '' || relative === '..' || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) {
-    throw unsafe('An archive entry destination escapes staging.');
-  }
   const entry = {
     path: normalized.canonical,
-    destination,
     type: rawEntry.type,
     size: rawEntry.size,
     sha256: rawEntry.type === 'file' ? rawEntry.sha256 : null,
@@ -201,14 +211,20 @@ function addPlannedEntry(state, rawEntry) {
 function zipType(versionMadeBy, attributes, rawName) {
   const creator = versionMadeBy >>> 8;
   const unixMode = (attributes >>> 16) & 0xffff;
-  const dosDirectory = (attributes & 0x10) !== 0;
+  const dosAttributes = attributes & 0xffff;
+  const dosDirectory = (dosAttributes & 0x10) !== 0;
   if (creator === 3) {
     const fileType = unixMode & 0xf000;
-    if (fileType === 0x4000) return 'directory';
-    if (fileType === 0x8000) return 'file';
-    throw unsafe('A ZIP entry has a special filesystem type.');
+    const type = fileType === 0x4000 ? 'directory' : fileType === 0x8000 ? 'file' : null;
+    if (!type) throw unsafe('A ZIP entry has a special filesystem type.');
+    const allowed = type === 'directory' ? [0x10, 0x30] : [0, 0x20];
+    if (!allowed.includes(dosAttributes)) throw unsafe('A ZIP entry has unsafe DOS attributes.');
+    if ((type === 'directory') !== rawName.endsWith('/')) throw unsafe('A ZIP entry type disagrees with its path syntax.');
+    return type;
   }
-  if (unixMode !== 0 || (attributes & ~0x20) !== 0 && !dosDirectory) throw unsafe('A ZIP entry has unsafe external attributes.');
+  const allowedDosAttributes = dosDirectory ? 0x10 : 0x20;
+  if (unixMode !== 0 || attributes !== allowedDosAttributes) throw unsafe('A ZIP entry has unsafe external attributes.');
+  if (dosDirectory !== rawName.endsWith('/')) throw unsafe('A ZIP entry type disagrees with its path syntax.');
   return dosDirectory || rawName.endsWith('/') ? 'directory' : 'file';
 }
 
@@ -336,34 +352,34 @@ function tarChecksum(block) {
   return sum;
 }
 
-function parsePax(bytes, limits) {
-  const text = decodeUtf8(bytes, 'PAX record');
+function parsePax(bytes) {
   const values = new Map();
   let offset = 0;
-  while (offset < text.length) {
-    const space = text.indexOf(' ', offset);
-    if (space < 1) throw unsafe('A PAX record length is malformed.');
-    const lengthText = text.slice(offset, space);
+  while (offset < bytes.length) {
+    const space = bytes.indexOf(0x20, offset);
+    if (space <= offset) throw unsafe('A PAX record length is malformed.');
+    const lengthText = bytes.subarray(offset, space).toString('ascii');
     if (!/^[1-9]\d*$/.test(lengthText)) throw unsafe('A PAX record length is malformed.');
     const length = checkedInteger(Number(lengthText), 'PAX record length', { positive: true });
-    const recordBytes = Buffer.from(text.slice(offset, offset + length));
-    if (recordBytes.length !== length) throw unsafe('A PAX record length is inconsistent.');
+    const end = checkedAdd(offset, length, 'PAX record extent');
+    if (end > bytes.length) throw unsafe('A PAX record length is inconsistent.');
+    const recordBytes = bytes.subarray(offset, end);
     const record = decodeUtf8(recordBytes, 'PAX record');
-    if (!record.endsWith('\n') || record[lengthText.length] !== ' ') throw unsafe('A PAX record is malformed.');
-    const equals = record.indexOf('=', lengthText.length + 1);
+    const prefix = lengthText + ' ';
+    if (!record.startsWith(prefix) || !record.endsWith('\n')) throw unsafe('A PAX record is malformed.');
+    const equals = record.indexOf('=', prefix.length);
     if (equals < 0) throw unsafe('A PAX record is malformed.');
-    const key = record.slice(lengthText.length + 1, equals);
+    const key = record.slice(prefix.length, equals);
     const value = record.slice(equals + 1, -1);
     if (!['path', 'size'].includes(key) || values.has(key) || value.length === 0) throw unsafe('A PAX record uses unsupported or duplicate metadata.');
     values.set(key, value);
-    offset += length;
+    offset = end;
   }
   if (values.has('size')) {
     const value = values.get('size');
     if (!/^(0|[1-9]\d*)$/.test(value)) throw unsafe('A PAX size is malformed.');
     values.set('size', checkedInteger(Number(value), 'PAX size'));
   }
-  if (values.has('path')) archivePathPolicy(values.get('path'), 'file', 'linux', limits);
   return values;
 }
 
@@ -415,6 +431,13 @@ function parseTarGz(bytes, state) {
     if (endBlocks !== 0) throw unsafe('The TAR end marker is malformed.');
     const expectedChecksum = parseTarOctal(block.subarray(148, 156), 'checksum');
     if (expectedChecksum !== tarChecksum(block)) throw unsafe('A TAR header checksum is invalid.');
+    if (!block.subarray(257, 263).equals(Buffer.from('ustar\0'))
+      || !block.subarray(263, 265).equals(Buffer.from('00'))
+      || block.subarray(157, 257).some((byte) => byte !== 0)
+      || block.subarray(265, 345).some((byte) => byte !== 0)
+      || block.subarray(500, 512).some((byte) => byte !== 0)) {
+      throw unsafe('A TAR header uses unsupported schema fields.');
+    }
     const rawName = tarString(block.subarray(0, 100));
     const prefix = tarString(block.subarray(345, 500));
     const headerPath = prefix ? `${prefix}/${rawName}` : rawName;
@@ -431,7 +454,7 @@ function parseTarGz(bytes, state) {
     cursor = dataEnd;
     if (typeFlag === 'x') {
       if (pendingPax || headerSize === 0) throw unsafe('PAX metadata is ambiguous.');
-      pendingPax = parsePax(content, state.limits);
+      pendingPax = parsePax(content);
       rawEntries.push({ type: 'metadata', size: headerSize });
       continue;
     }
@@ -647,12 +670,13 @@ export function parseArchiveHelperResponse(stdout, { requestId } = {}) {
 }
 
 function boundedText(value, maxOutputBytes, stream) {
+    let terminalDeadline;
   if (typeof value !== 'string' || Buffer.byteLength(value, 'utf8') > maxOutputBytes) {
     throw capability('The archive extractor ' + stream + ' exceeded its permitted output.');
   }
 }
 
-function defaultRunProcess(command, args, { shell, timeoutMs, maxOutputBytes }) {
+function defaultRunProcess(command, args, { shell, timeoutMs, maxOutputBytes, terminationDeadlineMs = 2000 }) {
   return new Promise((resolve, reject) => {
     let child;
     try {
@@ -666,25 +690,32 @@ function defaultRunProcess(command, args, { shell, timeoutMs, maxOutputBytes }) 
     let termination;
     let settled = false;
     let escalation;
-    const timer = setTimeout(() => {
-      termination = 'The archive extractor timed out.';
-      child.kill();
-      escalation = setTimeout(() => child.kill('SIGKILL'), 250);
-    }, timeoutMs);
+    let terminalDeadline;
+    let timer;
     const finish = (callback, value) => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
       clearTimeout(escalation);
+      clearTimeout(terminalDeadline);
       callback(value);
     };
+    const terminate = (message) => {
+      if (termination) return;
+      termination = message;
+      child.kill();
+      escalation = setTimeout(() => {
+        child.kill('SIGKILL');
+        terminalDeadline = setTimeout(() => finish(reject, capability('The archive extractor exit could not be confirmed.')), terminationDeadlineMs);
+      }, 250);
+    };
+    timer = setTimeout(() => terminate('The archive extractor timed out.'), timeoutMs);
     const append = (stream, chunk) => {
       if (termination) return;
       if (stream === 'stdout') stdout += chunk;
       else stderr += chunk;
       if (Buffer.byteLength(stream === 'stdout' ? stdout : stderr, 'utf8') > maxOutputBytes) {
-        termination = 'The archive extractor ' + stream + ' exceeded its permitted output.';
-        child.kill();
+        terminate('The archive extractor ' + stream + ' exceeded its permitted output.');
       }
     };
     child.stdout.setEncoding('utf8');
@@ -696,6 +727,10 @@ function defaultRunProcess(command, args, { shell, timeoutMs, maxOutputBytes }) 
       ? finish(reject, capability(termination))
       : finish(resolve, { code, stdout, stderr }));
   });
+}
+
+export function testRunArchiveProcess(command, args, options) {
+  return defaultRunProcess(command, args, { shell: false, ...options });
 }
 
 async function runProcess(command, args, options, adapter) {
@@ -742,6 +777,20 @@ async function assertExactDirectory(target, expectedIdentity, fsApi, { mode, par
   return stats;
 }
 
+async function assertExactFile(target, expectedIdentity, fsApi) {
+  try {
+    const stats = await fsApi.lstat(target);
+    const canonical = await fsApi.realpath(target);
+    if (!stats.isFile?.() || stats.isSymbolicLink?.() || stats.isReparsePoint === true
+      || !sameHostPath(canonical, target) || (expectedIdentity && !sameIdentity(stats, expectedIdentity))) {
+      throw safety('A protected archive file changed identity.');
+    }
+    return stats;
+  } catch (cause) {
+    if (cause instanceof ClaudexError) throw cause;
+    throw safety('A protected archive file could not be rechecked.', cause);
+  }
+}
 async function recheckArchive(plan, fsApi) {
   try {
     const before = await fsApi.lstat(plan.archivePath);
@@ -868,9 +917,9 @@ async function runWindowsExtraction(plan, stagingDir, adapter) {
     ? await adapter.verifyWindowsTools()
     : {
         powershellPath: await verifyFixedFile(FIXED_POWERSHELL_PATH, adapter.fsApi ?? fs, 'Fixed System32 PowerShell is missing.'),
-        helperPath: await verifyFixedFile(BUNDLED_ARCHIVE_HELPER_PATH, adapter.fsApi ?? fs, 'The bundled archive helper is missing.')
+        helperPath: await verifyFixedFile(ARCHIVE_HELPER_PATH, adapter.fsApi ?? fs, 'The bundled archive helper is missing.')
       };
-  if (tools.powershellPath !== FIXED_POWERSHELL_PATH || !path.win32.isAbsolute(tools.helperPath)) {
+  if (tools.powershellPath !== FIXED_POWERSHELL_PATH || tools.helperPath !== ARCHIVE_HELPER_PATH) {
     throw capability('The Windows archive extractor identity is invalid.');
   }
   const requestId = randomUUID();
@@ -884,10 +933,17 @@ async function runWindowsExtraction(plan, stagingDir, adapter) {
   const storage = await (adapter.createPrivateRequest ?? ((value) => defaultPrivateRequest(value, adapter)))(input);
   let response;
   let operationError;
+  let requestIdentity;
   try {
     if (!storage || typeof storage.requestPath !== 'string' || !path.isAbsolute(storage.requestPath) || typeof storage.cleanup !== 'function') {
       throw safety('The archive helper request storage is invalid.');
     }
+    requestIdentity = identity(await assertExactFile(storage.requestPath, undefined, adapter.fsApi ?? fs));
+    await adapter.beforeExtractorSpawn?.({ plan, stagingDir, requestPath: storage.requestPath, tools });
+    await verifyFixedFile(ARCHIVE_HELPER_PATH, adapter.fsApi ?? fs, 'The bundled archive helper is missing.');
+    await recheckArchive(plan, adapter.fsApi ?? fs);
+    await assertExactDirectory(stagingDir, undefined, adapter.fsApi ?? fs, { mode: 0o700 });
+    await assertExactFile(storage.requestPath, requestIdentity, adapter.fsApi ?? fs);
     const result = await runProcess(tools.powershellPath, [
       '-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass',
       '-File', tools.helperPath, '-RequestPath', storage.requestPath
@@ -899,6 +955,7 @@ async function runWindowsExtraction(plan, stagingDir, adapter) {
     operationError = cause;
   }
   try {
+    if (requestIdentity) await assertExactFile(storage.requestPath, requestIdentity, adapter.fsApi ?? fs);
     await storage?.cleanup?.();
   } catch (cause) {
     throw safety('The archive helper request cleanup failed closed.', cause);
@@ -936,11 +993,11 @@ async function walkExtractedTree(plan, staging, adapter) {
       if (before.isDirectory?.()) {
         actual.push({
           path: relative, destination: target, type: 'directory', size: 0, sha256: null,
-          mode: plan.targetPlatform === 'win32' ? null : before.mode & 0o777
+          mode: plan.targetPlatform === 'win32' ? null : before.mode & 0o777, identity: identity(before)
         });
         await visit(target, relative);
       } else if (before.isFile?.()) {
-        if (before.nlink > 1 || (process.platform !== 'win32' && Number.isSafeInteger(before.blocks) && before.size > 0 && before.blocks * 512 < before.size)) {
+        if (before.nlink > 1 || (plan.targetPlatform !== 'win32' && Number.isSafeInteger(before.blocks) && before.size > 0 && before.blocks * 512 < before.size)) {
           throw unsafe('The extracted tree contains a linked or sparse file.');
         }
         const bytes = await fsApi.readFile(target);
@@ -950,7 +1007,7 @@ async function walkExtractedTree(plan, staging, adapter) {
         }
         actual.push({
           path: relative, destination: target, type: 'file', size: bytes.length, sha256: digest(bytes),
-          mode: plan.targetPlatform === 'win32' ? null : after.mode & 0o777
+          mode: plan.targetPlatform === 'win32' ? null : after.mode & 0o777, identity: identity(after)
         });
       } else {
         throw unsafe('The extracted tree contains an unsupported filesystem type.');
@@ -976,6 +1033,32 @@ async function walkExtractedTree(plan, staging, adapter) {
     || candidate[0].sha256 !== plan.candidate.sha256 || (process.platform !== 'win32' && candidate[0].mode !== plan.candidate.mode)) {
     throw unsafe('The extracted candidate identity differs from the validated plan.');
   }
+  await adapter.beforeFinalHandoff?.({ plan, stagingDir: staging.target });
+  const finalPaths = [];
+  async function collect(directory, relativeDirectory = '') {
+    for (const child of await fsApi.readdir(directory, { withFileTypes: true })) {
+      const relative = relativeDirectory ? relativeDirectory + '/' + child.name : child.name;
+      finalPaths.push(relative);
+      if (child.isDirectory()) await collect(path.join(directory, child.name), relative);
+    }
+  }
+  await collect(staging.target);
+  finalPaths.sort((left, right) => Buffer.from(left).compare(Buffer.from(right)));
+  if (JSON.stringify(finalPaths) !== JSON.stringify(actual.map((entry) => entry.path))) {
+    throw unsafe('The extracted tree changed before handoff.');
+  }
+  for (const observed of actual) {
+    const stats = await fsApi.lstat(observed.destination);
+    const canonical = await fsApi.realpath(observed.destination);
+    if (!sameIdentity(stats, observed.identity) || stats.isSymbolicLink?.() || stats.isReparsePoint === true
+      || !sameHostPath(canonical, observed.destination)) throw unsafe('The extracted tree changed before handoff.');
+    if (observed.type === 'file') {
+      const bytes = await fsApi.readFile(observed.destination);
+      if (bytes.length !== observed.size || digest(bytes) !== observed.sha256) {
+        throw unsafe('The extracted candidate changed before handoff.');
+      }
+    }
+  }
   return Object.freeze({
     path: candidate[0].destination,
     size: candidate[0].size,
@@ -984,11 +1067,17 @@ async function walkExtractedTree(plan, staging, adapter) {
   });
 }
 
-async function cleanupOwnedStaging(staging, plan, fsApi) {
+async function cleanupOwnedStaging(staging, plan, fsApi, adapter) {
   if (!staging?.identity) return;
   await assertExactDirectory(plan.stagingRoot, plan.stagingRootIdentity, fsApi);
+  await adapter.beforeCleanupQuarantine?.({ plan, stagingDir: staging.target });
   await assertExactDirectory(staging.target, staging.identity, fsApi, { parent: staging.rootStats });
-  await fsApi.rm(staging.target, { recursive: true, force: false });
+  const quarantine = path.join(plan.stagingRoot, `.claudexctl-quarantine-${randomUUID()}`);
+  await fsApi.rename(staging.target, quarantine);
+  await assertExactDirectory(quarantine, staging.identity, fsApi, { parent: staging.rootStats });
+  await adapter.beforeQuarantineDelete?.({ plan, quarantine });
+  await assertExactDirectory(quarantine, staging.identity, fsApi, { parent: staging.rootStats });
+  await fsApi.rm(quarantine, { recursive: true, force: false });
 }
 
 /** Extract an in-memory branded immutable plan and verify every materialized path. */
@@ -1012,7 +1101,7 @@ export async function extractValidatedArchive(plan, stagingDir, adapter = {}) {
     return await walkExtractedTree(plan, staging, adapter);
   } catch (cause) {
     try {
-      await cleanupOwnedStaging(staging, plan, fsApi);
+      await cleanupOwnedStaging(staging, plan, fsApi, adapter);
     } catch (cleanupCause) {
       throw safety('Archive staging cleanup failed closed.', cleanupCause);
     }
