@@ -21,14 +21,17 @@ const managementCases = [
   { argv: ['models', 'antigravity'], command: ['models', 'antigravity'], options: {} },
   { argv: ['models', 'cursor'], command: ['models', 'cursor'], options: {} },
   { argv: ['models', 'all'], command: ['models', 'all'], options: {} },
+  { argv: ['models'], command: ['models'], options: {} },
   { argv: ['config', 'set', 'port', '8317', '--yes'], command: ['config', 'set', 'port'], options: { port: 8317, yes: true } },
   { argv: ['cursor', 'enable', '--scope', 'local'], command: ['cursor', 'enable'], options: { scope: 'local' } },
   { argv: ['cursor', 'disable', '--scope', 'user'], command: ['cursor', 'disable'], options: { scope: 'user' } },
   { argv: ['cursor', 'install', '--yes'], command: ['cursor', 'install'], options: { yes: true } },
   { argv: ['cursor', 'login'], command: ['cursor', 'login'], options: {} },
   { argv: ['cursor', 'repo', 'add', 'C:\\work\\repo'], command: ['cursor', 'repo', 'add'], options: { path: 'C:\\work\\repo' } },
+  { argv: ['cursor', 'repo', 'add'], command: ['cursor', 'repo', 'add'], options: {} },
   { argv: ['cursor', 'repo', 'list'], command: ['cursor', 'repo', 'list'], options: {} },
   { argv: ['cursor', 'repo', 'remove', 'C:\\work\\repo'], command: ['cursor', 'repo', 'remove'], options: { path: 'C:\\work\\repo' } },
+  { argv: ['cursor', 'repo', 'remove'], command: ['cursor', 'repo', 'remove'], options: {} },
   { argv: ['cursor', 'writes', 'enable', '--yes'], command: ['cursor', 'writes', 'enable'], options: { yes: true } },
   { argv: ['cursor', 'writes', 'disable'], command: ['cursor', 'writes', 'disable'], options: {} },
   { argv: ['cursor', 'approve', 'approval-id'], command: ['cursor', 'approve'], options: { approvalId: 'approval-id' } },
@@ -60,6 +63,16 @@ test('accepts global noninteractive before and after a management command', () =
   assert.deepEqual(parseManagementArgs(['doctor', '--non-interactive']), {
     command: ['doctor'], options: { nonInteractive: true }
   });
+});
+
+test('CI-derived noninteractive is idempotent with one explicit noninteractive flag', () => {
+  assert.deepEqual(parseManagementArgs(['doctor', '--non-interactive'], { CI: 'true' }), {
+    command: ['doctor'], options: { nonInteractive: true }
+  });
+  assert.throws(
+    () => parseManagementArgs(['doctor', '--non-interactive', '--non-interactive'], { CI: 'true' }),
+    (error) => error.code === 'USAGE_ERROR'
+  );
 });
 
 test('rejects conflicting, duplicate, unknown, and missing management options', () => {
@@ -95,6 +108,22 @@ test('rejects a missing operand for every valued command option', () => {
     assert.throws(() => parseManagementArgs(argv), (error) => error.code === 'USAGE_ERROR', argv.join(' '));
   }
   assert.throws(() => parseLauncherArgs(['--model']), (error) => error.code === 'USAGE_ERROR');
+});
+
+test('rejects underflow, overflow, and non-digit values for every port operand', () => {
+  const commands = [
+    ['setup', '--port'],
+    ['install', '--port'],
+    ['auth', 'codex', '--callback-port'],
+    ['auth', 'antigravity', '--callback-port'],
+    ['config', 'set', 'port']
+  ];
+  for (const command of commands) {
+    for (const value of ['1023', '65536', 'not-a-port']) {
+      const argv = [...command, value];
+      assert.throws(() => parseManagementArgs(argv), (error) => error.code === 'USAGE_ERROR', argv.join(' '));
+    }
+  }
 });
 
 test('cursor repo permits at most one non-option path operand', () => {

@@ -92,8 +92,8 @@ function assertNoMutuallyExclusive(options, first, second) {
 
 export function parseManagementArgs(argv, environment = process.env) {
   const options = {};
-  if (environment.CI === 'true') options.nonInteractive = true;
   const tokens = removeGlobalFlags([...argv], options);
+  if (environment.CI === 'true') options.nonInteractive = true;
   const [first, second, third] = tokens;
   if (!first) throw usage('A management command is required.');
 
