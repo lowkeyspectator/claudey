@@ -1,0 +1,111 @@
+{
+  "valid": [
+    {
+      "id": "windows",
+      "platform": { "family": "windows", "runtimePlatform": "win32", "runtimeArch": "x64" },
+      "env": { "LOCALAPPDATA": "C:\\Users\\Casey\\AppData\\Local", "APPDATA": "C:\\Users\\Casey\\AppData\\Roaming", "USERPROFILE": "C:\\Users\\Casey" },
+      "expected": {
+        "managerRoot": "C:\\Users\\Casey\\AppData\\Local\\claudexctl",
+        "releaseRoot": "C:\\Users\\Casey\\AppData\\Local\\claudexctl\\releases",
+        "launcherRoot": "C:\\Users\\Casey\\AppData\\Local\\claudexctl\\launchers",
+        "stateRoot": "C:\\Users\\Casey\\AppData\\Local\\claudexctl\\state",
+        "userBinRoot": "C:\\Users\\Casey\\AppData\\Local\\claudexctl\\bin",
+        "configRoot": "C:\\Users\\Casey\\AppData\\Roaming\\claudexctl",
+        "authRoot": "C:\\Users\\Casey\\AppData\\Roaming\\claudexctl\\auth"
+      }
+    },
+    {
+      "id": "macos",
+      "platform": { "family": "macos", "runtimePlatform": "darwin", "runtimeArch": "arm64" },
+      "env": { "HOME": "/Users/casey" },
+      "expected": {
+        "managerRoot": "/Users/casey/Library/Application Support/claudexctl",
+        "releaseRoot": "/Users/casey/Library/Application Support/claudexctl/releases",
+        "launcherRoot": "/Users/casey/Library/Application Support/claudexctl/launchers",
+        "configRoot": "/Users/casey/Library/Application Support/claudexctl",
+        "authRoot": "/Users/casey/Library/Application Support/claudexctl/auth",
+        "stateRoot": "/Users/casey/Library/Application Support/claudexctl/state",
+        "userBinRoot": "/Users/casey/.local/bin"
+      }
+    },
+    {
+      "id": "linux-custom-xdg",
+      "platform": { "family": "linux", "runtimePlatform": "linux", "runtimeArch": "x64", "isWsl": false },
+      "env": { "HOME": "/home/casey", "XDG_DATA_HOME": "/var/home/casey/data", "XDG_CONFIG_HOME": "/var/home/casey/config", "XDG_STATE_HOME": "/var/home/casey/state" },
+      "expected": {
+        "managerRoot": "/var/home/casey/data/claudexctl",
+        "releaseRoot": "/var/home/casey/data/claudexctl/releases",
+        "launcherRoot": "/var/home/casey/data/claudexctl/launchers",
+        "configRoot": "/var/home/casey/config/claudexctl",
+        "authRoot": "/var/home/casey/config/claudexctl/auth",
+        "stateRoot": "/var/home/casey/state/claudexctl",
+        "userBinRoot": "/home/casey/.local/bin"
+      }
+    },
+    {
+      "id": "linux-fallback-xdg",
+      "platform": { "family": "linux", "runtimePlatform": "linux", "runtimeArch": "arm64", "isWsl": false },
+      "env": { "HOME": "/home/casey", "XDG_DATA_HOME": "", "XDG_CONFIG_HOME": "", "XDG_STATE_HOME": "" },
+      "expected": {
+        "managerRoot": "/home/casey/.local/share/claudexctl",
+        "releaseRoot": "/home/casey/.local/share/claudexctl/releases",
+        "launcherRoot": "/home/casey/.local/share/claudexctl/launchers",
+        "configRoot": "/home/casey/.config/claudexctl",
+        "authRoot": "/home/casey/.config/claudexctl/auth",
+        "stateRoot": "/home/casey/.local/state/claudexctl",
+        "userBinRoot": "/home/casey/.local/bin"
+      }
+    },
+    {
+      "id": "wsl-custom-xdg",
+      "platform": { "family": "linux", "runtimePlatform": "linux", "runtimeArch": "x64", "isWsl": true, "wslVersion": 2 },
+      "env": { "HOME": "/home/casey", "XDG_DATA_HOME": "/var/home/casey/data", "XDG_CONFIG_HOME": "/var/home/casey/config", "XDG_STATE_HOME": "/var/home/casey/state" },
+      "expected": {
+        "managerRoot": "/var/home/casey/data/claudexctl",
+        "releaseRoot": "/var/home/casey/data/claudexctl/releases",
+        "launcherRoot": "/var/home/casey/data/claudexctl/launchers",
+        "configRoot": "/var/home/casey/config/claudexctl",
+        "authRoot": "/var/home/casey/config/claudexctl/auth",
+        "stateRoot": "/var/home/casey/state/claudexctl",
+        "userBinRoot": "/home/casey/.local/bin"
+      }
+    },
+    {
+      "id": "wsl-fallback-xdg",
+      "platform": { "family": "linux", "runtimePlatform": "linux", "runtimeArch": "arm64", "isWsl": true, "wslVersion": 1 },
+      "env": { "HOME": "/home/casey" },
+      "expected": {
+        "managerRoot": "/home/casey/.local/share/claudexctl",
+        "releaseRoot": "/home/casey/.local/share/claudexctl/releases",
+        "launcherRoot": "/home/casey/.local/share/claudexctl/launchers",
+        "configRoot": "/home/casey/.config/claudexctl",
+        "authRoot": "/home/casey/.config/claudexctl/auth",
+        "stateRoot": "/home/casey/.local/state/claudexctl",
+        "userBinRoot": "/home/casey/.local/bin"
+      }
+    }
+  ],
+  "unsafe": [
+    {
+      "id": "wsl-mounted-c-xdg",
+      "platform": { "family": "linux", "isWsl": true },
+      "env": { "HOME": "/home/casey", "XDG_DATA_HOME": "/mnt/c/Users/Casey/data" }
+    },
+    {
+      "id": "wsl-injected-windows-drive-mount",
+      "platform": { "family": "linux", "isWsl": true },
+      "env": { "HOME": "/home/casey", "XDG_CONFIG_HOME": "/workspace/config" },
+      "safety": { "mountTable": [{ "mountPoint": "/workspace", "source": "C:" }] }
+    },
+    {
+      "id": "empty-home",
+      "platform": { "family": "linux", "isWsl": false },
+      "env": { "HOME": "" }
+    },
+    {
+      "id": "relative-xdg",
+      "platform": { "family": "linux", "isWsl": false },
+      "env": { "HOME": "/home/casey", "XDG_STATE_HOME": "relative/state" }
+    }
+  ]
+}

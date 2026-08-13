@@ -1,0 +1,88 @@
+{
+  "supported": [
+    {
+      "id": "win-x64-1809",
+      "input": { "runtime": { "platform": "win32", "arch": "x64" }, "nativeArch": "x64", "windowsVersion": { "major": 10, "minor": 0, "build": 17763 } },
+      "expected": { "family": "windows", "runtimePlatform": "win32", "runtimeArch": "x64", "nativeArch": "x64", "warnings": [] }
+    },
+    {
+      "id": "win-arm64-1809",
+      "input": { "runtime": { "platform": "win32", "arch": "arm64" }, "nativeArch": "arm64", "windowsVersion": { "major": 10, "minor": 0, "build": 17763 } },
+      "expected": { "family": "windows", "runtimePlatform": "win32", "runtimeArch": "arm64", "nativeArch": "arm64", "warnings": [] }
+    },
+    {
+      "id": "win-x64-on-arm64",
+      "input": { "runtime": { "platform": "win32", "arch": "x64" }, "nativeArch": "arm64", "windowsVersion": { "major": 10, "minor": 0, "build": 22631 } },
+      "expected": { "family": "windows", "runtimePlatform": "win32", "runtimeArch": "x64", "nativeArch": "arm64", "warnings": [{ "code": "RUNTIME_NATIVE_ARCH_MISMATCH", "runtimeArch": "x64", "nativeArch": "arm64" }] }
+    },
+    {
+      "id": "mac-x64-13",
+      "input": { "runtime": { "platform": "darwin", "arch": "x64" }, "nativeArch": "x64", "macVersion": "13.0.0" },
+      "expected": { "family": "macos", "runtimePlatform": "darwin", "runtimeArch": "x64", "nativeArch": "x64", "warnings": [] }
+    },
+    {
+      "id": "mac-arm64-13",
+      "input": { "runtime": { "platform": "darwin", "arch": "arm64" }, "nativeArch": "arm64", "macVersion": "13.0.0" },
+      "expected": { "family": "macos", "runtimePlatform": "darwin", "runtimeArch": "arm64", "nativeArch": "arm64", "warnings": [] }
+    },
+    {
+      "id": "mac-x64-on-arm64",
+      "input": { "runtime": { "platform": "darwin", "arch": "x64" }, "nativeArch": "arm64", "macVersion": "14.5.0" },
+      "expected": { "family": "macos", "runtimePlatform": "darwin", "runtimeArch": "x64", "nativeArch": "arm64", "warnings": [{ "code": "RUNTIME_NATIVE_ARCH_MISMATCH", "runtimeArch": "x64", "nativeArch": "arm64" }] }
+    },
+    {
+      "id": "ubuntu-20-glibc-x64",
+      "input": { "runtime": { "platform": "linux", "arch": "x64" }, "nativeArch": "x64", "osRelease": { "ID": "ubuntu", "VERSION_ID": "20.04" }, "processReport": { "header": { "glibcVersionRuntime": "2.31" } }, "kernelRelease": "5.15.0-generic", "procVersion": "Linux version" },
+      "expected": { "family": "linux", "runtimePlatform": "linux", "runtimeArch": "x64", "nativeArch": "x64", "isWsl": false, "distribution": "ubuntu", "version": "20.04", "libc": "glibc", "warnings": [] }
+    },
+    {
+      "id": "ubuntu-20-glibc-arm64",
+      "input": { "runtime": { "platform": "linux", "arch": "arm64" }, "nativeArch": "arm64", "osRelease": { "ID": "ubuntu", "VERSION_ID": "20.4" }, "processReport": { "header": { "glibcVersionRuntime": "2.31" } } },
+      "expected": { "family": "linux", "runtimePlatform": "linux", "runtimeArch": "arm64", "nativeArch": "arm64", "isWsl": false, "distribution": "ubuntu", "version": "20.4", "libc": "glibc", "warnings": [] }
+    },
+    {
+      "id": "ubuntu-24-glibc",
+      "input": { "runtime": { "platform": "linux", "arch": "x64" }, "nativeArch": "x64", "osRelease": { "ID": "ubuntu", "VERSION_ID": "24.04" }, "processReport": { "header": { "glibcVersionRuntime": "2.39" } } },
+      "expected": { "family": "linux", "runtimePlatform": "linux", "runtimeArch": "x64", "nativeArch": "x64", "isWsl": false, "distribution": "ubuntu", "version": "24.04", "libc": "glibc", "warnings": [] }
+    },
+    {
+      "id": "debian-10-glibc-x64",
+      "input": { "runtime": { "platform": "linux", "arch": "x64" }, "nativeArch": "x64", "osRelease": { "ID": "debian", "VERSION_ID": "10" }, "processReport": { "header": { "glibcVersionRuntime": "2.28" } } },
+      "expected": { "family": "linux", "runtimePlatform": "linux", "runtimeArch": "x64", "nativeArch": "x64", "isWsl": false, "distribution": "debian", "version": "10", "libc": "glibc", "warnings": [] }
+    },
+    {
+      "id": "debian-12-glibc-arm64",
+      "input": { "runtime": { "platform": "linux", "arch": "arm64" }, "nativeArch": "arm64", "osRelease": { "ID": "debian", "VERSION_ID": "12" }, "processReport": { "header": { "glibcVersionRuntime": "2.36" } } },
+      "expected": { "family": "linux", "runtimePlatform": "linux", "runtimeArch": "arm64", "nativeArch": "arm64", "isWsl": false, "distribution": "debian", "version": "12", "libc": "glibc", "warnings": [] }
+    },
+    {
+      "id": "wsl1-ubuntu-x64",
+      "input": { "runtime": { "platform": "linux", "arch": "x64" }, "nativeArch": "x64", "osRelease": { "ID": "ubuntu", "VERSION_ID": "20.04" }, "processReport": { "header": { "glibcVersionRuntime": "2.31" } }, "kernelRelease": "4.4.0-19041-Microsoft", "procVersion": "Linux version Microsoft" },
+      "expected": { "family": "linux", "runtimePlatform": "linux", "runtimeArch": "x64", "nativeArch": "x64", "isWsl": true, "wslVersion": 1, "distribution": "ubuntu", "version": "20.04", "libc": "glibc", "warnings": [] }
+    },
+    {
+      "id": "wsl2-debian-arm64",
+      "input": { "runtime": { "platform": "linux", "arch": "arm64" }, "nativeArch": "arm64", "osRelease": { "ID": "debian", "VERSION_ID": "10" }, "processReport": { "header": { "glibcVersionRuntime": "2.28" } }, "kernelRelease": "5.15.153.1-microsoft-standard-WSL2", "procVersion": "Linux version Microsoft" },
+      "expected": { "family": "linux", "runtimePlatform": "linux", "runtimeArch": "arm64", "nativeArch": "arm64", "isWsl": true, "wslVersion": 2, "distribution": "debian", "version": "10", "libc": "glibc", "warnings": [] }
+    },
+    {
+      "id": "wsl-runtime-native-mismatch",
+      "input": { "runtime": { "platform": "linux", "arch": "x64" }, "nativeArch": "arm64", "osRelease": { "ID": "ubuntu", "VERSION_ID": "22.04" }, "processReport": { "header": { "glibcVersionRuntime": "2.35" } }, "kernelRelease": "5.15.153.1-microsoft-standard-WSL2" },
+      "expected": { "family": "linux", "runtimePlatform": "linux", "runtimeArch": "x64", "nativeArch": "arm64", "isWsl": true, "wslVersion": 2, "distribution": "ubuntu", "version": "22.04", "libc": "glibc", "warnings": [{ "code": "RUNTIME_NATIVE_ARCH_MISMATCH", "runtimeArch": "x64", "nativeArch": "arm64" }] }
+    }
+  ],
+  "unsupported": [
+    { "id": "win-pre-1809", "input": { "runtime": { "platform": "win32", "arch": "x64" }, "windowsVersion": { "major": 10, "minor": 0, "build": 17762 } } },
+    { "id": "win-8.1", "input": { "runtime": { "platform": "win32", "arch": "x64" }, "windowsVersion": { "major": 6, "minor": 3, "build": 9600 } } },
+    { "id": "win-ia32", "input": { "runtime": { "platform": "win32", "arch": "ia32" }, "windowsVersion": { "major": 10, "minor": 0, "build": 19045 } } },
+    { "id": "mac-12", "input": { "runtime": { "platform": "darwin", "arch": "x64" }, "macVersion": "12.6.9" } },
+    { "id": "mac-ia32", "input": { "runtime": { "platform": "darwin", "arch": "ia32" }, "macVersion": "13.0.0" } },
+    { "id": "ubuntu-19", "input": { "runtime": { "platform": "linux", "arch": "x64" }, "osRelease": { "ID": "ubuntu", "VERSION_ID": "19.10" }, "processReport": { "header": { "glibcVersionRuntime": "2.30" } } } },
+    { "id": "debian-9", "input": { "runtime": { "platform": "linux", "arch": "x64" }, "osRelease": { "ID": "debian", "VERSION_ID": "9" }, "processReport": { "header": { "glibcVersionRuntime": "2.24" } } } },
+    { "id": "linux-musl", "input": { "runtime": { "platform": "linux", "arch": "x64" }, "osRelease": { "ID": "ubuntu", "VERSION_ID": "22.04" }, "processReport": { "header": { "glibcVersionRuntime": "" } } } },
+    { "id": "linux-unknown-distro", "input": { "runtime": { "platform": "linux", "arch": "x64" }, "osRelease": { "ID": "fedora", "VERSION_ID": "40" }, "processReport": { "header": { "glibcVersionRuntime": "2.39" } } } },
+    { "id": "linux-missing-os-release", "input": { "runtime": { "platform": "linux", "arch": "x64" }, "processReport": { "header": { "glibcVersionRuntime": "2.39" } } } },
+    { "id": "linux-riscv64", "input": { "runtime": { "platform": "linux", "arch": "riscv64" }, "osRelease": { "ID": "ubuntu", "VERSION_ID": "22.04" }, "processReport": { "header": { "glibcVersionRuntime": "2.35" } } } },
+    { "id": "freebsd-x64", "input": { "runtime": { "platform": "freebsd", "arch": "x64" } } }
+  ]
+}

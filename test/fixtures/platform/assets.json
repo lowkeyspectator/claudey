@@ -1,0 +1,37 @@
+{
+  "valid": [
+    {
+      "input": { "version": "7.2.130", "platform": { "runtimePlatform": "win32", "runtimeArch": "x64", "nativeArch": "x64" } },
+      "expected": { "version": "7.2.130", "runtimePlatform": "win32", "runtimeArch": "x64", "archiveName": "CLIProxyAPI_7.2.130_windows_amd64.zip", "archiveKind": "zip" }
+    },
+    {
+      "input": { "version": "v7.2.130", "platform": { "runtimePlatform": "win32", "runtimeArch": "arm64", "nativeArch": "arm64" } },
+      "expected": { "version": "7.2.130", "runtimePlatform": "win32", "runtimeArch": "arm64", "archiveName": "CLIProxyAPI_7.2.130_windows_aarch64.zip", "archiveKind": "zip" }
+    },
+    {
+      "input": { "version": "7.2.130", "platform": { "runtimePlatform": "darwin", "runtimeArch": "x64", "nativeArch": "x64" } },
+      "expected": { "version": "7.2.130", "runtimePlatform": "darwin", "runtimeArch": "x64", "archiveName": "CLIProxyAPI_7.2.130_darwin_amd64.tar.gz", "archiveKind": "tar.gz" }
+    },
+    {
+      "input": { "version": "v7.2.130", "platform": { "runtimePlatform": "darwin", "runtimeArch": "arm64", "nativeArch": "arm64" } },
+      "expected": { "version": "7.2.130", "runtimePlatform": "darwin", "runtimeArch": "arm64", "archiveName": "CLIProxyAPI_7.2.130_darwin_aarch64.tar.gz", "archiveKind": "tar.gz" }
+    },
+    {
+      "input": { "version": "7.2.130", "platform": { "runtimePlatform": "linux", "runtimeArch": "x64", "nativeArch": "x64" } },
+      "expected": { "version": "7.2.130", "runtimePlatform": "linux", "runtimeArch": "x64", "archiveName": "CLIProxyAPI_7.2.130_linux_amd64.tar.gz", "archiveKind": "tar.gz" }
+    },
+    {
+      "input": { "version": "v7.2.130", "platform": { "runtimePlatform": "linux", "runtimeArch": "arm64", "nativeArch": "arm64" } },
+      "expected": { "version": "7.2.130", "runtimePlatform": "linux", "runtimeArch": "arm64", "archiveName": "CLIProxyAPI_7.2.130_linux_aarch64.tar.gz", "archiveKind": "tar.gz" }
+    }
+  ],
+  "invalid": [
+    { "version": "v", "platform": { "runtimePlatform": "win32", "runtimeArch": "x64" } },
+    { "version": "7.2", "platform": { "runtimePlatform": "win32", "runtimeArch": "x64" } },
+    { "version": "7.2.130-beta.1", "platform": { "runtimePlatform": "win32", "runtimeArch": "x64" } },
+    { "version": "7.2.130", "platform": { "runtimePlatform": "win32", "runtimeArch": "ia32" } },
+    { "version": "7.2.130", "platform": { "runtimePlatform": "linux", "runtimeArch": "riscv64" } },
+    { "version": "7.2.130", "platform": { "runtimePlatform": "android", "runtimeArch": "arm64" } },
+    { "version": "7.2.130", "platform": { "runtimePlatform": "freebsd", "runtimeArch": "x64" } }
+  ]
+}
