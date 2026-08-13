@@ -12,6 +12,7 @@ $requestStream = $null
 $archiveStream = $null
 $zip = $null
 $destinationIdentity = $null
+$directoryIdentities = @{}
 $invariant = [Globalization.CultureInfo]::InvariantCulture
 [Threading.Thread]::CurrentThread.CurrentCulture = $invariant
 [Threading.Thread]::CurrentThread.CurrentUICulture = $invariant
@@ -67,7 +68,85 @@ public static class ClaudexArchiveNativeIdentity {
         }
         if ((info.FileAttributes & 0x400) != 0) { handle.Dispose(); throw new IOException("Directory is a reparse point."); }
         ulong fileId = ((ulong)info.FileIndexHigh << 32) | info.FileIndexLow;
+        return DescribeDirectory(handle);
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct UNICODE_STRING { public ushort Length; public ushort MaximumLength; public IntPtr Buffer; }
+    [StructLayout(LayoutKind.Sequential)]
+    private struct OBJECT_ATTRIBUTES {
+        public uint Length; public IntPtr RootDirectory; public IntPtr ObjectName; public uint Attributes;
+        public IntPtr SecurityDescriptor; public IntPtr SecurityQualityOfService;
+    }
+    [StructLayout(LayoutKind.Sequential)]
+    private struct IO_STATUS_BLOCK { public IntPtr Status; public UIntPtr Information; }
+    [DllImport("ntdll.dll")]
+    private static extern int NtCreateFile(out IntPtr fileHandle, uint desiredAccess, ref OBJECT_ATTRIBUTES attributes,
+        out IO_STATUS_BLOCK ioStatus, IntPtr allocationSize, uint fileAttributes, uint shareAccess,
+        uint createDisposition, uint createOptions, IntPtr eaBuffer, uint eaLength);
+
+    private static ClaudexArchiveDirectoryIdentity DescribeDirectory(SafeFileHandle handle) {
+        BY_HANDLE_FILE_INFORMATION info;
+        if (!GetFileInformationByHandle(handle, out info)) {
+            int code = Marshal.GetLastWin32Error(); handle.Dispose();
+            throw new IOException("Directory identity query failed.", new System.ComponentModel.Win32Exception(code));
+        }
+        if ((info.FileAttributes & 0x400) != 0 || (info.FileAttributes & 0x10) == 0) {
+            handle.Dispose(); throw new IOException("Created directory is unsafe.");
+        }
+        ulong fileId = ((ulong)info.FileIndexHigh << 32) | info.FileIndexLow;
         return new ClaudexArchiveDirectoryIdentity(handle, info.VolumeSerialNumber, fileId);
+    }
+
+    private static SafeFileHandle CreateRelative(SafeFileHandle parent, string leaf, uint access, uint options) {
+        if (parent == null || parent.IsInvalid || parent.IsClosed || String.IsNullOrEmpty(leaf) ||
+            leaf == "." || leaf == ".." || leaf.IndexOf((char)92) >= 0 || leaf.IndexOf('/') >= 0 ||
+            leaf.IndexOf(':') >= 0 || leaf.IndexOf((char)0) >= 0) {
+            throw new IOException("Relative create input is invalid.");
+        }
+        IntPtr nameBuffer = Marshal.StringToHGlobalUni(leaf);
+        IntPtr nameStruct = IntPtr.Zero;
+        try {
+            UNICODE_STRING name = new UNICODE_STRING {
+                Length = checked((ushort)(leaf.Length * 2)),
+                MaximumLength = checked((ushort)((leaf.Length + 1) * 2)),
+                Buffer = nameBuffer
+            };
+            nameStruct = Marshal.AllocHGlobal(Marshal.SizeOf(typeof(UNICODE_STRING)));
+            Marshal.StructureToPtr(name, nameStruct, false);
+            OBJECT_ATTRIBUTES attributes = new OBJECT_ATTRIBUTES {
+                Length = (uint)Marshal.SizeOf(typeof(OBJECT_ATTRIBUTES)),
+                RootDirectory = parent.DangerousGetHandle(), ObjectName = nameStruct, Attributes = 0x40,
+                SecurityDescriptor = IntPtr.Zero, SecurityQualityOfService = IntPtr.Zero
+            };
+            IO_STATUS_BLOCK statusBlock;
+            IntPtr raw;
+            int status = NtCreateFile(out raw, access, ref attributes, out statusBlock, IntPtr.Zero, 0,
+                0x1 | 0x2, 2, options | 0x20 | 0x00200000, IntPtr.Zero, 0);
+            if (status < 0 || raw == IntPtr.Zero || raw == new IntPtr(-1)) {
+                throw new IOException("Handle-relative create failed: 0x" + status.ToString("x8"));
+            }
+            return new SafeFileHandle(raw, true);
+        } finally {
+            if (nameStruct != IntPtr.Zero) Marshal.FreeHGlobal(nameStruct);
+            Marshal.FreeHGlobal(nameBuffer);
+        }
+    }
+
+    public static ClaudexArchiveDirectoryIdentity CreateDirectoryRelative(SafeFileHandle parent, string leaf) {
+        const uint FILE_LIST_DIRECTORY = 0x0001;
+        const uint FILE_READ_ATTRIBUTES = 0x0080;
+        const uint SYNCHRONIZE = 0x00100000;
+        const uint FILE_DIRECTORY_FILE = 0x00000001;
+        return DescribeDirectory(CreateRelative(parent, leaf, FILE_LIST_DIRECTORY | FILE_READ_ATTRIBUTES | SYNCHRONIZE, FILE_DIRECTORY_FILE));
+    }
+
+    public static SafeFileHandle CreateFileRelative(SafeFileHandle parent, string leaf) {
+        const uint GENERIC_WRITE = 0x40000000;
+        const uint FILE_READ_ATTRIBUTES = 0x0080;
+        const uint SYNCHRONIZE = 0x00100000;
+        const uint FILE_NON_DIRECTORY_FILE = 0x00000040;
+        return CreateRelative(parent, leaf, GENERIC_WRITE | FILE_READ_ATTRIBUTES | SYNCHRONIZE, FILE_NON_DIRECTORY_FILE);
     }
 }
 '@
@@ -142,6 +221,25 @@ function Assert-DirectoryIdentity([string]$LiteralPath, [object]$Identity) {
     } finally { $current.native.Dispose() }
 }
 
+function Directory-Key([string]$LiteralPath) {
+    return ([IO.Path]::GetFullPath($LiteralPath)).TrimEnd('').ToUpperInvariant()
+}
+
+function Get-HeldDirectory([string]$LiteralPath) {
+    $key = Directory-Key $LiteralPath
+    if (-not $directoryIdentities.ContainsKey($key)) { throw 'Unplanned parent directory.' }
+    $held = $directoryIdentities[$key]
+    [void](Assert-DirectoryIdentity $LiteralPath $held)
+    return $held
+}
+
+function Dispose-HeldDirectories {
+    foreach ($held in @($directoryIdentities.Values)) {
+        if ($null -ne $held -and $null -ne $held.native) { $held.native.Dispose() }
+    }
+    $directoryIdentities.Clear()
+}
+
 try {
     $safeRequest = Assert-PrivateRequest $RequestPath
     if ($ExpectedRequestSha256 -notmatch '^[a-f0-9]{64}$') { throw 'Request digest.' }
@@ -165,6 +263,7 @@ try {
     if ($ExpectedDestinationVolume -notmatch '^(0|[1-9][0-9]*)$' -or $ExpectedDestinationFileId -notmatch '^(0|[1-9][0-9]*)$') { throw 'Destination identity.' }
     $destinationIdentity = Get-DirectoryIdentity $destination
     if ([string]$destinationIdentity.volume -ne $ExpectedDestinationVolume -or [string]$destinationIdentity.fileId -ne $ExpectedDestinationFileId) { throw 'Destination identity.' }
+    $directoryIdentities[(Directory-Key $destination)] = $destinationIdentity
     if (@((Get-Item -LiteralPath $destination -Force).EnumerateFileSystemInfos()).Count -ne 0) { throw 'Destination.' }
     $archiveStream = [IO.File]::Open($archive, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::Read)
     $sha = [Security.Cryptography.SHA256]::Create()
@@ -194,23 +293,33 @@ try {
         [void](Assert-DirectoryIdentity $destination $destinationIdentity)
         if (-not $zipEntries.ContainsKey($planned.path)) { throw 'ZIP entries.' }
         $zipEntry = $zipEntries[$planned.path]
-        $target = [IO.Path]::GetFullPath((Join-Path $destination $planned.path.Replace('/', '\')))
+        $target = [IO.Path]::GetFullPath((Join-Path $destination $planned.path.Replace('/', [IO.Path]::DirectorySeparatorChar)))
         [void](Relative-Forward $destination $target)
+        $parent = [IO.Path]::GetDirectoryName($target)
+        $parentIdentity = Get-HeldDirectory $parent
+        [void](Assert-DirectoryIdentity $parent $parentIdentity)
         if ($planned.type -eq 'directory') {
             if ($zipEntry.Length -ne 0) { throw 'ZIP directory.' }
             [void][IO.Directory]::CreateDirectory($target)
+            $createdIdentity = Get-DirectoryIdentity $target
+            $directoryIdentities[(Directory-Key $target)] = $createdIdentity
+            [void](Assert-DirectoryIdentity $parent $parentIdentity)
+            [void](Assert-DirectoryIdentity $target $createdIdentity)
         } else {
-            $parent = [IO.Path]::GetDirectoryName($target)
-            [void](Assert-NoReparse $parent)
+            [void](Assert-DirectoryIdentity $parent $parentIdentity)
             $inputStream = $zipEntry.Open()
-            $outputStream = [IO.File]::Open($target, [IO.FileMode]::CreateNew, [IO.FileAccess]::Write, [IO.FileShare]::None)
+            $leaf = [IO.Path]::GetFileName($target)
+            $fileHandle = [ClaudexArchiveNativeIdentity]::CreateFileRelative($parentIdentity.native.Handle, $leaf)
+            $outputStream = [IO.FileStream]::new($fileHandle, [IO.FileAccess]::Write, 4096, $false)
             try {
+                [void](Assert-DirectoryIdentity $parent $parentIdentity)
                 $inputStream.CopyTo($outputStream)
                 $outputStream.Flush($true)
             } finally {
                 $outputStream.Dispose()
                 $inputStream.Dispose()
             }
+            [void](Assert-DirectoryIdentity $parent $parentIdentity)
         }
         [void](Assert-DirectoryIdentity $destination $destinationIdentity)
         [void](Assert-NoReparse $target)
@@ -241,14 +350,15 @@ try {
     [void](Assert-DirectoryIdentity $destination $destinationIdentity)
     $requestStream.Dispose()
     $requestStream = $null
-    $destinationIdentity.native.Dispose()
+    Dispose-HeldDirectories
     $destinationIdentity = $null
     Write-Response ([ordered]@{
         ok = $true; schemaVersion = 1; requestId = $request.requestId
         result = [ordered]@{ canonicalDestination = $destination; entryCount = $actual.Count; expandedBytes = $expanded; entries = $actual }
     }) 0
 } catch {
-    if ($null -ne $destinationIdentity) { $destinationIdentity.native.Dispose() }
+    Dispose-HeldDirectories
+    if ($null -ne $destinationIdentity -and -not $destinationIdentity.native.Handle.IsClosed) { $destinationIdentity.native.Dispose() }
     if ($null -ne $requestStream) { $requestStream.Dispose() }
     if ($null -ne $zip) { $zip.Dispose() }
     if ($null -ne $archiveStream) { $archiveStream.Dispose() }

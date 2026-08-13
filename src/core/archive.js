@@ -30,16 +30,41 @@ const TAR_BLOCK_BYTES = 512;
 const ZIP_ALLOWED_FLAGS = 0x0800;
 const FIXED_POWERSHELL_PATH = 'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe';
 const WINDOWS_HELPER_BOOTSTRAP = String.raw`$ErrorActionPreference = 'Stop'
+$powershellSha256 = $env:CLAUDEX_ARCHIVE_POWERSHELL_SHA256
 $helperPath = $env:CLAUDEX_ARCHIVE_HELPER_PATH
 $helperSha256 = $env:CLAUDEX_ARCHIVE_HELPER_SHA256
 $requestPath = $env:CLAUDEX_ARCHIVE_REQUEST_PATH
 $requestSha256 = $env:CLAUDEX_ARCHIVE_REQUEST_SHA256
 $destinationVolume = $env:CLAUDEX_ARCHIVE_DESTINATION_VOLUME
 $destinationFileId = $env:CLAUDEX_ARCHIVE_DESTINATION_FILE_ID
-if ($helperSha256 -notmatch '^[a-f0-9]{64}$' -or $requestSha256 -notmatch '^[a-f0-9]{64}$' -or
+if ($powershellSha256 -notmatch '^[a-f0-9]{64}$' -or $helperSha256 -notmatch '^[a-f0-9]{64}$' -or $requestSha256 -notmatch '^[a-f0-9]{64}$' -or
     $destinationVolume -notmatch '^(0|[1-9][0-9]*)$' -or $destinationFileId -notmatch '^(0|[1-9][0-9]*)$') { exit 1 }
+
+$selfStream = $null
 $stream = $null
 try {
+    $selfPath = [Diagnostics.Process]::GetCurrentProcess().MainModule.FileName
+    $fixedSelf = [IO.Path]::Combine($env:SystemRoot, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe')
+    if (-not $selfPath.Equals($fixedSelf, [StringComparison]::OrdinalIgnoreCase)) { throw 'PowerShell path.' }
+    $acl = Get-Acl -LiteralPath $selfPath
+    $currentSid = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+    $ownerSid = $acl.GetOwner([Security.Principal.SecurityIdentifier]).Value
+    if ($ownerSid -eq $currentSid) { throw 'PowerShell owner.' }
+    $unsafeRights = [Security.AccessControl.FileSystemRights]::WriteData -bor [Security.AccessControl.FileSystemRights]::AppendData -bor
+        [Security.AccessControl.FileSystemRights]::WriteExtendedAttributes -bor [Security.AccessControl.FileSystemRights]::WriteAttributes -bor
+        [Security.AccessControl.FileSystemRights]::DeleteSubdirectoriesAndFiles -bor [Security.AccessControl.FileSystemRights]::Delete -bor
+        [Security.AccessControl.FileSystemRights]::ChangePermissions -bor [Security.AccessControl.FileSystemRights]::TakeOwnership
+    $untrustedSids = @($currentSid, 'S-1-1-0', 'S-1-5-11', 'S-1-5-32-545')
+    foreach ($rule in @($acl.GetAccessRules($true, $true, [Security.Principal.SecurityIdentifier]))) {
+        if ($rule.AccessControlType -eq [Security.AccessControl.AccessControlType]::Allow -and
+            $rule.IdentityReference.Value -in $untrustedSids -and ($rule.FileSystemRights -band $unsafeRights) -ne 0) {
+            throw 'PowerShell ACL.'
+        }
+    }
+    $selfStream = [IO.File]::Open($selfPath, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::Read)
+    $selfSha = [Security.Cryptography.SHA256]::Create()
+    try { $actualSelf = ([BitConverter]::ToString($selfSha.ComputeHash($selfStream))).Replace('-', '').ToLowerInvariant() } finally { $selfSha.Dispose() }
+    if ($actualSelf -ne $powershellSha256) { exit 1 }
     $stream = [IO.File]::Open($helperPath, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::Read)
     $sha = [Security.Cryptography.SHA256]::Create()
     try { $actual = ([BitConverter]::ToString($sha.ComputeHash($stream))).Replace('-', '').ToLowerInvariant() } finally { $sha.Dispose() }
@@ -48,13 +73,76 @@ try {
     $reader = [IO.StreamReader]::new($stream, [Text.UTF8Encoding]::new($false), $true, 4096, $true)
     try { $scriptText = $reader.ReadToEnd() } finally { $reader.Dispose() }
     & ([ScriptBlock]::Create($scriptText)) -RequestPath $requestPath -ExpectedRequestSha256 $requestSha256 -ExpectedDestinationVolume $destinationVolume -ExpectedDestinationFileId $destinationFileId
-} catch { exit 1 } finally { if ($null -ne $stream) { $stream.Dispose() } }`;
+} catch { exit 1 } finally { if ($null -ne $stream) { $stream.Dispose() }; if ($null -ne $selfStream) { $selfStream.Dispose() } }`;
 const WINDOWS_HELPER_BOOTSTRAP_ENCODED = Buffer.from(WINDOWS_HELPER_BOOTSTRAP, 'utf16le').toString('base64');
+const WINDOWS_CANDIDATE_PIN = String.raw`$ErrorActionPreference = 'Stop'
+$CandidatePath = $env:CLAUDEX_CANDIDATE_PATH
+$ExpectedVolume = $env:CLAUDEX_CANDIDATE_VOLUME
+$ExpectedFileId = $env:CLAUDEX_CANDIDATE_FILE_ID
+$ExpectedSize = $env:CLAUDEX_CANDIDATE_SIZE
+$ExpectedSha256 = $env:CLAUDEX_CANDIDATE_SHA256
+$ExpectedPowerShellSha256 = $env:CLAUDEX_CANDIDATE_POWERSHELL_SHA256
+Add-Type @'
+using System;
+using System.IO;
+using System.Runtime.InteropServices;
+using Microsoft.Win32.SafeHandles;
+public static class ClaudexCandidateIdentity {
+  [StructLayout(LayoutKind.Sequential)] public struct Info {
+    public uint Attributes; public System.Runtime.InteropServices.ComTypes.FILETIME Creation;
+    public System.Runtime.InteropServices.ComTypes.FILETIME Access; public System.Runtime.InteropServices.ComTypes.FILETIME Write;
+    public uint Volume; public uint SizeHigh; public uint SizeLow; public uint Links; public uint IndexHigh; public uint IndexLow;
+  }
+  [DllImport("kernel32.dll", SetLastError=true)] [return: MarshalAs(UnmanagedType.Bool)]
+  public static extern bool GetFileInformationByHandle(SafeFileHandle handle, out Info info);
+}
+'@
+
+$selfStream = $null
+$stream = $null
+try {
+  if ($ExpectedPowerShellSha256 -notmatch '^[a-f0-9]{64}$') { throw 'PowerShell digest.' }
+  $selfPath = [Diagnostics.Process]::GetCurrentProcess().MainModule.FileName
+  $fixedSelf = [IO.Path]::Combine($env:SystemRoot, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe')
+  if (-not $selfPath.Equals($fixedSelf, [StringComparison]::OrdinalIgnoreCase)) { throw 'PowerShell path.' }
+  $acl = Get-Acl -LiteralPath $selfPath
+  $currentSid = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+  $ownerSid = $acl.GetOwner([Security.Principal.SecurityIdentifier]).Value
+  if ($ownerSid -eq $currentSid) { throw 'PowerShell owner.' }
+  $unsafeRights = [Security.AccessControl.FileSystemRights]::WriteData -bor [Security.AccessControl.FileSystemRights]::AppendData -bor
+      [Security.AccessControl.FileSystemRights]::WriteExtendedAttributes -bor [Security.AccessControl.FileSystemRights]::WriteAttributes -bor
+      [Security.AccessControl.FileSystemRights]::DeleteSubdirectoriesAndFiles -bor [Security.AccessControl.FileSystemRights]::Delete -bor
+      [Security.AccessControl.FileSystemRights]::ChangePermissions -bor [Security.AccessControl.FileSystemRights]::TakeOwnership
+  $untrustedSids = @($currentSid, 'S-1-1-0', 'S-1-5-11', 'S-1-5-32-545')
+  foreach ($rule in @($acl.GetAccessRules($true, $true, [Security.Principal.SecurityIdentifier]))) {
+    if ($rule.AccessControlType -eq [Security.AccessControl.AccessControlType]::Allow -and
+      $rule.IdentityReference.Value -in $untrustedSids -and ($rule.FileSystemRights -band $unsafeRights) -ne 0) {
+      throw 'PowerShell ACL.'
+    }
+  }
+  $selfStream = [IO.File]::Open($selfPath, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::Read)
+  $selfSha = [Security.Cryptography.SHA256]::Create()
+  try { $actualSelf = ([BitConverter]::ToString($selfSha.ComputeHash($selfStream))).Replace('-', '').ToLowerInvariant() } finally { $selfSha.Dispose() }
+  if ($actualSelf -ne $ExpectedPowerShellSha256) { throw 'PowerShell digest.' }
+  if ($ExpectedVolume -notmatch '^(0|[1-9][0-9]*)$' -or $ExpectedFileId -notmatch '^(0|[1-9][0-9]*)$' -or
+      $ExpectedSize -notmatch '^(0|[1-9][0-9]*)$' -or $ExpectedSha256 -notmatch '^[a-f0-9]{64}$') { throw 'Input.' }
+  $stream = [IO.File]::Open($CandidatePath, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::Read)
+  $info = New-Object ClaudexCandidateIdentity+Info
+  if (-not [ClaudexCandidateIdentity]::GetFileInformationByHandle($stream.SafeFileHandle, [ref]$info)) { throw 'Identity.' }
+  $fileId = ([uint64]$info.IndexHigh -shl 32) -bor [uint64]$info.IndexLow
+  if ([string]$info.Volume -ne $ExpectedVolume -or [string]$fileId -ne $ExpectedFileId -or [string]$stream.Length -ne $ExpectedSize) { throw 'Identity.' }
+  $sha = [Security.Cryptography.SHA256]::Create()
+  try { $actual = ([BitConverter]::ToString($sha.ComputeHash($stream))).Replace('-', '').ToLowerInvariant() } finally { $sha.Dispose() }
+  if ($actual -ne $ExpectedSha256) { throw 'Digest.' }
+  [Console]::Out.WriteLine('CLAUDEX_CANDIDATE_PIN_READY'); [Console]::Out.Flush()
+  if ([Console]::In.ReadLine() -ne 'release') { throw 'Protocol.' }
+} catch { [Console]::Error.Write('Candidate pin refused.'); exit 1 } finally { if ($null -ne $stream) { $stream.Dispose() }; if ($null -ne $selfStream) { $selfStream.Dispose() } }`;
+const WINDOWS_CANDIDATE_PIN_ENCODED = Buffer.from(WINDOWS_CANDIDATE_PIN, 'utf16le').toString('base64');
 export const ARCHIVE_HELPER_PATH = fileURLToPath(new URL('../../scripts/windows/archive-helper.ps1', import.meta.url));
 const FIXED_POSIX_TAR_PATHS = new Set(['/usr/bin/tar', '/bin/tar']);
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const validatedPlans = new WeakSet();
-const extractedCandidates = new WeakSet();
+const extractedCandidates = new WeakMap();
 
 function unsafe(message = 'The release archive is unsafe.', cause) {
   return new ClaudexError('ARCHIVE_UNSAFE', message, cause ? { cause } : undefined);
@@ -782,8 +870,22 @@ async function runProcess(command, args, options, adapter) {
   return result;
 }
 
+async function verifyFixedAncestorChain(exactPath, fsApi) {
+  const normalized = path.normalize(exactPath);
+  const root = path.parse(normalized).root;
+  let current = root;
+  for (const segment of normalized.slice(root.length).split(path.sep).filter(Boolean)) {
+    current = path.join(current, segment);
+    const stats = await fsApi.lstat(current);
+    if (stats.isSymbolicLink?.() || stats.isReparsePoint === true) {
+      throw capability('A fixed archive extractor ancestor is unsafe.');
+    }
+  }
+}
+
 async function verifyFixedFile(exactPath, fsApi, missingMessage) {
   try {
+    await verifyFixedAncestorChain(exactPath, fsApi);
     const stats = await fsApi.lstat(exactPath);
     const canonical = await fsApi.realpath(exactPath);
     if (!stats.isFile?.() || stats.isSymbolicLink?.() || stats.isReparsePoint === true || !sameHostPath(canonical, exactPath)) {
@@ -834,6 +936,28 @@ async function assertExactFile(target, expectedIdentity, fsApi) {
     throw safety('A protected archive file could not be rechecked.', cause);
   }
 }
+async function assertExactNativeFile(target, expectedExactIdentity, fsApi) {
+  const stats = await assertExactFile(target, undefined, fsApi);
+  const exactStats = await fsApi.lstat(target, { bigint: true });
+  if (!sameExactIdentity(exactStats, expectedExactIdentity)) {
+    throw safety('A protected archive file changed native filesystem identity.');
+  }
+  return stats;
+}
+
+async function fixedExactFileDigest(target, expectedExactIdentity, fsApi) {
+  const before = await assertExactNativeFile(target, expectedExactIdentity, fsApi);
+  if (!Number.isSafeInteger(before.size) || before.size <= 0 || before.size > 16777216) {
+    throw safety('A protected archive file has an unsafe size.');
+  }
+  const bytes = await fsApi.readFile(target);
+  const after = await assertExactNativeFile(target, expectedExactIdentity, fsApi);
+  if (after.size !== before.size || bytes.length !== before.size) {
+    throw safety('A protected archive file changed while being pinned.');
+  }
+  return digest(bytes);
+}
+
 async function fixedFileDigest(target, expectedIdentity, fsApi) {
   const before = await assertExactFile(target, expectedIdentity, fsApi);
   if (!Number.isSafeInteger(before.size) || before.size <= 0 || before.size > 16777216) {
@@ -985,6 +1109,8 @@ async function runWindowsExtraction(plan, staging, adapter) {
   if (tools.powershellPath !== FIXED_POWERSHELL_PATH || tools.helperPath !== ARCHIVE_HELPER_PATH) {
     throw capability('The Windows archive extractor identity is invalid.');
   }
+  await verifyFixedAncestorChain(tools.powershellPath, fsApi);
+  await verifyFixedAncestorChain(tools.helperPath, fsApi);
   const toolIdentities = {
     powershell: identity(await assertExactFile(tools.powershellPath, undefined, fsApi)),
     helper: identity(await assertExactFile(tools.helperPath, undefined, fsApi))
@@ -1010,7 +1136,8 @@ async function runWindowsExtraction(plan, staging, adapter) {
     if (!storage || typeof storage.requestPath !== 'string' || !path.isAbsolute(storage.requestPath) || typeof storage.cleanup !== 'function') {
       throw safety('The archive helper request storage is invalid.');
     }
-    requestIdentity = identity(await assertExactFile(storage.requestPath, undefined, fsApi));
+    await assertExactFile(storage.requestPath, undefined, fsApi);
+    requestIdentity = exactIdentity(await fsApi.lstat(storage.requestPath, { bigint: true }));
     await adapter.beforeExtractorSpawn?.({ plan, stagingDir: staging.target, requestPath: storage.requestPath, tools });
     if (!sameDigest(await fixedFileDigest(tools.powershellPath, toolIdentities.powershell, fsApi), toolDigests.powershell)
       || !sameDigest(await fixedFileDigest(tools.helperPath, toolIdentities.helper, fsApi), toolDigests.helper)) {
@@ -1018,7 +1145,7 @@ async function runWindowsExtraction(plan, staging, adapter) {
     }
     await recheckArchive(plan, fsApi);
     await assertExactDirectory(staging.target, staging.identity, fsApi, { mode: 0o700, parent: staging.rootStats, enforceMode: plan.targetPlatform !== 'win32' });
-    await assertExactFile(storage.requestPath, requestIdentity, fsApi);
+    await assertExactNativeFile(storage.requestPath, requestIdentity, fsApi);
     await adapter.beforeLaunchIdentityValidation?.({
       plan, stagingDir: staging.target, requestPath: storage.requestPath, tools, toolIdentities, requestSha256
     });
@@ -1028,9 +1155,10 @@ async function runWindowsExtraction(plan, staging, adapter) {
     }
     await recheckArchive(plan, fsApi);
     await assertExactDirectory(staging.target, staging.identity, fsApi, { mode: 0o700, parent: staging.rootStats, enforceMode: plan.targetPlatform !== 'win32' });
-    await assertExactFile(storage.requestPath, requestIdentity, fsApi);
+    await assertExactNativeFile(storage.requestPath, requestIdentity, fsApi);
     const helperEnvironment = {
       ...process.env,
+      CLAUDEX_ARCHIVE_POWERSHELL_SHA256: toolDigests.powershell,
       CLAUDEX_ARCHIVE_HELPER_PATH: tools.helperPath,
       CLAUDEX_ARCHIVE_HELPER_SHA256: toolDigests.helper,
       CLAUDEX_ARCHIVE_REQUEST_PATH: storage.requestPath,
@@ -1042,6 +1170,15 @@ async function runWindowsExtraction(plan, staging, adapter) {
       plan, stagingDir: staging.target, requestPath: storage.requestPath, tools, toolIdentities,
       requestSha256, helperEnvironment
     });
+    if (!sameDigest(await fixedFileDigest(tools.powershellPath, toolIdentities.powershell, fsApi), toolDigests.powershell)
+      || !sameDigest(await fixedFileDigest(tools.helperPath, toolIdentities.helper, fsApi), toolDigests.helper)
+      || !sameDigest(await fixedExactFileDigest(storage.requestPath, requestIdentity, fsApi), requestSha256)) {
+      throw capability('A fixed archive launch input changed at the process boundary.');
+    }
+    await recheckArchive(plan, fsApi);
+    await assertExactNativeDirectory(staging.target, {
+      dev: staging.nativeIdentity.volume, ino: staging.nativeIdentity.fileId
+    }, fsApi, { mode: 0o700, parent: staging.rootStats, enforceMode: false });
     const result = await runProcess(tools.powershellPath, [
       '-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass',
       '-EncodedCommand', WINDOWS_HELPER_BOOTSTRAP_ENCODED
@@ -1060,7 +1197,7 @@ async function runWindowsExtraction(plan, staging, adapter) {
     throw operationError;
   }
   try {
-    if (requestIdentity) await assertExactFile(storage.requestPath, requestIdentity, fsApi);
+    if (requestIdentity) await assertExactNativeFile(storage.requestPath, requestIdentity, fsApi);
     await storage?.cleanup?.();
   } catch (cause) {
     throw safety('The archive helper request cleanup failed closed.', cause);
@@ -1079,6 +1216,75 @@ async function runPosixExtraction(plan, stagingDir, adapter) {
   ], { shell: false, timeoutMs: ARCHIVE_LIMITS.extractionDeadlineMs, maxOutputBytes: ARCHIVE_LIMITS.outputBytes }, adapter);
   if (result.code !== 0 || result.stdout !== '') throw capability('The POSIX archive extractor returned an invalid result.');
 }
+async function pinWindowsCandidate(record, candidate) {
+  await verifyFixedFile(FIXED_POWERSHELL_PATH, fs, 'Fixed System32 PowerShell is missing.');
+  const powershellIdentity = identity(await assertExactFile(FIXED_POWERSHELL_PATH, undefined, fs));
+  const powershellSha256 = await fixedFileDigest(FIXED_POWERSHELL_PATH, powershellIdentity, fs);
+  const child = spawnChild(FIXED_POWERSHELL_PATH, [
+    '-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass',
+    '-EncodedCommand', WINDOWS_CANDIDATE_PIN_ENCODED
+  ], {
+    shell: false, windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'],
+    env: {
+      ...process.env,
+      CLAUDEX_CANDIDATE_POWERSHELL_SHA256: powershellSha256,
+      CLAUDEX_CANDIDATE_PATH: record.path,
+      CLAUDEX_CANDIDATE_VOLUME: record.identity.dev,
+      CLAUDEX_CANDIDATE_FILE_ID: record.identity.ino,
+      CLAUDEX_CANDIDATE_SIZE: String(candidate.size),
+      CLAUDEX_CANDIDATE_SHA256: candidate.sha256
+    }
+  });
+  let stdout = '';
+  let stderr = '';
+  let ready = false;
+  let closed;
+  const closePromise = new Promise((resolve) => { closed = resolve; });
+  child.once('close', (code) => closed(code));
+  child.stdout.setEncoding('utf8');
+  child.stderr.setEncoding('utf8');
+  child.stdout.on('data', (chunk) => { if (stdout.length < 256) stdout += chunk; });
+  child.stderr.on('data', (chunk) => { if (stderr.length < 256) stderr += chunk; });
+  try {
+    await new Promise((resolve, reject) => {
+      const timer = setTimeout(() => reject(safety('The native candidate pin timed out.')), 5000);
+      const inspect = () => {
+        if (stdout === 'CLAUDEX_CANDIDATE_PIN_READY\r\n' || stdout === 'CLAUDEX_CANDIDATE_PIN_READY\n') {
+          ready = true;
+          clearTimeout(timer);
+          resolve();
+        } else if (Buffer.byteLength(stdout, 'utf8') > 128 || Buffer.byteLength(stderr, 'utf8') > 128) {
+          clearTimeout(timer);
+          reject(safety('The native candidate pin returned invalid output.'));
+        }
+      };
+      child.stdout.on('data', inspect);
+      child.stderr.on('data', inspect);
+      child.once('error', (cause) => {
+        clearTimeout(timer);
+        reject(safety('The native candidate pin could not start.', cause));
+      });
+      child.once('close', () => {
+        if (!ready) {
+          clearTimeout(timer);
+          reject(safety('The native candidate pin refused the candidate.'));
+        }
+      });
+    });
+  } catch (cause) {
+    child.kill();
+    throw cause;
+  }
+  return async () => {
+    child.stdin.end('release\n');
+    let releaseTimer;
+    const deadline = new Promise((resolve) => { releaseTimer = setTimeout(() => resolve(null), 5000); });
+    const code = await Promise.race([closePromise, deadline]);
+    clearTimeout(releaseTimer);
+    if (code !== 0) { child.kill(); throw safety('The native candidate pin did not release cleanly.'); }
+  };
+}
+
 async function walkExtractedTree(plan, staging, adapter) {
   const fsApi = adapter.fsApi ?? fs;
   await assertExactDirectory(plan.stagingRoot, plan.stagingRootIdentity, fsApi);
@@ -1193,77 +1399,88 @@ async function walkExtractedTree(plan, staging, adapter) {
     await handle?.close();
   }
   const descriptor = {
-    path: candidatePath,
     size: candidate[0].size,
     sha256: candidate[0].sha256,
-    mode: plan.candidate.mode,
-    identity: candidateExactIdentity
+    mode: plan.candidate.mode
   };
+  const record = deepFreeze({ path: candidatePath, identity: candidateExactIdentity });
   deepFreeze(descriptor);
-  extractedCandidates.add(descriptor);
+  extractedCandidates.set(descriptor, record);
   return descriptor;
 }
 
-export async function revalidateExtractedCandidate(candidate, adapter = {}) {
-  if (!extractedCandidates.has(candidate) || !Object.isFrozen(candidate) || !Object.isFrozen(candidate.identity)) {
-    throw safety('Candidate use requires the original immutable extracted descriptor.');
+async function readExactHandle(handle, expectedSize) {
+  if (!Number.isSafeInteger(expectedSize) || expectedSize < 0) throw unsafe('The candidate size is invalid.');
+  const bytes = Buffer.alloc(expectedSize);
+  let offset = 0;
+  while (offset < bytes.length) {
+    const { bytesRead } = await handle.read(bytes, offset, bytes.length - offset, offset);
+    if (bytesRead === 0) break;
+    offset += bytesRead;
+  }
+  if (offset !== bytes.length) throw unsafe('The candidate handle returned truncated bytes.');
+  return bytes;
+}
+
+export async function withValidatedExtractedCandidate(candidate, consumer, adapter = {}) {
+  const record = extractedCandidates.get(candidate);
+  if (!record || !Object.isFrozen(candidate) || typeof consumer !== 'function') {
+    throw safety('Candidate use requires the original immutable extracted descriptor and a scoped consumer.');
   }
   const fsApi = adapter.fsApi ?? fs;
   let handle;
+  let releasePin;
   try {
-    const pathStats = await fsApi.lstat(candidate.path, { bigint: true });
-    const canonical = await fsApi.realpath(candidate.path);
-    if (!sameExactIdentity(pathStats, candidate.identity) || pathStats.isSymbolicLink?.() || pathStats.isReparsePoint === true
-      || !sameHostPath(canonical, candidate.path)) throw unsafe('The extracted candidate changed before use.');
-    handle = await fsApi.open(candidate.path, fsConstants.O_RDONLY | (fsConstants.O_NOFOLLOW ?? 0));
+    const pathStats = await fsApi.lstat(record.path, { bigint: true });
+    const canonical = await fsApi.realpath(record.path);
+    if (!sameExactIdentity(pathStats, record.identity) || pathStats.isSymbolicLink?.() || pathStats.isReparsePoint === true
+      || !sameHostPath(canonical, record.path)) throw unsafe('The extracted candidate changed before scoped use.');
+    handle = await fsApi.open(record.path, fsConstants.O_RDONLY | (fsConstants.O_NOFOLLOW ?? 0));
+    if (process.platform === 'win32') releasePin = await pinWindowsCandidate(record, candidate);
     const before = await handle.stat();
     const exactBefore = await handle.stat({ bigint: true });
-    const bytes = await handle.readFile();
+    const bytes = await readExactHandle(handle, candidate.size);
     const after = await handle.stat();
-    if (!before.isFile?.() || before.nlink > 1 || !sameExactIdentity(exactBefore, candidate.identity) || !sameIdentity(before, after)
-      || bytes.length !== candidate.size || after.size !== bytes.length || !sameDigest(digest(bytes), candidate.sha256)) {
-      throw unsafe('The extracted candidate changed before use.');
+    if (!before.isFile?.() || before.nlink > 1 || !sameExactIdentity(exactBefore, record.identity) || !sameIdentity(before, after)
+      || after.size !== bytes.length || !sameDigest(digest(bytes), candidate.sha256)) {
+      throw unsafe('The extracted candidate changed before scoped use.');
     }
-    return candidate;
+    await adapter.beforeCandidateConsumer?.({ candidatePath: record.path });
+    const finalPath = await fsApi.lstat(record.path, { bigint: true });
+    const finalCanonical = await fsApi.realpath(record.path);
+    if (!sameExactIdentity(finalPath, record.identity) || finalPath.isSymbolicLink?.() || finalPath.isReparsePoint === true
+      || !sameHostPath(finalCanonical, record.path)) throw unsafe('The extracted candidate pathname changed before scoped use.');
+    const scope = Object.freeze({ path: record.path, handle, identity: record.identity });
+    const result = await consumer(scope);
+    const callbackAfter = await handle.stat();
+    const callbackExact = await handle.stat({ bigint: true });
+    const callbackPath = await fsApi.lstat(record.path, { bigint: true });
+    if (!sameIdentity(after, callbackAfter) || !sameExactIdentity(callbackExact, record.identity)
+      || !sameExactIdentity(callbackPath, record.identity)) throw unsafe('The extracted candidate changed during scoped use.');
+    return result;
   } catch (cause) {
     if (cause instanceof ClaudexError) throw cause;
-    throw unsafe('The extracted candidate could not be revalidated before use.', cause);
+    throw unsafe('The extracted candidate could not be used through a pinned scope.', cause);
   } finally {
     await handle?.close();
+    await releasePin?.();
   }
+}
+
+export async function revalidateExtractedCandidate(candidate, adapter = {}) {
+  await withValidatedExtractedCandidate(candidate, async () => undefined, adapter);
+  return candidate;
 }
 
 async function cleanupOwnedStaging(staging, plan, fsApi, adapter) {
   if (!staging?.identity) return undefined;
-  const rootStats = await assertExactDirectory(plan.stagingRoot, plan.stagingRootIdentity, fsApi);
-  await adapter.beforeCleanupQuarantine?.({ plan, stagingDir: staging.target });
-  await assertExactDirectory(staging.target, staging.identity, fsApi, { parent: staging.rootStats });
-  const quarantineParent = await fsApi.mkdtemp(path.join(plan.stagingRoot, '.claudexctl-quarantine-'));
-  await fsApi.chmod?.(quarantineParent, 0o700);
-  if (plan.targetPlatform === 'win32') {
-    if (adapter.protectStaging) await adapter.protectStaging(quarantineParent);
-    else {
-      const response = await runWindowsSecurityHelper({ request: {
-        requestId: randomUUID(), operation: 'protect', path: quarantineParent,
-        expectedType: 'directory', currentUserSid: adapter.currentUserSid
-      } }, adapter.windowsSecurityDeps);
-      assertWindowsDacl(response.result, { expectedType: 'directory', currentUserSid: adapter.currentUserSid });
-    }
-  }
-  const parentStats = await assertExactDirectory(quarantineParent, undefined, fsApi, { mode: 0o700, parent: rootStats, enforceMode: plan.targetPlatform !== 'win32' });
-  const parentIdentity = identity(parentStats);
-  const parentExactIdentity = exactIdentity(await fsApi.lstat(quarantineParent, { bigint: true }));
   const stagingExactIdentity = { dev: staging.nativeIdentity.volume, ino: staging.nativeIdentity.fileId };
-  const quarantine = path.join(quarantineParent, 'owned-staging');
-  await fsApi.rename(staging.target, quarantine);
-  await assertExactDirectory(quarantineParent, parentIdentity, fsApi, { mode: 0o700, parent: rootStats, enforceMode: plan.targetPlatform !== 'win32' });
-  await assertExactNativeDirectory(quarantine, stagingExactIdentity, fsApi, { parent: parentStats });
-  await adapter.beforeQuarantineDelete?.({ plan, quarantine, quarantineParent });
-  await assertExactNativeDirectory(quarantine, stagingExactIdentity, fsApi, { parent: parentStats });
-  await adapter.afterQuarantineValidationBeforeDelete?.({ plan, quarantine, quarantineParent });
-  await assertExactNativeDirectory(quarantineParent, parentExactIdentity, fsApi, { mode: 0o700, parent: rootStats, enforceMode: plan.targetPlatform !== 'win32' });
-  await assertExactNativeDirectory(quarantine, stagingExactIdentity, fsApi, { parent: parentStats });
-  return Object.freeze({ retained: true, quarantineParent });
+  await assertExactDirectory(plan.stagingRoot, plan.stagingRootIdentity, fsApi);
+  await assertExactNativeDirectory(staging.target, stagingExactIdentity, fsApi, { parent: staging.rootStats });
+  await adapter.afterRetainedStagingValidation?.({ plan, stagingDir: staging.target, identity: stagingExactIdentity });
+  await assertExactDirectory(plan.stagingRoot, plan.stagingRootIdentity, fsApi);
+  await assertExactNativeDirectory(staging.target, stagingExactIdentity, fsApi, { parent: staging.rootStats });
+  return deepFreeze({ retained: true, retainedPath: staging.target, retainedIdentity: stagingExactIdentity });
 }
 /** Extract an in-memory branded immutable plan and verify every materialized path. */
 export async function extractValidatedArchive(plan, stagingDir, adapter = {}) {
@@ -1295,12 +1512,17 @@ export async function extractValidatedArchive(plan, stagingDir, adapter = {}) {
     } catch (cleanupCause) {
       throw safety('Archive staging cleanup failed closed.', cleanupCause);
     }
+    const retention = cleanup?.retained ? {
+      stagingRetained: true,
+      retainedStagingPath: cleanup.retainedPath,
+      retainedStagingIdentity: cleanup.retainedIdentity
+    } : {};
     if (cause instanceof ClaudexError) {
-      if (cleanup?.retained) cause.details = { ...cause.details, stagingRetained: true };
+      if (cleanup?.retained) cause.details = { ...cause.details, ...retention };
       throw cause;
     }
     const wrapped = unsafe('Archive extraction failed safely.', cause);
-    if (cleanup?.retained) wrapped.details = { ...wrapped.details, stagingRetained: true };
+    if (cleanup?.retained) wrapped.details = { ...wrapped.details, ...retention };
     throw wrapped;
   }
 }

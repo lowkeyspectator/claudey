@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { execFileSync, spawnSync } from 'node:child_process';
+import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
 import fs from 'node:fs/promises';
 import { EventEmitter } from 'node:events';
@@ -17,22 +17,23 @@ import {
   extractValidatedArchive,
   parseArchiveHelperResponse,
   revalidateExtractedCandidate,
+  withValidatedExtractedCandidate,
   validateArchive
 } from '../../src/core/archive.js';
 import { buildTarGz, buildZip, validTarEntries, validZipEntries } from '../support/archive-fixtures.js';
 
 const sha256 = (bytes) => createHash('sha256').update(bytes).digest('hex');
 
-async function extractionFixture(t, kind = 'tar.gz') {
+async function extractionFixture(t, kind = 'tar.gz', options = {}) {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'claudexctl-archive-extraction-'));
   t.after(() => fs.rm(root, { recursive: true, force: true }));
   await fs.chmod(root, 0o700);
-  const bytes = kind === 'zip' ? buildZip(validZipEntries) : buildTarGz(validTarEntries);
+  const bytes = kind === 'zip' ? buildZip(options.entries ?? validZipEntries) : buildTarGz(options.entries ?? validTarEntries);
   const archivePath = path.join(root, kind === 'zip' ? 'release.zip' : 'release.tar.gz');
   await fs.writeFile(archivePath, bytes, { mode: 0o600 });
   const stats = await fs.stat(archivePath);
   const targetPlatform = kind === 'zip' ? 'win32' : 'linux';
-  const expectedExecutable = kind === 'zip' ? 'CLIProxyAPI.exe' : 'CLIProxyAPI';
+  const expectedExecutable = options.expectedExecutable ?? (kind === 'zip' ? 'CLIProxyAPI.exe' : 'CLIProxyAPI');
   const descriptor = Object.freeze({
     path: archivePath, name: path.basename(archivePath), bytes: bytes.length, sha256: sha256(bytes), kind
   });
@@ -123,15 +124,18 @@ test('extracts only through fixed absolute tar arguments and returns a frozen ca
   const adapter = posixAdapter(fixture.plan, action);
   const candidate = await extractValidatedArchive(fixture.plan, fixture.staging, adapter);
   assert.deepEqual(candidate, {
-    path: path.join(fixture.staging, 'bin', 'CLIProxyAPI'),
     size: 9,
     sha256: sha256(Buffer.from('candidate')),
-    mode: 0o755,
-    identity: candidate.identity
+    mode: 0o755
   });
-  assert.deepEqual(Object.keys(candidate.identity).sort(), ['dev', 'ino']);
+  assert.equal(Object.hasOwn(candidate, 'path'), false);
   assert.equal(Object.isFrozen(candidate), true);
-  assert.equal(Object.isFrozen(candidate.identity), true);
+  const scoped = await withValidatedExtractedCandidate(candidate, async ({ path: candidatePath, handle, identity }) => ({
+    candidatePath, bytes: await handle.readFile(), identity
+  }), { fsApi: adapter.fsApi });
+  assert.equal(scoped.candidatePath, path.join(fixture.staging, 'bin', 'CLIProxyAPI'));
+  assert.equal(scoped.bytes.toString(), 'candidate');
+  assert.deepEqual(Object.keys(scoped.identity).sort(), ['dev', 'ino']);
   assert.equal(await revalidateExtractedCandidate(candidate, { fsApi: adapter.fsApi }), candidate);
 });
 
@@ -204,7 +208,8 @@ test('invokes only fixed System32 PowerShell and the bundled helper with a priva
     }
   };
   const candidate = await extractValidatedArchive(fixture.plan, fixture.staging, adapter);
-  assert.equal(candidate.path, path.join(fixture.staging, 'bin', 'CLIProxyAPI.exe'));
+  assert.equal(await withValidatedExtractedCandidate(candidate, ({ path: candidatePath }) => candidatePath),
+    path.join(fixture.staging, 'bin', 'CLIProxyAPI.exe'));
   await assert.rejects(() => fs.access(requestPath), { code: 'ENOENT' });
 });
 
@@ -253,7 +258,7 @@ test('rejects linked, permissive, and cross-device staging before extractor', as
     assert.equal(extractorCalled, false, hostile);
   }
 });
-test('quarantines only verified owned staging after confirmed timeout and preserves the prior installation', async (t) => {
+test('retains verified owned staging after confirmed timeout and preserves the prior installation', async (t) => {
   const fixture = await extractionFixture(t);
   const prior = path.join(fixture.root, 'active-release');
   await fs.writeFile(prior, 'prior');
@@ -262,11 +267,11 @@ test('quarantines only verified owned staging after confirmed timeout and preser
     () => extractValidatedArchive(fixture.plan, fixture.staging, posixAdapter(fixture.plan, { staging: fixture.staging, error: timeout })),
     (error) => error?.code === 'CAPABILITY_UNSUPPORTED' && !error.message.includes('canary-private-path')
   );
-  await assert.rejects(() => fs.access(fixture.staging), { code: 'ENOENT' });
+  assert.equal((await fs.lstat(fixture.staging)).isDirectory(), true);
   assert.equal(await fs.readFile(prior, 'utf8'), 'prior');
 });
 
-test('post-walk rejects unexpected, missing, changed-size/hash, and changed-type results and quarantines staging', async (t) => {
+test('post-walk rejects unexpected, missing, changed-size/hash, and changed-type results and retains staging', async (t) => {
   for (const hostile of [
     { unexpected: 'extra' },
     { omit: 'README.txt' },
@@ -278,7 +283,7 @@ test('post-walk rejects unexpected, missing, changed-size/hash, and changed-type
       () => extractValidatedArchive(fixture.plan, fixture.staging, posixAdapter(fixture.plan, { staging: fixture.staging, ...hostile })),
       (error) => error?.code === 'ARCHIVE_UNSAFE'
     );
-    await assert.rejects(() => fs.access(fixture.staging), { code: 'ENOENT' });
+    assert.equal((await fs.lstat(fixture.staging)).isDirectory(), true);
   }
 });
 
@@ -292,15 +297,16 @@ test('post-walk rejects a reparse/link swap and candidate substitution immediate
     () => extractValidatedArchive(fixture.plan, fixture.staging, posixAdapter(fixture.plan, reparseAction)),
     (error) => error?.code === 'ARCHIVE_UNSAFE'
   );
+  const substitutionFixture = await extractionFixture(t);
   const action = {
-    staging: fixture.staging,
+    staging: substitutionFixture.staging,
     beforePostWalk: async () => {
-      const candidate = path.join(fixture.staging, 'bin', 'CLIProxyAPI');
+      const candidate = path.join(substitutionFixture.staging, 'bin', 'CLIProxyAPI');
       await fs.writeFile(candidate, 'substitute');
     }
   };
   await assert.rejects(
-    () => extractValidatedArchive(fixture.plan, fixture.staging, posixAdapter(fixture.plan, action)),
+    () => extractValidatedArchive(substitutionFixture.plan, substitutionFixture.staging, posixAdapter(substitutionFixture.plan, action)),
     (error) => error?.code === 'ARCHIVE_UNSAFE'
   );
 });
@@ -360,7 +366,7 @@ test('refuses helper metadata differing from the immutable plan before candidate
       }) };
     }
   }), (error) => error?.code === 'ARCHIVE_UNSAFE');
-  await assert.rejects(() => fs.access(fixture.staging), { code: 'ENOENT' });
+  assert.equal((await fs.lstat(fixture.staging)).isDirectory(), true);
 });
 test('refuses any Windows helper path other than the bundled archive helper', async (t) => {
   const fixture = await extractionFixture(t, 'zip');
@@ -425,7 +431,7 @@ test('rechecks helper request and archive identities immediately before Windows 
 });
 
 test('last launch seam pins tools, request digest, and destination before Windows spawn', async (t) => {
-  for (const swapped of ['powershell', 'helper', 'helper-bytes', 'request-bytes', 'destination']) {
+  for (const swapped of ['powershell', 'helper', 'powershell-last', 'helper-bytes', 'request-bytes', 'destination']) {
     const fixture = await extractionFixture(t, 'zip');
     const requestPath = path.join(fixture.root, 'last-seam-' + swapped + '.json');
     let seamReached = false;
@@ -462,6 +468,7 @@ test('last launch seam pins tools, request digest, and destination before Window
         if (swapped === 'helper') { seamReached = true; helperSwapped = true; }
       },
       afterLaunchIdentityPinBeforeProcessCreate: async () => {
+        if (swapped === 'powershell-last') { seamReached = true; powershellSwapped = true; return; }
         if (!['helper-bytes', 'request-bytes', 'destination'].includes(swapped)) return;
         seamReached = true;
         if (swapped === 'helper-bytes') helperBytesChanged = true;
@@ -495,7 +502,7 @@ test('last launch seam pins tools, request digest, and destination before Window
       }
     }), (error) => ['CAPABILITY_UNSUPPORTED', 'SAFETY_REFUSAL', 'ARCHIVE_UNSAFE'].includes(error?.code));
     assert.equal(seamReached, true);
-    assert.equal(spawned, ['helper-bytes', 'request-bytes', 'destination'].includes(swapped));
+    assert.equal(spawned, false);
     if (foreignMarker) assert.equal(await fs.readFile(foreignMarker, 'utf8'), 'foreign');
   }
 });
@@ -580,6 +587,29 @@ test('final handoff rechecks every entry and candidate identity after a determin
   );
 });
 
+test('scoped candidate use refuses a swap before callback and pins replacement during callback', async (t) => {
+  const beforeFixture = await extractionFixture(t);
+  const beforeAdapter = posixAdapter(beforeFixture.plan, { staging: beforeFixture.staging });
+  const beforeCandidate = await extractValidatedArchive(beforeFixture.plan, beforeFixture.staging, beforeAdapter);
+  beforeAdapter.beforeCandidateConsumer = async ({ candidatePath }) => {
+    await fs.rename(candidatePath, candidatePath + '.owned');
+    await fs.writeFile(candidatePath, 'candidate');
+  };
+  let beforeCallbackCalled = false;
+  await assert.rejects(
+    () => withValidatedExtractedCandidate(beforeCandidate, () => { beforeCallbackCalled = true; }, beforeAdapter),
+    (error) => error?.code === 'ARCHIVE_UNSAFE'
+  );
+  assert.equal(beforeCallbackCalled, false);
+
+  const duringFixture = await extractionFixture(t);
+  const duringAdapter = posixAdapter(duringFixture.plan, { staging: duringFixture.staging });
+  const duringCandidate = await extractValidatedArchive(duringFixture.plan, duringFixture.staging, duringAdapter);
+  await withValidatedExtractedCandidate(duringCandidate, async ({ path: candidatePath, handle }) => {
+    await assert.rejects(() => fs.rename(candidatePath, candidatePath + '.foreign'), (error) => ['EPERM', 'EBUSY', 'EACCES'].includes(error?.code));
+    assert.equal((await handle.stat()).isFile(), true);
+  }, duringAdapter);
+});
 test('candidate pathname swap after handle read and immediately before return is refused', async (t) => {
   const fixture = await extractionFixture(t);
   const action = { staging: fixture.staging };
@@ -596,33 +626,49 @@ test('candidate pathname swap after handle read and immediately before return is
   );
   assert.equal(seamReached, true);
 });
-test('cleanup quarantines by identity and never recursively deletes a substituted foreign directory', async (t) => {
+test('cleanup retains owned staging in place with recovery identity and no pathname mutation', async (t) => {
   const fixture = await extractionFixture(t);
-  const foreignMarker = path.join(fixture.staging, 'foreign-marker');
   const adapter = posixAdapter(fixture.plan, { staging: fixture.staging, error: new Error('extract failure') });
-  adapter.beforeCleanupQuarantine = async () => {
-    await fs.rename(fixture.staging, fixture.staging + '.owned');
-    await fs.mkdir(fixture.staging);
-    await fs.writeFile(foreignMarker, 'foreign');
+  const mutations = [];
+  const baseFs = adapter.fsApi;
+  adapter.fsApi = {
+    ...baseFs,
+    rename: async (...args) => { mutations.push('rename'); return baseFs.rename(...args); },
+    rm: async (...args) => { mutations.push('rm'); return baseFs.rm(...args); },
+    rmdir: async (...args) => { mutations.push('rmdir'); return baseFs.rmdir(...args); }
   };
+  let refusal;
   await assert.rejects(
     () => extractValidatedArchive(fixture.plan, fixture.staging, adapter),
-    (error) => error?.code === 'SAFETY_REFUSAL'
+    (error) => {
+      refusal = error;
+      return error?.code === 'CAPABILITY_UNSUPPORTED' && error.details?.stagingRetained === true;
+    }
   );
-  assert.equal(await fs.readFile(foreignMarker, 'utf8'), 'foreign');
+  assert.deepEqual(mutations, []);
+  assert.equal(refusal.details.retainedStagingPath, fixture.staging);
+  assert.deepEqual(Object.keys(refusal.details.retainedStagingIdentity).sort(), ['dev', 'ino']);
+  assert.equal((await fs.lstat(fixture.staging)).isDirectory(), true);
 });
-test('cleanup retains quarantine and refuses a foreign substitution after final validation before deletion', async (t) => {
+
+test('cleanup refuses a post-validation substitution and never mutates or deletes the foreign directory', async (t) => {
   const fixture = await extractionFixture(t);
   const adapter = posixAdapter(fixture.plan, { staging: fixture.staging, error: new Error('extract failure') });
-  let foreignMarker;
-  let ownedQuarantine;
+  const mutations = [];
+  const baseFs = adapter.fsApi;
+  adapter.fsApi = {
+    ...baseFs,
+    rename: async (...args) => { mutations.push('rename'); return baseFs.rename(...args); },
+    rm: async (...args) => { mutations.push('rm'); return baseFs.rm(...args); },
+    rmdir: async (...args) => { mutations.push('rmdir'); return baseFs.rmdir(...args); }
+  };
+  const owned = fixture.staging + '.owned';
+  const foreignMarker = path.join(fixture.staging, 'foreign-marker');
   let seamReached = false;
-  adapter.afterQuarantineValidationBeforeDelete = async ({ quarantine }) => {
+  adapter.afterRetainedStagingValidation = async () => {
     seamReached = true;
-    ownedQuarantine = quarantine + '.owned';
-    await fs.rename(quarantine, ownedQuarantine);
-    await fs.mkdir(quarantine, { mode: 0o700 });
-    foreignMarker = path.join(quarantine, 'foreign-marker');
+    await fs.rename(fixture.staging, owned);
+    await fs.mkdir(fixture.staging, { mode: 0o700 });
     await fs.writeFile(foreignMarker, 'foreign');
   };
   await assert.rejects(
@@ -630,10 +676,10 @@ test('cleanup retains quarantine and refuses a foreign substitution after final 
     (error) => error?.code === 'SAFETY_REFUSAL'
   );
   assert.equal(seamReached, true);
+  assert.deepEqual(mutations, []);
   assert.equal(await fs.readFile(foreignMarker, 'utf8'), 'foreign');
-  assert.equal((await fs.lstat(ownedQuarantine)).isDirectory(), true);
-});
-test('production Windows bootstrap pins the bundled helper before extraction', { skip: process.platform !== 'win32' }, async (t) => {
+  assert.equal((await fs.lstat(owned)).isDirectory(), true);
+});test('production Windows bootstrap pins the bundled helper before extraction', { skip: process.platform !== 'win32' }, async (t) => {
   const fixture = await extractionFixture(t, 'zip');
   const powershell = 'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe';
   const sid = execFileSync(powershell, [
@@ -643,8 +689,10 @@ test('production Windows bootstrap pins the bundled helper before extraction', {
   const candidate = await extractValidatedArchive(fixture.plan, fixture.staging, {
     targetPlatform: 'win32', currentUserSid: sid
   });
-  assert.equal(candidate.path, path.join(fixture.staging, 'bin', 'CLIProxyAPI.exe'));
-  assert.equal(await revalidateExtractedCandidate(candidate), candidate);
+  assert.equal(await withValidatedExtractedCandidate(candidate, ({ path: candidatePath }) => candidatePath),
+    path.join(fixture.staging, 'bin', 'CLIProxyAPI.exe'));
+  assert.equal(await withValidatedExtractedCandidate(candidate, ({ path: candidatePath }) => candidatePath),
+    path.join(fixture.staging, 'bin', 'CLIProxyAPI.exe'));
 });
 test('bundled Windows helper performs a real protected-request ZIP extraction without executing the candidate', { skip: process.platform !== 'win32' }, async (t) => {
   const fixture = await extractionFixture(t, 'zip');
@@ -698,4 +746,83 @@ test('bundled Windows helper performs a real protected-request ZIP extraction wi
   ], { encoding: 'utf8' });
   assert.equal(refused.status, 1);
   assert.equal(JSON.parse(refused.stdout).ok, false);
+});
+test('bundled helper pins or refuses a parent substitution before any foreign write', { skip: process.platform !== 'win32' }, async (t) => {
+  const expectedExecutable = 'zzzzCLIProxyAPI.exe';
+  const entries = [
+    { name: 'bin/', directory: true },
+    ...Array.from({ length: 1024 }, (_, index) => ({ name: 'bin/' + String(index).padStart(4, '0') + '.txt', content: 'x' })),
+    { name: 'bin/' + expectedExecutable, content: 'candidate', mode: 0o755 }
+  ];
+  const fixture = await extractionFixture(t, 'zip', { entries, expectedExecutable });
+  const destination = fixture.staging;
+  const requestDirectory = path.join(fixture.root, 'parent-pin-request');
+  const requestPath = path.join(requestDirectory, 'request.json');
+  await fs.mkdir(destination, { mode: 0o700 });
+  await fs.mkdir(requestDirectory, { mode: 0o700 });
+  const powershell = path.join(process.env.SystemRoot, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
+  const icacls = path.join(process.env.SystemRoot, 'System32', 'icacls.exe');
+  const sid = execFileSync(powershell, [
+    '-NoLogo', '-NoProfile', '-NonInteractive', '-Command',
+    '[Security.Principal.WindowsIdentity]::GetCurrent().User.Value'
+  ], { encoding: 'utf8' }).trim();
+  execFileSync(icacls, [requestDirectory, '/inheritance:r', '/grant:r', '*' + sid + ':(OI)(CI)F', '*S-1-5-18:(OI)(CI)F', '/q']);
+  const requestId = randomUUID();
+  const requestInput = buildArchiveHelperRequest({
+    requestId, archivePath: fixture.archivePath, destination,
+    archiveSha256: fixture.plan.archiveSha256, entries: helperEntries(fixture.plan)
+  });
+  await fs.writeFile(requestPath, requestInput);
+  execFileSync(icacls, [requestPath, '/inheritance:r', '/grant:r', '*' + sid + ':F', '*S-1-5-18:F', '/q']);
+  const destinationStats = await fs.lstat(destination, { bigint: true });
+  const child = spawn(powershell, [
+    '-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass',
+    '-File', ARCHIVE_HELPER_PATH, '-RequestPath', requestPath,
+    '-ExpectedRequestSha256', sha256(Buffer.from(requestInput)),
+    '-ExpectedDestinationVolume', String(destinationStats.dev),
+    '-ExpectedDestinationFileId', String(destinationStats.ino)
+  ], { windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
+  let stdout = '';
+  let stderr = '';
+  child.stdout.setEncoding('utf8');
+  child.stderr.setEncoding('utf8');
+  child.stdout.on('data', (chunk) => { stdout += chunk; });
+  child.stderr.on('data', (chunk) => { stderr += chunk; });
+  const closed = new Promise((resolve, reject) => {
+    child.once('error', reject);
+    child.once('close', resolve);
+  });
+  const parent = path.join(destination, 'bin');
+  const firstDescendant = path.join(parent, '0000.txt');
+  let parentAppeared = false;
+  for (let attempt = 0; attempt < 1000; attempt += 1) {
+    try {
+      if ((await fs.lstat(firstDescendant)).isFile()) { parentAppeared = true; break; }
+    } catch (error) {
+      if (error?.code !== 'ENOENT') throw error;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 2));
+  }
+  assert.equal(parentAppeared, true);
+  assert.equal(child.exitCode, null, stdout + stderr);
+  let renameBlocked = false;
+  try {
+    await fs.rename(parent, parent + '.owned');
+  } catch (error) {
+    if (!['EPERM', 'EACCES', 'EBUSY'].includes(error?.code)) throw error;
+    renameBlocked = true;
+  }
+  if (renameBlocked) {
+    assert.equal(await closed, 0, stdout + stderr);
+    assert.equal(stderr, '');
+    assert.equal(parseArchiveHelperResponse(stdout, { requestId }).ok, true);
+  } else {
+    await fs.mkdir(parent, { mode: 0o700 });
+    const foreignMarker = path.join(parent, 'foreign-marker');
+    await fs.writeFile(foreignMarker, 'foreign');
+    assert.equal(await closed, 1, stdout + stderr);
+    assert.equal(parseArchiveHelperResponse(stdout, { requestId }).ok, false);
+    assert.equal(await fs.readFile(foreignMarker, 'utf8'), 'foreign');
+    await assert.rejects(() => fs.access(path.join(parent, expectedExecutable)), { code: 'ENOENT' });
+  }
 });

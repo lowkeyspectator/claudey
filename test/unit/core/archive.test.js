@@ -268,6 +268,36 @@ test('checks exact numeric boundaries through a metadata-only internal seam', ()
   assert.throws(() => testArchiveLimitPolicy([{ size: 0 }], 1, undefined, 268435457), unsafe);
 });
 
+test('verified descriptor path enforces compressed ceiling at exact and plus one without allocation', async (t) => {
+  const bytes = buildZip(validZipEntries);
+  const fixture = await archiveFixture(t, bytes, 'zip', 'CLIProxyAPI.exe');
+  const archiveStats = await fs.lstat(fixture.descriptor.path);
+  let archiveReads = 0;
+  const fsApi = {
+    ...fs,
+    lstat: async (target, options) => target === fixture.descriptor.path
+      ? new Proxy(archiveStats, { get: (value, key) => key === 'size' ? ARCHIVE_LIMITS.archiveBytes : Reflect.get(value, key, value) })
+      : fs.lstat(target, options),
+    readFile: async (target, ...args) => {
+      if (target === fixture.descriptor.path) archiveReads += 1;
+      return fs.readFile(target, ...args);
+    }
+  };
+  const exact = Object.freeze({ ...fixture.descriptor, bytes: ARCHIVE_LIMITS.archiveBytes });
+  await assert.rejects(
+    () => validateArchive(exact, fixture.expectedExecutable, undefined, { ...fixture.adapter, fsApi }),
+    unsafe
+  );
+  assert.equal(archiveReads, 1);
+
+  archiveReads = 0;
+  const over = Object.freeze({ ...fixture.descriptor, bytes: ARCHIVE_LIMITS.archiveBytes + 1 });
+  await assert.rejects(
+    () => validateArchive(over, fixture.expectedExecutable, undefined, { ...fixture.adapter, fsApi }),
+    unsafe
+  );
+  assert.equal(archiveReads, 0);
+});
 test('TAR entry ceiling counts PAX metadata headers at exact 2048 and rejects 2049', async (t) => {
   const paxAndCandidate = [
     { name: 'PaxHeader', type: 'x', content: paxRecord('path', 'bin/CLIProxyAPI') },
