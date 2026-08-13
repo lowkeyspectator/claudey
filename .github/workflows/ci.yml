@@ -1,0 +1,198 @@
+name: native-ci
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: native-ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  native:
+    name: ${{ matrix.os }} / ${{ matrix.lane }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, windows-11-arm, macos-15-intel, macos-15, ubuntu-24.04, ubuntu-24.04-arm]
+        lane: [floor, lts, current]
+        include:
+          - os: windows-latest
+            shell: windows
+            arch: x64
+          - os: windows-11-arm
+            shell: windows
+            arch: arm64
+          - os: macos-15-intel
+            shell: posix
+            arch: x64
+          - os: macos-15
+            shell: posix
+            arch: arm64
+          - os: ubuntu-24.04
+            shell: posix
+            arch: x64
+          - os: ubuntu-24.04-arm
+            shell: posix
+            arch: arm64
+    steps:
+      - name: Checkout exact revision
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - name: Resolve reviewed Node lane on Windows
+        id: windows_lane
+        if: matrix.shell == 'windows'
+        shell: powershell
+        run: |
+          $lanes = Get-Content -Raw -LiteralPath .\ci\node-lanes.json | ConvertFrom-Json
+          $nodeVersion = [string]$lanes.'${{ matrix.lane }}'
+          if ($nodeVersion -notmatch '^(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)$') { exit 1 }
+          [IO.File]::AppendAllText($env:GITHUB_OUTPUT, "node_version=$nodeVersion`n", [Text.UTF8Encoding]::new($false))
+      - name: Resolve reviewed Node lane on POSIX
+        id: posix_lane
+        if: matrix.shell == 'posix'
+        shell: bash
+        run: |
+          set -euo pipefail
+          node_version="$(node -e "const f=require('./ci/node-lanes.json');process.stdout.write(f[process.argv[1]])" '${{ matrix.lane }}')"
+          case "$node_version" in
+            *[!0-9.]*|'') exit 1 ;;
+          esac
+          printf 'node_version=%s\n' "$node_version" >> "$GITHUB_OUTPUT"
+      - name: Install exact reviewed Node lane
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: ${{ steps.windows_lane.outputs.node_version || steps.posix_lane.outputs.node_version }}
+          check-latest: false
+      - name: Create an ephemeral secret canary on Windows
+        if: matrix.shell == 'windows'
+        shell: powershell
+        run: node -e "const c=require('crypto').randomBytes(32).toString('hex');require('fs').appendFileSync(process.env.GITHUB_ENV,'CLAUDEX_SECRET_CANARY='+c+'\n')"
+      - name: Create an ephemeral secret canary on POSIX
+        if: matrix.shell == 'posix'
+        shell: bash
+        run: node -e "const c=require('crypto').randomBytes(32).toString('hex');require('fs').appendFileSync(process.env.GITHUB_ENV,'CLAUDEX_SECRET_CANARY='+c+'\n')"
+      - name: Verify exact runtime lane and architecture on Windows
+        if: matrix.shell == 'windows'
+        shell: powershell
+        run: |
+          if ((node -p process.versions.node) -ne '${{ steps.windows_lane.outputs.node_version }}') { exit 1 }
+          if ((node -p process.arch) -ne '${{ matrix.arch }}') { exit 1 }
+      - name: Verify exact runtime lane and architecture on POSIX
+        if: matrix.shell == 'posix'
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(node -p process.versions.node)" = '${{ steps.posix_lane.outputs.node_version }}'
+          test "$(node -p process.arch)" = '${{ matrix.arch }}'
+      - name: Windows checks, unit, integration, fixture E2E, native security, hostile and failure regressions
+        if: matrix.shell == 'windows'
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          npm.cmd run check
+          npm.cmd run test:unit
+          npm.cmd run test:integration
+          node --test test/fixtures
+          node --test test/integration/bootstrap-windows.test.js test/integration/permissions-native.test.js test/integration/archive-extraction.test.js test/integration/windows-shim.test.js test/unit/core/archive.test.js test/unit/core/fs-safe.test.js test/unit/core/process.test.js test/unit/cursor/runner.test.js
+          npm.cmd run check
+      - name: Windows PowerShell 5.1 bootstrap parser
+        if: matrix.shell == 'windows'
+        shell: powershell
+        run: |
+          $errors = $null
+          [Management.Automation.Language.Parser]::ParseFile((Resolve-Path '.\install.ps1'), [ref]$null, [ref]$errors) | Out-Null
+          if ($errors.Count) { $errors | ForEach-Object Message; exit 1 }
+          & "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -NonInteractive -Command "`$e=`$null;[Management.Automation.Language.Parser]::ParseFile((Resolve-Path '.\install.ps1'),[ref]`$null,[ref]`$e)|Out-Null;if(`$e.Count){exit 1}"
+      - name: Current PowerShell bootstrap parser
+        if: matrix.shell == 'windows'
+        shell: powershell
+        run: |
+          $pwsh = (Get-Command 'pwsh.exe' -CommandType Application -ErrorAction Stop).Source
+          & $pwsh -NoProfile -NonInteractive -Command "`$e=`$null;[Management.Automation.Language.Parser]::ParseFile((Resolve-Path '.\install.ps1'),[ref]`$null,[ref]`$e)|Out-Null;if(`$e.Count){exit 1}"
+          & $pwsh -NoProfile -NonInteractive -File .\install.ps1 -Unknown
+          if ($LASTEXITCODE -ne 64) { exit 1 }
+      - name: Build and capture-test matching native Windows shim
+        if: matrix.shell == 'windows' && matrix.lane == 'floor'
+        shell: powershell
+        run: |
+          $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
+          if (-not (Test-Path -LiteralPath $vswhere -PathType Leaf)) { exit 1 }
+          $component = if ('${{ matrix.arch }}' -eq 'x64') { 'Microsoft.VisualStudio.Component.VC.Tools.x86.x64' } else { 'Microsoft.VisualStudio.Component.VC.Tools.ARM64' }
+          $installation = (& $vswhere '-latest' '-products' '*' '-requires' $component '-property' 'installationPath').Trim()
+          $devShell = Join-Path $installation 'Common7\Tools\Launch-VsDevShell.ps1'
+          if (-not [IO.Path]::IsPathRooted($installation) -or -not (Test-Path -LiteralPath $devShell -PathType Leaf)) { exit 1 }
+          $targetArch = if ('${{ matrix.arch }}' -eq 'x64') { 'amd64' } else { 'arm64' }
+          & $devShell -Arch $targetArch -HostArch 'amd64' -SkipAutomaticLocation
+          if ($null -eq (Get-Command 'cl.exe' -CommandType Application -ErrorAction SilentlyContinue)) { exit 1 }
+          $revision = git rev-parse HEAD
+          & .\scripts\build-windows-shim.ps1 -Architecture '${{ matrix.arch }}' -SourceRevision $revision -OutputDirectory (Join-Path $pwd 'native-artifacts')
+          node -e "const fs=require('fs'),p=require('path'),c=Buffer.from(process.env.CLAUDEX_SECRET_CANARY);for(const n of fs.readdirSync('native-artifacts')){const f=p.join('native-artifacts',n);if(fs.statSync(f).isFile()&&fs.readFileSync(f).includes(c))process.exit(1)}"
+      - name: Upload immutable native shim proof
+        if: matrix.shell == 'windows' && matrix.lane == 'floor'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: windows-shim-${{ matrix.arch }}-${{ github.sha }}
+          path: native-artifacts/claudex-windows-${{ matrix.arch }}.exe*
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 0
+      - name: POSIX checks, unit, integration, fixture E2E, native security, hostile and failure regressions
+        if: matrix.shell == 'posix'
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm run check
+          npm run test:unit
+          npm run test:integration
+          node --test test/fixtures
+          node --test test/integration/bootstrap-posix.test.js test/integration/permissions-native.test.js test/integration/archive-extraction.test.js test/unit/core/archive.test.js test/unit/core/fs-safe.test.js test/unit/core/process.test.js test/unit/cursor/runner.test.js
+          npm run check
+      - name: Native Ubuntu 20.04 and Debian 10 baselines
+        if: startsWith(matrix.os, 'ubuntu-')
+        shell: bash
+        run: |
+          set -euo pipefail
+          node_root="$(dirname "$(dirname "$(command -v node)")")"
+          expected="${{ matrix.arch }}"
+          test "$(node -p process.arch)" = "$expected"
+          platform="linux/${{ matrix.arch == 'x64' && 'amd64' || 'arm64' }}"
+          for image in ubuntu:20.04 debian:10; do
+            baseline_name="${image/:/-}-${{ matrix.lane }}-${{ matrix.arch }}"
+            baseline_home="$RUNNER_TEMP/$baseline_name"
+            mkdir -m 700 "$baseline_home"
+            docker pull --platform "$platform" "$image"
+            docker run --rm --platform "linux/${{ matrix.arch == 'x64' && 'amd64' || 'arm64' }}" \
+              --user "$(id -u):$(id -g)" -e HOME=/home/claudex -e PATH=/opt/node/bin:/usr/bin:/bin -e CLDX_EXPECTED_ARCH="$expected" \
+              -e CLAUDEX_SECRET_CANARY -v "$GITHUB_WORKSPACE:/work:ro" -v "$node_root:/opt/node:ro" -v "$baseline_home:/home/claudex" -w /work \
+              "$image" /bin/sh -eu -c 'case "$CLDX_EXPECTED_ARCH:$(uname -m)" in x64:x86_64|arm64:aarch64|arm64:arm64) ;; *) exit 1 ;; esac; /opt/node/bin/node -e "if(process.arch!==process.env.CLDX_EXPECTED_ARCH)process.exit(1)"; /opt/node/bin/npm run check && /opt/node/bin/npm run test:unit && /opt/node/bin/npm run test:integration && /opt/node/bin/node --test test/fixtures && /opt/node/bin/node --test test/integration/bootstrap-posix.test.js test/integration/permissions-native.test.js test/integration/archive-extraction.test.js test/unit/core/archive.test.js test/unit/core/fs-safe.test.js test/unit/core/process.test.js test/unit/cursor/runner.test.js && /opt/node/bin/npm run check'
+          done
+      - name: Record exact runtime proof on Windows
+        if: matrix.shell == 'windows' && always()
+        shell: powershell
+        run: |
+          [IO.Directory]::CreateDirectory((Join-Path $pwd 'ci-proof')) | Out-Null
+          node -e "const fs=require('fs');fs.writeFileSync('ci-proof/runtime.json',JSON.stringify({sha:process.env.GITHUB_SHA,os:'${{ matrix.os }}',lane:'${{ matrix.lane }}',version:process.versions.node,arch:process.arch})+'\n',{flag:'wx'})"
+      - name: Record exact runtime proof on POSIX
+        if: matrix.shell == 'posix' && always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p ci-proof
+          node -e "const fs=require('fs');fs.writeFileSync('ci-proof/runtime.json',JSON.stringify({sha:process.env.GITHUB_SHA,os:'${{ matrix.os }}',lane:'${{ matrix.lane }}',version:process.versions.node,arch:process.arch})+'\n',{flag:'wx'})"
+      - name: Upload bounded runtime proof
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: runtime-${{ matrix.os }}-${{ matrix.lane }}-${{ github.sha }}
+          path: ci-proof/runtime.json
+          if-no-files-found: error
+          retention-days: 7
