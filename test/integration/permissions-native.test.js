@@ -196,6 +196,23 @@ test('Windows helper emits one UTF-8 JSON error for malformed protected request 
     rmSync(directory, { recursive: true, force: true });
   }
 });
+
+test('Windows helper refuses request directory ACE propagation flags before reading valid content', { skip: process.platform !== 'win32' }, async (t) => {
+  const target = await fs.mkdtemp(path.join(os.tmpdir(), 'claudexctl-dacl-propagation-target-'));
+  const directory = mkdtempSync(path.join(os.tmpdir(), 'claudexctl-dacl-propagation-request-'));
+  t.after(async () => { await fs.rm(target, { recursive: true, force: true }); rmSync(directory, { recursive: true, force: true }); });
+  const requestPath = path.join(directory, 'request.json');
+  const ownerSid = execFileSync(powershellPath, ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command', '[System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value'], { encoding: 'utf8' }).trim();
+  execFileSync(icaclsPath, [directory, '/inheritance:r', '/grant:r', `*${ownerSid}:(OI)(CI)(NP)F`, '*S-1-5-18:(OI)(CI)(NP)F', '/q']);
+  writeFileSync(requestPath, JSON.stringify({
+    schemaVersion: 1, requestId: '21212121-2121-4121-8121-212121212121', operation: 'inspect',
+    path: target, expectedType: 'directory', currentUserSid: ownerSid
+  }), { encoding: 'utf8' });
+  execFileSync(icaclsPath, [requestPath, '/inheritance:r', '/grant:r', `*${ownerSid}:F`, '*S-1-5-18:F', '/q']);
+  const result = spawnSync(powershellPath, ['-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', helperPath, '-RequestPath', requestPath], { encoding: 'utf8' });
+  assert.notEqual(result.status, 0);
+  assert.equal(JSON.parse(result.stdout).code, 'SAFETY_REFUSAL');
+});
 test('adapter rejects a retained foreign directory ACE before writing request.json', { skip: process.platform !== 'win32' }, async () => {
   const target = await fs.mkdtemp(path.join(os.tmpdir(), 'claudexctl-dacl-prewrite-target-'));
   const ownerSid = execFileSync(powershellPath, ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command', '[System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value'], { encoding: 'utf8' }).trim();
@@ -209,6 +226,32 @@ test('adapter rejects a retained foreign directory ACE before writing request.js
     }, {
       afterDirectoryProtection: async ({ directoryPath }) => {
         execFileSync(icaclsPath, [directoryPath, '/grant', '*S-1-1-0:R', '/q']);
+      },
+      beforeCleanup: async ({ directoryPath }) => {
+        await assert.rejects(() => fs.access(path.join(directoryPath, 'request.json')), { code: 'ENOENT' });
+        requestWasAbsent = true;
+      }
+    }), (error) => error?.code === 'SAFETY_REFUSAL');
+    assert.equal(requestWasAbsent, true);
+  } finally {
+    await fs.rm(target, { recursive: true, force: true });
+  }
+});
+
+test('adapter rejects directory ACEs without object inheritance before writing request.json', { skip: process.platform !== 'win32' }, async () => {
+  const target = await fs.mkdtemp(path.join(os.tmpdir(), 'claudexctl-dacl-prewrite-inheritance-target-'));
+  const ownerSid = execFileSync(powershellPath, ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command', '[System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value'], { encoding: 'utf8' }).trim();
+  let requestWasAbsent = false;
+  try {
+    await assert.rejects(() => runWindowsSecurityHelper({
+      request: {
+        requestId: '20202020-2020-4020-8020-202020202020', operation: 'inspect',
+        path: target, expectedType: 'directory', currentUserSid: ownerSid
+      }
+    }, {
+      afterDirectoryProtection: async ({ directoryPath }) => {
+        execFileSync(icaclsPath, [directoryPath, '/remove:g', `*${ownerSid}`, '*S-1-5-18', '/q']);
+        execFileSync(icaclsPath, [directoryPath, '/grant', `*${ownerSid}:(CI)F`, '*S-1-5-18:(CI)F', '/q']);
       },
       beforeCleanup: async ({ directoryPath }) => {
         await assert.rejects(() => fs.access(path.join(directoryPath, 'request.json')), { code: 'ENOENT' });

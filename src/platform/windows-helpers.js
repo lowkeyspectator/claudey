@@ -60,9 +60,11 @@ export function buildSecurityHelperRequest(request) {
 }
 
 function assertAce(ace) {
-  assertExactKeys(ace, ['type', 'sid', 'rights', 'inherited']);
+  assertExactKeys(ace, ['type', 'sid', 'rights', 'inherited', 'inheritanceFlags', 'propagationFlags']);
   if (!['allow', 'deny'].includes(ace.type) || typeof ace.sid !== 'string'
-    || !['full-control', 'other'].includes(ace.rights) || typeof ace.inherited !== 'boolean') {
+    || !['full-control', 'other'].includes(ace.rights) || typeof ace.inherited !== 'boolean'
+    || !Number.isInteger(ace.inheritanceFlags) || ace.inheritanceFlags < 0 || ace.inheritanceFlags > 3
+    || !Number.isInteger(ace.propagationFlags) || ace.propagationFlags < 0 || ace.propagationFlags > 3) {
     throw safetyRefusal('Windows helper returned an invalid ACL entry.');
   }
 }
@@ -392,7 +394,10 @@ export function assertWindowsDacl(result, { expectedType, currentUserSid }) {
     throw safetyRefusal('Windows managed path protection is invalid.');
   }
   const allowed = new Set([currentUserSid, systemSid]);
-  if (result.aces.length !== 2 || result.aces.some((ace) => ace.inherited || ace.type !== 'allow' || ace.rights !== 'full-control' || !allowed.delete(ace.sid))) {
+  const expectedInheritanceFlags = expectedType === 'directory' ? 3 : 0;
+  if (result.aces.length !== 2 || result.aces.some((ace) => ace.inherited || ace.type !== 'allow'
+    || ace.rights !== 'full-control' || ace.inheritanceFlags !== expectedInheritanceFlags
+    || ace.propagationFlags !== 0 || !allowed.delete(ace.sid))) {
     throw safetyRefusal('Windows managed path DACL is broader than allowed.');
   }
   return result;

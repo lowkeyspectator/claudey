@@ -56,6 +56,8 @@ try {
             sid = $_.IdentityReference.Value
             rights = if (($_.FileSystemRights -band [System.Security.AccessControl.FileSystemRights]::FullControl) -eq [System.Security.AccessControl.FileSystemRights]::FullControl) { 'full-control' } else { 'other' }
             inherited = [bool]$_.IsInherited
+            inheritanceFlags = [int]$_.InheritanceFlags
+            propagationFlags = [int]$_.PropagationFlags
         }
     })
     $result = [ordered]@{ canonicalPath = $item.FullName; type = $type; isReparsePoint = $false; ownerSid = $owner; daclProtected = [bool]$acl.AreAccessRulesProtected; aces = $aces }

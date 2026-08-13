@@ -57,10 +57,11 @@ function Assert-PrivateRequestAcl([string]$LiteralPath, [string]$ExpectedType) {
         if (($rule.FileSystemRights -band [System.Security.AccessControl.FileSystemRights]::FullControl) -ne [System.Security.AccessControl.FileSystemRights]::FullControl) { throw 'Private request ACL is insufficient.' }
         if ($ExpectedType -eq 'directory') {
             $requiredInheritance = [System.Security.AccessControl.InheritanceFlags]::ContainerInherit -bor [System.Security.AccessControl.InheritanceFlags]::ObjectInherit
-            if (($rule.InheritanceFlags -band $requiredInheritance) -ne $requiredInheritance) { throw 'Private request directory ACL does not propagate.' }
+            if ($rule.InheritanceFlags -ne $requiredInheritance) { throw 'Private request directory ACL does not propagate exactly.' }
         } elseif ($rule.InheritanceFlags -ne [System.Security.AccessControl.InheritanceFlags]::None) {
             throw 'Private request file ACL has unexpected inheritance flags.'
         }
+        if ($rule.PropagationFlags -ne [System.Security.AccessControl.PropagationFlags]::None) { throw 'Private request ACL has unexpected propagation flags.' }
     }
     if (@($rules | ForEach-Object { $_.IdentityReference.Value } | Select-Object -Unique).Count -ne 2) { throw 'Private request ACL identities are incomplete.' }
     return $safePath
@@ -91,9 +92,10 @@ try {
         $acl = Get-Acl -LiteralPath $safeTargetPath
         $acl.SetAccessRuleProtection($true, $false)
         foreach ($rule in @($acl.Access)) { [void]$acl.RemoveAccessRuleAll($rule) }
+        $inheritanceFlags = if ($type -eq 'directory') { [System.Security.AccessControl.InheritanceFlags]::ContainerInherit -bor [System.Security.AccessControl.InheritanceFlags]::ObjectInherit } else { [System.Security.AccessControl.InheritanceFlags]::None }
         foreach ($sidText in @($request.currentUserSid, 'S-1-5-18')) {
             $sid = [System.Security.Principal.SecurityIdentifier]::new($sidText)
-            $rule = [System.Security.AccessControl.FileSystemAccessRule]::new($sid, [System.Security.AccessControl.FileSystemRights]::FullControl, [System.Security.AccessControl.AccessControlType]::Allow)
+            $rule = [System.Security.AccessControl.FileSystemAccessRule]::new($sid, [System.Security.AccessControl.FileSystemRights]::FullControl, $inheritanceFlags, [System.Security.AccessControl.PropagationFlags]::None, [System.Security.AccessControl.AccessControlType]::Allow)
             [void]$acl.AddAccessRule($rule)
         }
         [void](Assert-NoReparsePath $safeTargetPath)
@@ -103,7 +105,7 @@ try {
     $acl = Get-Acl -LiteralPath $safeTargetPath
     $owner = $acl.GetOwner([System.Security.Principal.SecurityIdentifier]).Value
     $aces = @($acl.GetAccessRules($true, $true, [System.Security.Principal.SecurityIdentifier]) | ForEach-Object {
-        [ordered]@{ type = if ($_.AccessControlType -eq [System.Security.AccessControl.AccessControlType]::Allow) { 'allow' } else { 'deny' }; sid = $_.IdentityReference.Value; rights = if (($_.FileSystemRights -band [System.Security.AccessControl.FileSystemRights]::FullControl) -eq [System.Security.AccessControl.FileSystemRights]::FullControl) { 'full-control' } else { 'other' }; inherited = [bool]$_.IsInherited }
+        [ordered]@{ type = if ($_.AccessControlType -eq [System.Security.AccessControl.AccessControlType]::Allow) { 'allow' } else { 'deny' }; sid = $_.IdentityReference.Value; rights = if (($_.FileSystemRights -band [System.Security.AccessControl.FileSystemRights]::FullControl) -eq [System.Security.AccessControl.FileSystemRights]::FullControl) { 'full-control' } else { 'other' }; inherited = [bool]$_.IsInherited; inheritanceFlags = [int]$_.InheritanceFlags; propagationFlags = [int]$_.PropagationFlags }
     })
     $result = [ordered]@{ canonicalPath = $item.FullName; type = $type; isReparsePoint = $false; ownerSid = $owner; daclProtected = [bool]$acl.AreAccessRulesProtected; aces = $aces }
     Write-Response ([ordered]@{ ok = $true; schemaVersion = 1; requestId = $request.requestId; result = $result }) 0

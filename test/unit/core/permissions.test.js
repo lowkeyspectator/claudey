@@ -9,6 +9,7 @@ import test from 'node:test';
 import { assertProtected, atomicReplace } from '../../../src/core/permissions.js';
 import { assertPosixProtection } from '../../../src/platform/posix.js';
 import {
+  assertWindowsDacl,
   buildSecurityHelperRequest,
   parseSecurityHelperResponse,
   runWindowsSecurityHelper
@@ -143,8 +144,8 @@ test('builds and parses the strict schema-1 Windows helper protocol', async () =
       ownerSid: 'S-1-5-21-1-2-3-4',
       daclProtected: true,
       aces: [
-        { type: 'allow', sid: 'S-1-5-21-1-2-3-4', rights: 'full-control', inherited: false },
-        { type: 'allow', sid: 'S-1-5-18', rights: 'full-control', inherited: false }
+        { type: 'allow', sid: 'S-1-5-21-1-2-3-4', rights: 'full-control', inherited: false, inheritanceFlags: 3, propagationFlags: 0 },
+        { type: 'allow', sid: 'S-1-5-18', rights: 'full-control', inherited: false, inheritanceFlags: 3, propagationFlags: 0 }
       ]
     }
   }), { requestId: '11111111-1111-4111-8111-111111111111' });
@@ -155,6 +156,23 @@ test('builds and parses the strict schema-1 Windows helper protocol', async () =
     () => parseSecurityHelperResponse(`${request}\n${request}`, { requestId: '11111111-1111-4111-8111-111111111111' }),
     (error) => error?.code === 'CAPABILITY_UNSUPPORTED'
   );
+});
+
+test('rejects directory ACE propagation flags even with exact principals and rights', () => {
+  const currentUserSid = 'S-1-5-21-1-2-3-4';
+  assert.throws(() => assertWindowsDacl({
+    canonicalPath: 'C:\\managed\\private',
+    type: 'directory',
+    isReparsePoint: false,
+    ownerSid: currentUserSid,
+    daclProtected: true,
+    aces: [
+      { type: 'allow', sid: currentUserSid, rights: 'full-control', inherited: false, inheritanceFlags: 3, propagationFlags: 1 },
+      { type: 'allow', sid: 'S-1-5-18', rights: 'full-control', inherited: false, inheritanceFlags: 3, propagationFlags: 0 }
+    ]
+  }, {
+    expectedType: 'directory', currentUserSid
+  }), (error) => error?.code === 'SAFETY_REFUSAL');
 });
 
 function isDaclVerifier(args) {
@@ -176,8 +194,8 @@ function successfulHelperResponse(request) {
       canonicalPath: request.path, type: request.expectedType, isReparsePoint: false,
       ownerSid: request.currentUserSid, daclProtected: true,
       aces: [
-        { type: 'allow', sid: request.currentUserSid, rights: 'full-control', inherited: false },
-        { type: 'allow', sid: 'S-1-5-18', rights: 'full-control', inherited: false }
+        { type: 'allow', sid: request.currentUserSid, rights: 'full-control', inherited: false, inheritanceFlags: request.expectedType === 'directory' ? 3 : 0, propagationFlags: 0 },
+        { type: 'allow', sid: 'S-1-5-18', rights: 'full-control', inherited: false, inheritanceFlags: request.expectedType === 'directory' ? 3 : 0, propagationFlags: 0 }
       ]
     }
   });
