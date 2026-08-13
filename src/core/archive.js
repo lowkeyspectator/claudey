@@ -40,11 +40,92 @@ $destinationFileId = $env:CLAUDEX_ARCHIVE_DESTINATION_FILE_ID
 if ($powershellSha256 -notmatch '^[a-f0-9]{64}$' -or $helperSha256 -notmatch '^[a-f0-9]{64}$' -or $requestSha256 -notmatch '^[a-f0-9]{64}$' -or
     $destinationVolume -notmatch '^(0|[1-9][0-9]*)$' -or $destinationFileId -notmatch '^(0|[1-9][0-9]*)$') { exit 1 }
 
-$selfStream = $null
+$launchPins = [Collections.Generic.List[IDisposable]]::new()
+Add-Type @'
+using System;
+using System.IO;
+using System.Runtime.InteropServices;
+using Microsoft.Win32.SafeHandles;
+public sealed class ClaudexBootstrapPin : IDisposable {
+ [StructLayout(LayoutKind.Sequential)] private struct Info { public uint Attributes; public System.Runtime.InteropServices.ComTypes.FILETIME Creation; public System.Runtime.InteropServices.ComTypes.FILETIME Access; public System.Runtime.InteropServices.ComTypes.FILETIME Write; public uint Volume; public uint SizeHigh; public uint SizeLow; public uint Links; public uint IndexHigh; public uint IndexLow; }
+ [DllImport("kernel32.dll", CharSet=CharSet.Unicode, SetLastError=true)] private static extern SafeFileHandle CreateFileW(string name,uint access,FileShare share,IntPtr security,FileMode mode,uint flags,IntPtr template);
+ [DllImport("kernel32.dll",SetLastError=true)] [return:MarshalAs(UnmanagedType.Bool)] private static extern bool GetFileInformationByHandle(SafeFileHandle handle,out Info info);
+ public readonly SafeFileHandle Handle; public readonly uint Volume; public readonly ulong FileId; public readonly uint Attributes;
+ private ClaudexBootstrapPin(SafeFileHandle handle,Info info){Handle=handle;Volume=info.Volume;FileId=((ulong)info.IndexHigh<<32)|info.IndexLow;Attributes=info.Attributes;}
+ public static ClaudexBootstrapPin Open(string path,bool directory){ const uint GENERIC_READ=0x80000000,READ_CONTROL=0x20000,READ_ATTRIBUTES=0x80,BACKUP=0x02000000,OPEN_REPARSE=0x00200000; uint access=directory?0:GENERIC_READ|READ_CONTROL|READ_ATTRIBUTES;FileShare share=directory?FileShare.Read|FileShare.Write|FileShare.Delete:FileShare.Read;SafeFileHandle handle=CreateFileW(path,access,share,IntPtr.Zero,FileMode.Open,OPEN_REPARSE|(directory?BACKUP:0),IntPtr.Zero); if(handle.IsInvalid)throw new IOException("Pin open.",new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error())); Info info;if(!GetFileInformationByHandle(handle,out info)){int code=Marshal.GetLastWin32Error();handle.Dispose();throw new IOException("Pin identity.",new System.ComponentModel.Win32Exception(code));}return new ClaudexBootstrapPin(handle,info);}
+ public void Dispose(){Handle.Dispose();}
+}
+'@
+function Assert-LaunchAcl([string]$LiteralPath, [bool]$RequireTrustedAcl, [bool]$Directory) {
+  $acl = Get-Acl -LiteralPath $LiteralPath
+  $owner = $acl.GetOwner([Security.Principal.SecurityIdentifier]).Value
+  $trusted = @('S-1-5-18','S-1-5-32-544','S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464')
+  if ($RequireTrustedAcl -and $owner -notin $trusted) { throw 'Launch owner.' }
+  $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
+  $untrusted = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+  foreach ($sid in @('S-1-1-0','S-1-5-11','S-1-5-32-545',$identity.User.Value)) { [void]$untrusted.Add($sid) }
+  foreach ($group in @($identity.Groups)) { if ($group.Value -notin $trusted) { [void]$untrusted.Add($group.Value) } }
+  $unsafe = [Security.AccessControl.FileSystemRights]::DeleteSubdirectoriesAndFiles -bor [Security.AccessControl.FileSystemRights]::Delete -bor [Security.AccessControl.FileSystemRights]::ChangePermissions -bor [Security.AccessControl.FileSystemRights]::TakeOwnership; if (-not $Directory) { $unsafe = $unsafe -bor [Security.AccessControl.FileSystemRights]::WriteData -bor [Security.AccessControl.FileSystemRights]::AppendData -bor [Security.AccessControl.FileSystemRights]::WriteExtendedAttributes -bor [Security.AccessControl.FileSystemRights]::WriteAttributes }
+  foreach ($rule in @($acl.GetAccessRules($true,$true,[Security.Principal.SecurityIdentifier]))) { if ($rule.AccessControlType -eq [Security.AccessControl.AccessControlType]::Allow -and $untrusted.Contains($rule.IdentityReference.Value) -and ($rule.PropagationFlags -band [Security.AccessControl.PropagationFlags]::InheritOnly) -eq 0 -and ($rule.FileSystemRights -band $unsafe) -ne 0 -and $RequireTrustedAcl) { throw 'Launch writable.' } }
+  return $owner
+}
+function Get-LaunchChain([string]$Target) { $full=[IO.Path]::GetFullPath($Target);$root=[IO.Path]::GetPathRoot($full);$values=[Collections.Generic.List[string]]::new();$values.Add($root);$current=$root;foreach($segment in @($full.Substring($root.Length)-split '\\'|Where-Object{$_})){$current=[IO.Path]::Combine($current,$segment);$values.Add($current)};return $values.ToArray() }
+function Get-LaunchNativeError([Exception]$ErrorValue) {
+  $current = $ErrorValue
+  while ($null -ne $current) {
+    if ($current -is [ComponentModel.Win32Exception]) { return $current.NativeErrorCode }
+    $current = $current.InnerException
+  }
+  return -1
+}
+function Assert-LaunchProof {
+  $encoded = $env:CLAUDEX_ARCHIVE_LAUNCH_PROOF
+  if ([string]::IsNullOrWhiteSpace($encoded) -or $encoded.Length -gt 65536) { throw 'Launch proof.' }
+  $records = ([Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($encoded))) | ConvertFrom-Json
+  $expected = [Collections.Generic.List[string]]::new()
+  $seen = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+  $systemPaths = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+  foreach ($systemPath in @(Get-LaunchChain $fixedSelf)) { [void]$systemPaths.Add($systemPath) }
+  foreach ($target in @($fixedSelf, $helperPath)) {
+    foreach ($entry in @(Get-LaunchChain $target)) { if ($seen.Add($entry)) { $expected.Add($entry) } }
+  }
+  if ($records.Count -ne $expected.Count) { throw 'Launch proof count.' }
+  for ($index = 0; $index -lt $records.Count; $index++) {
+    $record = $records[$index]
+    $names = @($record.PSObject.Properties.Name)
+    if ($names.Count -ne 9) { throw 'Launch proof schema.' }
+    $expectedPath = $expected[$index]
+    if (-not ([IO.Path]::GetFullPath([string]$record.path)).Equals($expectedPath, [StringComparison]::OrdinalIgnoreCase)) { throw 'Launch proof path.' }
+    $directory = $record.type -eq 'directory'
+    if (-not $directory -and $record.type -ne 'file') { throw 'Launch proof type.' }
+    $item = Get-Item -LiteralPath $expectedPath -Force
+    if (($directory -and -not $item.PSIsContainer) -or (-not $directory -and $item.PSIsContainer) -or
+      ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { throw 'Launch proof path type.' }
+    $requireTrustedAcl = $systemPaths.Contains($expectedPath)
+    if ($requireTrustedAcl -or -not $directory) {
+      $owner = Assert-LaunchAcl $expectedPath $requireTrustedAcl $directory
+      if ($owner -ne $record.ownerSid) { throw 'Launch proof owner.' }
+    }
+    if ($record.currentUserCanReplace -ne $false -or $record.isReparsePoint -ne $false) { throw 'Launch proof ACL.' }
+    $pin = $null
+    try {
+      $pin = [ClaudexBootstrapPin]::Open($expectedPath, $directory)
+      if (($pin.Attributes -band 0x400) -ne 0 -or [string]$pin.Volume -ne [string]$record.volume -or [string]$pin.FileId -ne [string]$record.fileId) { throw 'Launch proof identity.' }
+      $launchPins.Add($pin); $pin = $null
+    } catch {
+      if ($requireTrustedAcl -or -not $directory -or (Get-LaunchNativeError $_.Exception) -ne 5) { throw }
+    } finally { if ($null -ne $pin) { $pin.Dispose() } }
+    if (-not $directory) {
+      $actual = (Get-FileHash -LiteralPath $expectedPath -Algorithm SHA256).Hash.ToLowerInvariant()
+      if ($actual -ne $record.sha256) { throw 'Launch proof digest.' }
+    }
+  }
+}$selfStream = $null
 $stream = $null
 try {
     $selfPath = [Diagnostics.Process]::GetCurrentProcess().MainModule.FileName
     $fixedSelf = [IO.Path]::Combine($env:SystemRoot, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe')
+    Assert-LaunchProof
     if (-not $selfPath.Equals($fixedSelf, [StringComparison]::OrdinalIgnoreCase)) { throw 'PowerShell path.' }
     $acl = Get-Acl -LiteralPath $selfPath
     $currentSid = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
@@ -73,7 +154,7 @@ try {
     $reader = [IO.StreamReader]::new($stream, [Text.UTF8Encoding]::new($false), $true, 4096, $true)
     try { $scriptText = $reader.ReadToEnd() } finally { $reader.Dispose() }
     & ([ScriptBlock]::Create($scriptText)) -RequestPath $requestPath -ExpectedRequestSha256 $requestSha256 -ExpectedDestinationVolume $destinationVolume -ExpectedDestinationFileId $destinationFileId
-} catch { exit 1 } finally { if ($null -ne $stream) { $stream.Dispose() }; if ($null -ne $selfStream) { $selfStream.Dispose() } }`;
+} catch { exit 1 } finally { if ($null -ne $stream) { $stream.Dispose() }; if ($null -ne $selfStream) { $selfStream.Dispose() }; foreach ($launchPin in $launchPins) { $launchPin.Dispose() } }`;
 const WINDOWS_HELPER_BOOTSTRAP_ENCODED = Buffer.from(WINDOWS_HELPER_BOOTSTRAP, 'utf16le').toString('base64');
 const WINDOWS_CANDIDATE_PIN = String.raw`$ErrorActionPreference = 'Stop'
 $CandidatePath = $env:CLAUDEX_CANDIDATE_PATH
@@ -138,6 +219,152 @@ try {
   if ([Console]::In.ReadLine() -ne 'release') { throw 'Protocol.' }
 } catch { [Console]::Error.Write('Candidate pin refused.'); exit 1 } finally { if ($null -ne $stream) { $stream.Dispose() }; if ($null -ne $selfStream) { $selfStream.Dispose() } }`;
 const WINDOWS_CANDIDATE_PIN_ENCODED = Buffer.from(WINDOWS_CANDIDATE_PIN, 'utf16le').toString('base64');
+const WINDOWS_LAUNCH_PIN = String.raw`$ErrorActionPreference = 'Stop'
+$powershellPath = $env:CLAUDEX_LAUNCH_POWERSHELL_PATH
+$helperPath = $env:CLAUDEX_LAUNCH_HELPER_PATH
+$powershellSha256 = $env:CLAUDEX_LAUNCH_POWERSHELL_SHA256
+$helperSha256 = $env:CLAUDEX_LAUNCH_HELPER_SHA256
+$helperAncestorProof = $env:CLAUDEX_LAUNCH_HELPER_ANCESTORS
+$pins = [Collections.Generic.List[IDisposable]]::new()
+Add-Type @'
+using System;
+using System.IO;
+using System.Runtime.InteropServices;
+using Microsoft.Win32.SafeHandles;
+public sealed class ClaudexLaunchPin : IDisposable {
+  [StructLayout(LayoutKind.Sequential)] private struct Info {
+    public uint Attributes; public System.Runtime.InteropServices.ComTypes.FILETIME Creation;
+    public System.Runtime.InteropServices.ComTypes.FILETIME Access; public System.Runtime.InteropServices.ComTypes.FILETIME Write;
+    public uint Volume; public uint SizeHigh; public uint SizeLow; public uint Links; public uint IndexHigh; public uint IndexLow;
+  }
+  [DllImport("kernel32.dll", CharSet=CharSet.Unicode, SetLastError=true)]
+  private static extern SafeFileHandle CreateFileW(string name, uint access, FileShare share, IntPtr security, FileMode mode, uint flags, IntPtr template);
+  [DllImport("kernel32.dll", SetLastError=true)] [return: MarshalAs(UnmanagedType.Bool)]
+  private static extern bool GetFileInformationByHandle(SafeFileHandle handle, out Info info);
+  public readonly SafeFileHandle Handle;
+  public readonly uint Volume;
+  public readonly ulong FileId;
+  public readonly uint Attributes;
+  private ClaudexLaunchPin(SafeFileHandle handle, Info info) {
+    Handle = handle; Volume = info.Volume; FileId = ((ulong)info.IndexHigh << 32) | info.IndexLow; Attributes = info.Attributes;
+  }
+  public static ClaudexLaunchPin Open(string path, bool directory) {
+    const uint GENERIC_READ = 0x80000000, READ_CONTROL = 0x00020000, FILE_READ_ATTRIBUTES = 0x80;
+    const uint BACKUP = 0x02000000, OPEN_REPARSE = 0x00200000;
+    uint access = directory ? 0 : GENERIC_READ | READ_CONTROL | FILE_READ_ATTRIBUTES;
+    FileShare share = directory ? FileShare.Read | FileShare.Write | FileShare.Delete : FileShare.Read;
+    SafeFileHandle handle = CreateFileW(path, access, share, IntPtr.Zero,
+      FileMode.Open, OPEN_REPARSE | (directory ? BACKUP : 0), IntPtr.Zero);
+    if (handle.IsInvalid) throw new IOException("Launch pin open failed.", new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error()));
+    Info info;
+    if (!GetFileInformationByHandle(handle, out info)) { int code = Marshal.GetLastWin32Error(); handle.Dispose(); throw new IOException("Launch pin identity failed.", new System.ComponentModel.Win32Exception(code)); }
+    return new ClaudexLaunchPin(handle, info);
+  }
+  public void Dispose() { Handle.Dispose(); }
+}
+'@
+function Get-Chain([string]$Target) {
+  $full = [IO.Path]::GetFullPath($Target)
+  $root = [IO.Path]::GetPathRoot($full)
+  $result = [Collections.Generic.List[string]]::new(); $result.Add($root)
+  $current = $root
+  foreach ($segment in @($full.Substring($root.Length) -split '\\' | Where-Object { $_ })) {
+    $current = [IO.Path]::Combine($current, $segment); $result.Add($current)
+  }
+  return $result.ToArray()
+}
+function Get-NativeErrorCode([Exception]$ErrorValue) {
+  $current = $ErrorValue
+  while ($null -ne $current) {
+    if ($current -is [ComponentModel.Win32Exception]) { return $current.NativeErrorCode }
+    $current = $current.InnerException
+  }
+  return -1
+}
+function Get-ExpectedHelperAncestors {
+  if ([string]::IsNullOrWhiteSpace($helperAncestorProof) -or $helperAncestorProof.Length -gt 65536) { throw 'Helper ancestor proof.' }
+  $values = ([Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($helperAncestorProof))) | ConvertFrom-Json
+  $result = @{}
+  foreach ($value in $values) { $result[[IO.Path]::GetFullPath([string]$value.path).ToUpperInvariant()] = $value }
+  return $result
+}
+function Inspect-HelperDirectory([string]$Target, [object]$Expected) {
+  $item = Get-Item -LiteralPath $Target -Force
+  if (-not $item.PSIsContainer -or ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0 -or $null -eq $Expected) { throw 'Helper ancestor.' }
+  $pin = $null
+  try {
+    $pin = [ClaudexLaunchPin]::Open($item.FullName, $true)
+    if (($pin.Attributes -band 0x400) -ne 0 -or [string]$pin.Volume -ne [string]$Expected.volume -or [string]$pin.FileId -ne [string]$Expected.fileId) { throw 'Helper ancestor identity.' }
+    $pins.Add($pin); $pin = $null
+  } catch {
+    if ((Get-NativeErrorCode $_.Exception) -ne 5) { throw }
+  } finally { if ($null -ne $pin) { $pin.Dispose() } }
+  return [ordered]@{
+    path = $item.FullName; type = 'directory'; volume = [string]$Expected.volume; fileId = [string]$Expected.fileId
+    ownerSid = [string]$Expected.ownerSid; daclProtected = [bool]$Expected.daclProtected; currentUserCanReplace = $false
+    isReparsePoint = $false; sha256 = $null
+  }
+}function Inspect-And-Pin([string]$Target, [string]$Type, [AllowNull()][string]$ExpectedSha, [bool]$RequireTrustedAcl) {
+  $item = Get-Item -LiteralPath $Target -Force
+  $directory = $Type -eq 'directory'
+  if (($directory -and -not $item.PSIsContainer) -or (-not $directory -and $item.PSIsContainer)) { throw 'Type.' }
+  $pin = [ClaudexLaunchPin]::Open($item.FullName, $directory); $pins.Add($pin)
+  if (($pin.Attributes -band 0x400) -ne 0) { throw 'Reparse.' }
+  $acl = Get-Acl -LiteralPath $item.FullName
+  $owner = $acl.GetOwner([Security.Principal.SecurityIdentifier]).Value
+  $trusted = @('S-1-5-18', 'S-1-5-32-544', 'S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464')
+  if ($RequireTrustedAcl -and $owner -notin $trusted) { throw 'Owner.' }
+  $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
+  $untrusted = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+  foreach ($sid in @('S-1-1-0', 'S-1-5-11', 'S-1-5-32-545', $identity.User.Value)) { [void]$untrusted.Add($sid) }
+  foreach ($group in @($identity.Groups)) { if ($group.Value -notin $trusted) { [void]$untrusted.Add($group.Value) } }
+  $unsafe = [Security.AccessControl.FileSystemRights]::DeleteSubdirectoriesAndFiles -bor [Security.AccessControl.FileSystemRights]::Delete -bor
+    [Security.AccessControl.FileSystemRights]::ChangePermissions -bor [Security.AccessControl.FileSystemRights]::TakeOwnership
+  if (-not $directory) {
+    $unsafe = $unsafe -bor [Security.AccessControl.FileSystemRights]::WriteData -bor [Security.AccessControl.FileSystemRights]::AppendData -bor
+      [Security.AccessControl.FileSystemRights]::WriteExtendedAttributes -bor [Security.AccessControl.FileSystemRights]::WriteAttributes
+  }
+  foreach ($rule in @($acl.GetAccessRules($true, $true, [Security.Principal.SecurityIdentifier]))) {
+    if ($rule.AccessControlType -eq [Security.AccessControl.AccessControlType]::Allow -and $untrusted.Contains($rule.IdentityReference.Value) -and
+      ($rule.PropagationFlags -band [Security.AccessControl.PropagationFlags]::InheritOnly) -eq 0 -and
+      ($rule.FileSystemRights -band $unsafe) -ne 0 -and $RequireTrustedAcl) { throw 'Writable.' }
+  }
+  $actualSha = $null
+  if (-not $directory) {
+    $actualSha = (Get-FileHash -LiteralPath $item.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+    if ($actualSha -ne $ExpectedSha) { throw 'Digest.' }
+  }
+  return [ordered]@{
+    path = $item.FullName; type = $Type; volume = [string]$pin.Volume; fileId = [string]$pin.FileId
+    ownerSid = $owner; daclProtected = [bool]$acl.AreAccessRulesProtected; currentUserCanReplace = $false
+    isReparsePoint = $false; sha256 = $actualSha
+  }
+}
+try {
+  if ($powershellPath -ne [IO.Path]::Combine($env:SystemRoot, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe') -or
+    $powershellSha256 -notmatch '^[a-f0-9]{64}$' -or $helperSha256 -notmatch '^[a-f0-9]{64}$') { throw 'Input.' }
+  $records = [Collections.Generic.List[object]]::new()
+  $seen = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+  $expectedHelperAncestors = Get-ExpectedHelperAncestors
+  foreach ($pair in @(@($powershellPath, $powershellSha256, $true), @($helperPath, $helperSha256, $false))) {
+    $chain = @(Get-Chain $pair[0])
+    for ($index = 0; $index -lt $chain.Count; $index++) {
+      $entryPath = $chain[$index]
+      if (-not $seen.Add($entryPath)) { continue }
+      $isFile = $index -eq ($chain.Count - 1)
+      if (-not [bool]$pair[2] -and -not $isFile) {
+        $records.Add((Inspect-HelperDirectory $entryPath $expectedHelperAncestors[$entryPath.ToUpperInvariant()]))
+        continue
+      }
+      $entryType = if ($isFile) { 'file' } else { 'directory' }
+      $entrySha = if ($isFile) { $pair[1] } else { $null }
+      $records.Add((Inspect-And-Pin $entryPath $entryType $entrySha ([bool]$pair[2])))
+    }
+  }  [Console]::Out.WriteLine((ConvertTo-Json -InputObject @($records) -Compress -Depth 5)); [Console]::Out.Flush()
+  if ([Console]::In.ReadLine() -ne 'release') { throw 'Protocol.' }
+} catch { [Console]::Error.Write('Launch boundary refused.'); exit 1 } finally { foreach ($pin in $pins) { $pin.Dispose() } }
+`;
+const WINDOWS_LAUNCH_PIN_ENCODED = Buffer.from(WINDOWS_LAUNCH_PIN, 'utf16le').toString('base64');
 export const ARCHIVE_HELPER_PATH = fileURLToPath(new URL('../../scripts/windows/archive-helper.ps1', import.meta.url));
 const FIXED_POSIX_TAR_PATHS = new Set(['/usr/bin/tar', '/bin/tar']);
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -798,7 +1025,7 @@ function boundedText(value, maxOutputBytes, stream) {
 
 function defaultRunProcess(command, args, {
   shell, timeoutMs, maxOutputBytes, terminationGraceMs = 250, terminationDeadlineMs = 2000,
-  spawnChildApi = spawnChild, env
+  spawnChildApi = spawnChild, env, afterChildCreate
 }) {
   return new Promise((resolve, reject) => {
     let child;
@@ -849,6 +1076,11 @@ function defaultRunProcess(command, args, {
     child.once('close', (code) => termination
       ? finish(reject, capability(termination))
       : finish(resolve, { code, stdout, stderr }));
+    if (afterChildCreate) {
+      Promise.resolve().then(() => afterChildCreate(child)).catch(() => {
+        terminate('The fixed archive launch boundary changed after child creation.');
+      });
+    }
   });
 }
 
@@ -870,6 +1102,87 @@ async function runProcess(command, args, options, adapter) {
   return result;
 }
 
+const TRUSTED_WINDOWS_OWNER_SIDS = new Set([
+  'S-1-5-18',
+  'S-1-5-32-544',
+  'S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464'
+]);
+
+function fixedWindowsLaunchPaths(target) {
+  const normalized = path.win32.normalize(target);
+  const root = path.win32.parse(normalized).root;
+  const result = [root];
+  let current = root;
+  for (const segment of normalized.slice(root.length).split('\\').filter(Boolean)) {
+    current = path.win32.join(current, segment);
+    result.push(current);
+  }
+  return result;
+}
+
+export function testValidateWindowsLaunchChain(records, {
+  powershellPath = FIXED_POWERSHELL_PATH,
+  helperPath = ARCHIVE_HELPER_PATH,
+  powershellSha256,
+  helperSha256,
+  powershellIdentity,
+  helperIdentity
+} = {}) {
+  if (!Array.isArray(records) || !/^[a-f0-9]{64}$/.test(powershellSha256 ?? '')
+    || !/^[a-f0-9]{64}$/.test(helperSha256 ?? '')) {
+    throw capability('The fixed Windows launch proof is invalid.');
+  }
+  const expectedPaths = [];
+  for (const target of [powershellPath, helperPath]) {
+    for (const entryPath of fixedWindowsLaunchPaths(target)) {
+      if (!expectedPaths.some((value) => sameWindowsPath(value, entryPath))) expectedPaths.push(entryPath);
+    }
+  }
+  if (records.length !== expectedPaths.length) throw capability('The fixed Windows launch proof is incomplete.');
+  const identities = new Set();
+  const systemPaths = fixedWindowsLaunchPaths(powershellPath);
+  const normalized = records.map((record, index) => {
+    assertHelperExactKeys(record, [
+      'path', 'type', 'volume', 'fileId', 'ownerSid', 'daclProtected',
+      'currentUserCanReplace', 'isReparsePoint', 'sha256'
+    ]);
+    const expectedPath = expectedPaths[index];
+    const isFile = sameWindowsPath(expectedPath, powershellPath) || sameWindowsPath(expectedPath, helperPath);
+    const expectedDigest = sameWindowsPath(expectedPath, powershellPath) ? powershellSha256
+      : sameWindowsPath(expectedPath, helperPath) ? helperSha256 : null;
+    const expectedIdentity = sameWindowsPath(expectedPath, powershellPath) ? powershellIdentity
+      : sameWindowsPath(expectedPath, helperPath) ? helperIdentity : undefined;
+    const identityKey = String(record.volume) + ':' + String(record.fileId);
+    if (typeof record.path !== 'string' || !sameWindowsPath(record.path, expectedPath)
+      || record.type !== (isFile ? 'file' : 'directory')
+      || !/^(0|[1-9][0-9]*)$/.test(String(record.volume))
+      || !/^(0|[1-9][0-9]*)$/.test(String(record.fileId))
+      || identities.has(identityKey)
+      || (expectedIdentity && (String(record.volume) !== expectedIdentity.dev || String(record.fileId) !== expectedIdentity.ino))
+      || (systemPaths.some((systemPath) => sameWindowsPath(systemPath, expectedPath))
+        && !TRUSTED_WINDOWS_OWNER_SIDS.has(record.ownerSid))
+      || typeof record.ownerSid !== 'string' || !/^S-1-\d+(?:-\d+)+$/i.test(record.ownerSid)
+      || typeof record.daclProtected !== 'boolean'
+      || record.currentUserCanReplace !== false
+      || record.isReparsePoint !== false
+      || record.sha256 !== expectedDigest) {
+      throw capability('A fixed Windows launch ancestor is unsafe.');
+    }
+    identities.add(identityKey);
+    return {
+      path: path.win32.normalize(record.path),
+      type: record.type,
+      volume: String(record.volume),
+      fileId: String(record.fileId),
+      ownerSid: record.ownerSid,
+      daclProtected: record.daclProtected,
+      currentUserCanReplace: false,
+      isReparsePoint: false,
+      sha256: record.sha256
+    };
+  });
+  return deepFreeze(normalized);
+}
 async function verifyFixedAncestorChain(exactPath, fsApi) {
   const normalized = path.normalize(exactPath);
   const root = path.parse(normalized).root;
@@ -1098,6 +1411,146 @@ function compareHelperResult(result, plan, stagingDir) {
   }
 }
 
+async function collectWindowsHelperAncestorProof(helperPath, fsApi, ownerSid) {
+  const records = [];
+  const paths = fixedWindowsLaunchPaths(helperPath).slice(0, -1);
+  for (const ancestorPath of paths) {
+    const stats = await fsApi.lstat(ancestorPath);
+    const exact = await fsApi.lstat(ancestorPath, { bigint: true });
+    if (!stats.isDirectory?.() || stats.isSymbolicLink?.() || stats.isReparsePoint === true) {
+      throw capability('A bundled archive-helper ancestor is unsafe.');
+    }
+    records.push({
+      path: path.win32.normalize(ancestorPath),
+      type: 'directory',
+      volume: String(exact.dev),
+      fileId: String(exact.ino),
+      ownerSid,
+      daclProtected: false,
+      currentUserCanReplace: false,
+      isReparsePoint: false,
+      sha256: null
+    });
+  }
+  return deepFreeze(records);
+}
+async function recheckNativeWindowsLaunchProof(proof) {
+  const systemPaths = fixedWindowsLaunchPaths(FIXED_POWERSHELL_PATH);
+  for (const record of proof) {
+    const stats = await fs.lstat(record.path, { bigint: true });
+    let canonicalMatches = true;
+    try {
+      canonicalMatches = sameWindowsPath(await fs.realpath(record.path), record.path);
+    } catch (cause) {
+      if (cause?.code !== 'EPERM' || systemPaths.some((systemPath) => sameWindowsPath(systemPath, record.path))) throw cause;
+    }
+    if (!canonicalMatches
+      || (record.type === 'file' ? !stats.isFile() : !stats.isDirectory())
+      || stats.isSymbolicLink?.() || stats.isReparsePoint === true
+      || String(stats.dev) !== record.volume || String(stats.ino) !== record.fileId) {
+      throw capability('A fixed Windows launch ancestor changed while natively pinned.');
+    }
+    if (record.sha256 !== null) {
+      const bytes = await fs.readFile(record.path);
+      if (!sameDigest(digest(bytes), record.sha256)) {
+        throw capability('A fixed Windows launch file changed while natively pinned.');
+      }
+    }
+  }
+  return proof;
+}
+async function defaultCreateWindowsLaunchPin(input) {
+  const child = spawnChild(FIXED_POWERSHELL_PATH, [
+    '-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass',
+    '-EncodedCommand', WINDOWS_LAUNCH_PIN_ENCODED
+  ], {
+    shell: false,
+    windowsHide: true,
+    stdio: ['pipe', 'pipe', 'pipe'],
+    env: {
+      ...process.env,
+      CLAUDEX_LAUNCH_POWERSHELL_PATH: input.powershellPath,
+      CLAUDEX_LAUNCH_HELPER_PATH: input.helperPath,
+      CLAUDEX_LAUNCH_POWERSHELL_SHA256: input.powershellSha256,
+      CLAUDEX_LAUNCH_HELPER_SHA256: input.helperSha256,
+      CLAUDEX_LAUNCH_HELPER_ANCESTORS: Buffer.from(JSON.stringify(input.helperAncestors), 'utf8').toString('base64')
+    }
+  });
+  child.stdout.setEncoding('utf8');
+  child.stderr.setEncoding('utf8');
+  let stdout = '';
+  let stderr = '';
+  let proof;
+  let closedCode;
+  let resolveClose;
+  const closePromise = new Promise((resolve) => { resolveClose = resolve; });
+  const readyPromise = new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(capability('The fixed Windows launch pin timed out.')), 15000);
+    const fail = (error) => {
+      clearTimeout(timer);
+      reject(error);
+    };
+    child.once('error', (cause) => fail(prerequisite('The fixed Windows launch pin could not start.', cause)));
+    child.once('close', (code) => {
+      closedCode = code;
+      resolveClose(code);
+      if (!proof) fail(capability('The fixed Windows launch pin refused the supported path boundary.'));
+    });
+    child.stderr.on('data', (chunk) => {
+      stderr += chunk;
+      if (Buffer.byteLength(stderr, 'utf8') > 1024) fail(capability('The fixed Windows launch pin returned excessive diagnostics.'));
+    });
+    child.stdout.on('data', (chunk) => {
+      stdout += chunk;
+      if (Buffer.byteLength(stdout, 'utf8') > ARCHIVE_LIMITS.outputBytes) {
+        fail(capability('The fixed Windows launch pin returned excessive output.'));
+        return;
+      }
+      const lines = stdout.split(/\r?\n/);
+      if (lines.length < 2) return;
+      if (lines.length !== 2 || lines[1] !== '') {
+        fail(capability('The fixed Windows launch pin returned an invalid proof envelope.'));
+        return;
+      }
+      try {
+        proof = JSON.parse(lines[0]);
+      } catch (cause) {
+        fail(capability('The fixed Windows launch pin returned invalid JSON.', cause));
+        return;
+      }
+      clearTimeout(timer);
+      resolve(proof);
+    });
+  });
+  try {
+    proof = await readyPromise;
+  } catch (cause) {
+    child.kill();
+    throw cause;
+  }
+  return {
+    proof,
+    recheck: async () => {
+      if (closedCode !== undefined || child.killed) throw capability('The fixed Windows launch pin ended unexpectedly.');
+      return recheckNativeWindowsLaunchProof(proof);
+    },
+    release: async () => {
+      if (closedCode !== undefined) {
+        if (closedCode !== 0) throw capability('The fixed Windows launch pin ended unsafely.');
+        return;
+      }
+      child.stdin.end('release\n');
+      let timer;
+      const deadline = new Promise((resolve) => { timer = setTimeout(() => resolve(null), 5000); });
+      const code = await Promise.race([closePromise, deadline]);
+      clearTimeout(timer);
+      if (code !== 0) {
+        child.kill();
+        throw capability('The fixed Windows launch pin did not release cleanly.');
+      }
+    }
+  };
+}
 async function runWindowsExtraction(plan, staging, adapter) {
   const fsApi = adapter.fsApi ?? fs;
   const tools = adapter.verifyWindowsTools
@@ -1119,6 +1572,19 @@ async function runWindowsExtraction(plan, staging, adapter) {
     powershell: await fixedFileDigest(tools.powershellPath, toolIdentities.powershell, fsApi),
     helper: await fixedFileDigest(tools.helperPath, toolIdentities.helper, fsApi)
   };
+  const toolNativeIdentities = {
+    powershell: exactIdentity(await fsApi.lstat(tools.powershellPath, { bigint: true })),
+    helper: exactIdentity(await fsApi.lstat(tools.helperPath, { bigint: true }))
+  };
+  const launchInput = {
+    powershellPath: tools.powershellPath,
+    helperPath: tools.helperPath,
+    powershellSha256: toolDigests.powershell,
+    helperSha256: toolDigests.helper,
+    powershellIdentity: toolNativeIdentities.powershell,
+    helperIdentity: toolNativeIdentities.helper,
+    helperAncestors: await collectWindowsHelperAncestorProof(tools.helperPath, fsApi, adapter.currentUserSid ?? 'S-1-0-0')
+  };
   const requestId = randomUUID();
   const input = buildArchiveHelperRequest({
     requestId,
@@ -1128,31 +1594,47 @@ async function runWindowsExtraction(plan, staging, adapter) {
     entries: plan.entries.map(helperEntry)
   });
   const requestSha256 = digest(Buffer.from(input, 'utf8'));
-  const storage = await (adapter.createPrivateRequest ?? ((value) => defaultPrivateRequest(value, adapter)))(input);
   let response;
   let operationError;
   let requestIdentity;
+  let storage;
+  let launchPin;
+  let launchProof;
+  const recheckLaunchBoundary = async () => {
+    if (!launchPin || typeof launchPin.recheck !== 'function') {
+      throw capability('The fixed Windows launch pin is invalid.');
+    }
+    const proof = await launchPin.recheck();
+    launchProof = testValidateWindowsLaunchChain(proof, launchInput);
+    if (!sameDigest(await fixedFileDigest(tools.powershellPath, toolIdentities.powershell, fsApi), toolDigests.powershell)
+      || !sameDigest(await fixedFileDigest(tools.helperPath, toolIdentities.helper, fsApi), toolDigests.helper)) {
+      throw capability('A fixed archive extractor changed after native launch pinning.');
+    }
+    return launchProof;
+  };
   try {
+    launchPin = await (adapter.createWindowsLaunchPin ?? defaultCreateWindowsLaunchPin)(launchInput);
+    if (!launchPin || typeof launchPin.release !== 'function' || typeof launchPin.recheck !== 'function') {
+      throw capability('The fixed Windows launch pin is invalid.');
+    }
+    launchProof = testValidateWindowsLaunchChain(launchPin.proof, launchInput);
+    await adapter.afterWindowsLaunchPin?.({ launchProof, tools });
+    await recheckLaunchBoundary();
+    storage = await (adapter.createPrivateRequest ?? ((value) => defaultPrivateRequest(value, adapter)))(input);
     if (!storage || typeof storage.requestPath !== 'string' || !path.isAbsolute(storage.requestPath) || typeof storage.cleanup !== 'function') {
       throw safety('The archive helper request storage is invalid.');
     }
     await assertExactFile(storage.requestPath, undefined, fsApi);
     requestIdentity = exactIdentity(await fsApi.lstat(storage.requestPath, { bigint: true }));
     await adapter.beforeExtractorSpawn?.({ plan, stagingDir: staging.target, requestPath: storage.requestPath, tools });
-    if (!sameDigest(await fixedFileDigest(tools.powershellPath, toolIdentities.powershell, fsApi), toolDigests.powershell)
-      || !sameDigest(await fixedFileDigest(tools.helperPath, toolIdentities.helper, fsApi), toolDigests.helper)) {
-      throw capability('A fixed archive extractor changed after identity pinning.');
-    }
+    await recheckLaunchBoundary();
     await recheckArchive(plan, fsApi);
     await assertExactDirectory(staging.target, staging.identity, fsApi, { mode: 0o700, parent: staging.rootStats, enforceMode: plan.targetPlatform !== 'win32' });
     await assertExactNativeFile(storage.requestPath, requestIdentity, fsApi);
     await adapter.beforeLaunchIdentityValidation?.({
       plan, stagingDir: staging.target, requestPath: storage.requestPath, tools, toolIdentities, requestSha256
     });
-    if (!sameDigest(await fixedFileDigest(tools.powershellPath, toolIdentities.powershell, fsApi), toolDigests.powershell)
-      || !sameDigest(await fixedFileDigest(tools.helperPath, toolIdentities.helper, fsApi), toolDigests.helper)) {
-      throw capability('A fixed archive extractor changed after identity pinning.');
-    }
+    await recheckLaunchBoundary();
     await recheckArchive(plan, fsApi);
     await assertExactDirectory(staging.target, staging.identity, fsApi, { mode: 0o700, parent: staging.rootStats, enforceMode: plan.targetPlatform !== 'win32' });
     await assertExactNativeFile(storage.requestPath, requestIdentity, fsApi);
@@ -1161,6 +1643,7 @@ async function runWindowsExtraction(plan, staging, adapter) {
       CLAUDEX_ARCHIVE_POWERSHELL_SHA256: toolDigests.powershell,
       CLAUDEX_ARCHIVE_HELPER_PATH: tools.helperPath,
       CLAUDEX_ARCHIVE_HELPER_SHA256: toolDigests.helper,
+      CLAUDEX_ARCHIVE_LAUNCH_PROOF: Buffer.from(JSON.stringify(launchProof), 'utf8').toString('base64'),
       CLAUDEX_ARCHIVE_REQUEST_PATH: storage.requestPath,
       CLAUDEX_ARCHIVE_REQUEST_SHA256: requestSha256,
       CLAUDEX_ARCHIVE_DESTINATION_VOLUME: staging.nativeIdentity.volume,
@@ -1170,22 +1653,29 @@ async function runWindowsExtraction(plan, staging, adapter) {
       plan, stagingDir: staging.target, requestPath: storage.requestPath, tools, toolIdentities,
       requestSha256, helperEnvironment
     });
-    if (!sameDigest(await fixedFileDigest(tools.powershellPath, toolIdentities.powershell, fsApi), toolDigests.powershell)
-      || !sameDigest(await fixedFileDigest(tools.helperPath, toolIdentities.helper, fsApi), toolDigests.helper)
-      || !sameDigest(await fixedExactFileDigest(storage.requestPath, requestIdentity, fsApi), requestSha256)) {
+    await recheckLaunchBoundary();
+    if (!sameDigest(await fixedExactFileDigest(storage.requestPath, requestIdentity, fsApi), requestSha256)) {
       throw capability('A fixed archive launch input changed at the process boundary.');
     }
     await recheckArchive(plan, fsApi);
     await assertExactNativeDirectory(staging.target, {
       dev: staging.nativeIdentity.volume, ino: staging.nativeIdentity.fileId
     }, fsApi, { mode: 0o700, parent: staging.rootStats, enforceMode: false });
+    const afterChildCreate = async () => {
+      await recheckLaunchBoundary();
+      await assertExactNativeFile(storage.requestPath, requestIdentity, fsApi);
+      await assertExactNativeDirectory(staging.target, {
+        dev: staging.nativeIdentity.volume, ino: staging.nativeIdentity.fileId
+      }, fsApi, { mode: 0o700, parent: staging.rootStats, enforceMode: false });
+    };
     const result = await runProcess(tools.powershellPath, [
       '-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass',
       '-EncodedCommand', WINDOWS_HELPER_BOOTSTRAP_ENCODED
     ], {
       shell: false, timeoutMs: ARCHIVE_LIMITS.extractionDeadlineMs,
-      maxOutputBytes: ARCHIVE_LIMITS.outputBytes, env: helperEnvironment
+      maxOutputBytes: ARCHIVE_LIMITS.outputBytes, env: helperEnvironment, afterChildCreate
     }, adapter);
+    await afterChildCreate();
     response = parseArchiveHelperResponse(result.stdout, { requestId });
     if (result.code !== 0 || response.ok === false) throw capability('The Windows archive helper refused extraction.');
     compareHelperResult(response.result, plan, staging.target);
@@ -1193,15 +1683,26 @@ async function runWindowsExtraction(plan, staging, adapter) {
     operationError = cause;
   }
   if (operationError?.details?.exitUnconfirmed) {
-    operationError.details = { ...operationError.details, requestStorageRetained: true };
+    operationError.details = {
+      ...operationError.details,
+      requestStorageRetained: Boolean(storage),
+      launchPinRetained: Boolean(launchPin)
+    };
     throw operationError;
   }
+  let cleanupError;
   try {
     if (requestIdentity) await assertExactNativeFile(storage.requestPath, requestIdentity, fsApi);
     await storage?.cleanup?.();
   } catch (cause) {
-    throw safety('The archive helper request cleanup failed closed.', cause);
+    cleanupError = safety('The archive helper request cleanup failed closed.', cause);
   }
+  try {
+    await launchPin?.release?.();
+  } catch (cause) {
+    cleanupError ??= safety('The fixed Windows launch pin could not be released safely.', cause);
+  }
+  if (cleanupError) throw cleanupError;
   if (operationError) throw operationError;
 }
 async function runPosixExtraction(plan, stagingDir, adapter) {
@@ -1390,7 +1891,7 @@ async function walkExtractedTree(plan, staging, adapter) {
     const after = await handle.stat();
     if (!sameIdentity(before, after) || after.size !== bytes.length || bytes.length !== candidate[0].size
       || !sameDigest(digest(bytes), candidate[0].sha256)) throw unsafe('The extracted candidate changed during handle verification.');
-    await adapter.afterCandidateReadBeforeReturn?.({ plan, stagingDir: staging.target, candidatePath });
+    await adapter.afterCandidateReadBeforeReturn?.({ plan, stagingDir: staging.target });
     const finalPath = await fsApi.lstat(candidatePath);
     const finalCanonical = await fsApi.realpath(candidatePath);
     if (!sameIdentity(finalPath, after) || finalPath.isSymbolicLink?.() || finalPath.isReparsePoint === true
@@ -1422,6 +1923,15 @@ async function readExactHandle(handle, expectedSize) {
   return bytes;
 }
 
+function containsInternalCandidatePath(value, internalPath, seen = new WeakSet()) {
+  if (typeof value === 'string') return path.isAbsolute(value) && sameHostPath(value, internalPath);
+  if (!value || typeof value !== 'object' || Buffer.isBuffer(value) || seen.has(value)) return false;
+  seen.add(value);
+  for (const key of Object.keys(value)) {
+    if (containsInternalCandidatePath(value[key], internalPath, seen)) return true;
+  }
+  return false;
+}
 export async function withValidatedExtractedCandidate(candidate, consumer, adapter = {}) {
   const record = extractedCandidates.get(candidate);
   if (!record || !Object.isFrozen(candidate) || typeof consumer !== 'function') {
@@ -1445,13 +1955,32 @@ export async function withValidatedExtractedCandidate(candidate, consumer, adapt
       || after.size !== bytes.length || !sameDigest(digest(bytes), candidate.sha256)) {
       throw unsafe('The extracted candidate changed before scoped use.');
     }
-    await adapter.beforeCandidateConsumer?.({ candidatePath: record.path });
+    await adapter.beforeCandidateConsumer?.({ candidate });
     const finalPath = await fsApi.lstat(record.path, { bigint: true });
     const finalCanonical = await fsApi.realpath(record.path);
     if (!sameExactIdentity(finalPath, record.identity) || finalPath.isSymbolicLink?.() || finalPath.isReparsePoint === true
       || !sameHostPath(finalCanonical, record.path)) throw unsafe('The extracted candidate pathname changed before scoped use.');
-    const scope = Object.freeze({ path: record.path, handle, identity: record.identity });
+    const read = async () => {
+      const readBefore = await handle.stat({ bigint: true });
+      if (!sameExactIdentity(readBefore, record.identity)) throw unsafe('The extracted candidate handle changed during scoped use.');
+      const value = await readExactHandle(handle, candidate.size);
+      const readAfter = await handle.stat({ bigint: true });
+      if (!sameExactIdentity(readAfter, record.identity) || !sameDigest(digest(value), candidate.sha256)) {
+        throw unsafe('The extracted candidate changed during scoped use.');
+      }
+      return Buffer.from(value);
+    };
+    const scope = Object.freeze({
+      handle,
+      identity: record.identity,
+      read,
+      sha256: candidate.sha256,
+      size: candidate.size
+    });
     const result = await consumer(scope);
+    if (containsInternalCandidatePath(result, record.path)) {
+      throw unsafe('The extracted candidate pathname cannot leave the scoped-use boundary.');
+    }
     const callbackAfter = await handle.stat();
     const callbackExact = await handle.stat({ bigint: true });
     const callbackPath = await fsApi.lstat(record.path, { bigint: true });

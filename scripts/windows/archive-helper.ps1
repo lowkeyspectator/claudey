@@ -300,9 +300,20 @@ try {
         [void](Assert-DirectoryIdentity $parent $parentIdentity)
         if ($planned.type -eq 'directory') {
             if ($zipEntry.Length -ne 0) { throw 'ZIP directory.' }
-            [void][IO.Directory]::CreateDirectory($target)
-            $createdIdentity = Get-DirectoryIdentity $target
-            $directoryIdentities[(Directory-Key $target)] = $createdIdentity
+            $leaf = [IO.Path]::GetFileName($target)
+            $createdNative = [ClaudexArchiveNativeIdentity]::CreateDirectoryRelative($parentIdentity.native.Handle, $leaf)
+            try {
+                $createdIdentity = [pscustomobject]@{
+                    path = $target
+                    volume = $createdNative.VolumeSerialNumber
+                    fileId = $createdNative.FileId
+                    native = $createdNative
+                }
+                $directoryIdentities[(Directory-Key $target)] = $createdIdentity
+                $createdNative = $null
+            } finally {
+                if ($null -ne $createdNative) { $createdNative.Dispose() }
+            }
             [void](Assert-DirectoryIdentity $parent $parentIdentity)
             [void](Assert-DirectoryIdentity $target $createdIdentity)
         } else {

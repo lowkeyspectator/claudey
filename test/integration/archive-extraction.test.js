@@ -17,6 +17,7 @@ import {
   extractValidatedArchive,
   parseArchiveHelperResponse,
   revalidateExtractedCandidate,
+  testValidateWindowsLaunchChain,
   withValidatedExtractedCandidate,
   validateArchive
 } from '../../src/core/archive.js';
@@ -76,6 +77,47 @@ function helperEntries(plan) {
   }));
 }
 
+function fakeWindowsLaunchRecords({ powershellPath, helperPath, powershellSha256, helperSha256, powershellIdentity, helperIdentity }) {
+  const records = [];
+  const addChain = (target, fileSha256, fileIdentity) => {
+    const normalized = path.win32.normalize(target);
+    const root = path.win32.parse(normalized).root;
+    let current = root;
+    const values = [{ path: root, type: 'directory' }];
+    for (const segment of normalized.slice(root.length).split('\\').filter(Boolean)) {
+      current = path.win32.join(current, segment);
+      values.push({ path: current, type: current === normalized ? 'file' : 'directory' });
+    }
+    for (const value of values) {
+      if (records.some((record) => record.path.toLowerCase() === value.path.toLowerCase())) continue;
+      records.push({
+        ...value,
+        volume: value.type === 'file' && fileIdentity ? fileIdentity.dev : '7',
+        fileId: value.type === 'file' && fileIdentity ? fileIdentity.ino : String(1000 + records.length),
+        ownerSid: 'S-1-5-18',
+        daclProtected: value.path.toLowerCase() === normalized.toLowerCase(),
+        currentUserCanReplace: false,
+        isReparsePoint: false,
+        sha256: value.type === 'file' ? fileSha256 : null
+      });
+    }
+  };
+  addChain(powershellPath, powershellSha256, powershellIdentity);
+  addChain(helperPath, helperSha256, helperIdentity);
+  return records;
+}
+
+function fakeWindowsLaunchPin(state) {
+  return async (input) => {
+    state.created = true;
+    const proof = fakeWindowsLaunchRecords(input);
+    return {
+      proof,
+      recheck: async () => { state.rechecks += 1; return proof; },
+      release: async () => { state.released = true; }
+    };
+  };
+}
 function posixAdapter(plan, action = {}) {
   const simulatedModes = new Map();
   return {
@@ -130,10 +172,14 @@ test('extracts only through fixed absolute tar arguments and returns a frozen ca
   });
   assert.equal(Object.hasOwn(candidate, 'path'), false);
   assert.equal(Object.isFrozen(candidate), true);
-  const scoped = await withValidatedExtractedCandidate(candidate, async ({ path: candidatePath, handle, identity }) => ({
-    candidatePath, bytes: await handle.readFile(), identity
+  const scoped = await withValidatedExtractedCandidate(candidate, async (scope) => ({
+    keys: Object.keys(scope).sort(),
+    hasPath: Object.hasOwn(scope, 'path'),
+    bytes: await scope.read(),
+    identity: scope.identity
   }), { fsApi: adapter.fsApi });
-  assert.equal(scoped.candidatePath, path.join(fixture.staging, 'bin', 'CLIProxyAPI'));
+  assert.deepEqual(scoped.keys, ['handle', 'identity', 'read', 'sha256', 'size']);
+  assert.equal(scoped.hasPath, false);
   assert.equal(scoped.bytes.toString(), 'candidate');
   assert.deepEqual(Object.keys(scoped.identity).sort(), ['dev', 'ino']);
   assert.equal(await revalidateExtractedCandidate(candidate, { fsApi: adapter.fsApi }), candidate);
@@ -167,8 +213,10 @@ test('invokes only fixed System32 PowerShell and the bundled helper with a priva
   const action = { staging: fixture.staging };
   const requestPath = path.join(fixture.root, 'private-request.json');
   let stagingProtected = false;
+  const launchPin = { created: false, rechecks: 0, released: false };
   const adapter = {
     targetPlatform: 'win32',
+    createWindowsLaunchPin: fakeWindowsLaunchPin(launchPin),
     currentUserSid: 'S-1-5-21-1',
     protectStaging: async (target) => { assert.equal(path.dirname(target), fixture.root); if (target === fixture.staging) stagingProtected = true; },
     verifyWindowsTools: async () => ({
@@ -208,8 +256,10 @@ test('invokes only fixed System32 PowerShell and the bundled helper with a priva
     }
   };
   const candidate = await extractValidatedArchive(fixture.plan, fixture.staging, adapter);
-  assert.equal(await withValidatedExtractedCandidate(candidate, ({ path: candidatePath }) => candidatePath),
-    path.join(fixture.staging, 'bin', 'CLIProxyAPI.exe'));
+  assert.equal((await withValidatedExtractedCandidate(candidate, ({ read }) => read())).toString(), 'candidate');
+  assert.equal(launchPin.created, true);
+  assert.equal(launchPin.rechecks, 5);
+  assert.equal(launchPin.released, true);
   await assert.rejects(() => fs.access(requestPath), { code: 'ENOENT' });
 });
 
@@ -351,6 +401,7 @@ test('refuses helper metadata differing from the immutable plan before candidate
   const requestPath = path.join(fixture.root, 'request.json');
   await assert.rejects(() => extractValidatedArchive(fixture.plan, fixture.staging, {
     targetPlatform: 'win32', currentUserSid: 'S-1-5-21-1',
+    createWindowsLaunchPin: fakeWindowsLaunchPin({ created: false, rechecks: 0, released: false }),
     verifyWindowsTools: async () => ({ powershellPath: 'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe', helperPath: ARCHIVE_HELPER_PATH }),
     protectStaging: async (target) => assert.equal(path.dirname(target), fixture.root),
     createPrivateRequest: async (input) => {
@@ -367,6 +418,35 @@ test('refuses helper metadata differing from the immutable plan before candidate
     }
   }), (error) => error?.code === 'ARCHIVE_UNSAFE');
   assert.equal((await fs.lstat(fixture.staging)).isDirectory(), true);
+});
+test('Windows launch chain rejects writable or spoof-owned ancestors and binds exact native identities', () => {
+  const powershellPath = 'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe';
+  const powershellSha256 = 'a'.repeat(64);
+  const helperSha256 = 'b'.repeat(64);
+  const expected = fakeWindowsLaunchRecords({
+    powershellPath, helperPath: ARCHIVE_HELPER_PATH, powershellSha256, helperSha256
+  });
+  const proof = testValidateWindowsLaunchChain(expected, {
+    powershellPath, helperPath: ARCHIVE_HELPER_PATH, powershellSha256, helperSha256
+  });
+  assert.equal(Object.isFrozen(proof), true);
+  assert.equal(proof.length, expected.length);
+
+  for (const mutation of [
+    (records) => { records[1].currentUserCanReplace = true; },
+    (records) => { records[1].ownerSid = 'S-1-5-21-123'; },
+    (records) => { records[1].isReparsePoint = true; },
+    (records) => { records[1].fileId = records[0].fileId; }
+  ]) {
+    const hostile = structuredClone(expected);
+    mutation(hostile);
+    assert.throws(
+      () => testValidateWindowsLaunchChain(hostile, {
+        powershellPath, helperPath: ARCHIVE_HELPER_PATH, powershellSha256, helperSha256
+      }),
+      (error) => error?.code === 'CAPABILITY_UNSUPPORTED'
+    );
+  }
 });
 test('refuses any Windows helper path other than the bundled archive helper', async (t) => {
   const fixture = await extractionFixture(t, 'zip');
@@ -392,6 +472,7 @@ test('rechecks helper request and archive identities immediately before Windows 
     let helperSwapped = false;
     await assert.rejects(() => extractValidatedArchive(fixture.plan, fixture.staging, {
       targetPlatform: 'win32',
+      createWindowsLaunchPin: fakeWindowsLaunchPin({ created: false, rechecks: 0, released: false }),
       fsApi: {
         ...fs,
         realpath: async (target) => helperSwapped && target === ARCHIVE_HELPER_PATH ? target + '.foreign' : fs.realpath(target)
@@ -454,6 +535,7 @@ test('last launch seam pins tools, request digest, and destination before Window
     };
     await assert.rejects(() => extractValidatedArchive(fixture.plan, fixture.staging, {
       targetPlatform: 'win32', fsApi, currentUserSid: 'S-1-5-21-1', protectStaging: async () => {},
+      createWindowsLaunchPin: fakeWindowsLaunchPin({ created: false, rechecks: 0, released: false }),
       verifyWindowsTools: async () => ({
         powershellPath: 'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe',
         helperPath: ARCHIVE_HELPER_PATH
@@ -508,6 +590,13 @@ test('last launch seam pins tools, request digest, and destination before Window
 });
 test('actual child timeout and output overflow settle within a terminal deadline', async () => {
   const started = Date.now();
+  let childBoundaryChecked = false;
+  const normal = await testRunArchiveProcess(process.execPath, ['-e', ''], {
+    timeoutMs: 1000, maxOutputBytes: 64,
+    afterChildCreate: async () => { childBoundaryChecked = true; }
+  });
+  assert.equal(normal.code, 0);
+  assert.equal(childBoundaryChecked, true);
   await assert.rejects(() => testRunArchiveProcess(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], {
     timeoutMs: 20, maxOutputBytes: 1024, terminationDeadlineMs: 500
   }), (error) => error?.code === 'CAPABILITY_UNSUPPORTED');
@@ -557,6 +646,7 @@ test('unconfirmed Windows helper exit retains request, staging, and archive evid
   });
   await assert.rejects(() => extractValidatedArchive(fixture.plan, fixture.staging, {
     targetPlatform: 'win32', currentUserSid: 'S-1-5-21-1', protectStaging: async () => {},
+    createWindowsLaunchPin: fakeWindowsLaunchPin({ created: false, rechecks: 0, released: false }),
     verifyWindowsTools: async () => ({
       powershellPath: 'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe', helperPath: ARCHIVE_HELPER_PATH
     }),
@@ -587,13 +677,14 @@ test('final handoff rechecks every entry and candidate identity after a determin
   );
 });
 
-test('scoped candidate use refuses a swap before callback and pins replacement during callback', async (t) => {
+test('scoped candidate use exposes no pathname and never reads a pathname replacement', async (t) => {
   const beforeFixture = await extractionFixture(t);
   const beforeAdapter = posixAdapter(beforeFixture.plan, { staging: beforeFixture.staging });
   const beforeCandidate = await extractValidatedArchive(beforeFixture.plan, beforeFixture.staging, beforeAdapter);
-  beforeAdapter.beforeCandidateConsumer = async ({ candidatePath }) => {
-    await fs.rename(candidatePath, candidatePath + '.owned');
-    await fs.writeFile(candidatePath, 'candidate');
+  const beforePath = path.join(beforeFixture.staging, 'bin', 'CLIProxyAPI');
+  beforeAdapter.beforeCandidateConsumer = async () => {
+    await fs.rename(beforePath, beforePath + '.owned');
+    await fs.writeFile(beforePath, 'candidate');
   };
   let beforeCallbackCalled = false;
   await assert.rejects(
@@ -605,17 +696,43 @@ test('scoped candidate use refuses a swap before callback and pins replacement d
   const duringFixture = await extractionFixture(t);
   const duringAdapter = posixAdapter(duringFixture.plan, { staging: duringFixture.staging });
   const duringCandidate = await extractValidatedArchive(duringFixture.plan, duringFixture.staging, duringAdapter);
-  await withValidatedExtractedCandidate(duringCandidate, async ({ path: candidatePath, handle }) => {
-    await assert.rejects(() => fs.rename(candidatePath, candidatePath + '.foreign'), (error) => ['EPERM', 'EBUSY', 'EACCES'].includes(error?.code));
-    assert.equal((await handle.stat()).isFile(), true);
+  const duringPath = path.join(duringFixture.staging, 'bin', 'CLIProxyAPI');
+  let replacementInstalled = false;
+  const operation = withValidatedExtractedCandidate(duringCandidate, async (scope) => {
+    assert.equal(Object.hasOwn(scope, 'path'), false);
+    assert.equal(JSON.stringify(scope).includes(duringPath), false);
+    try {
+      await fs.rename(duringPath, duringPath + '.foreign');
+      await fs.writeFile(duringPath, 'replacement');
+      replacementInstalled = true;
+    } catch (error) {
+      if (!['EPERM', 'EBUSY', 'EACCES'].includes(error?.code)) throw error;
+    }
+    assert.equal((await scope.read()).toString(), 'candidate');
+    assert.equal((await scope.handle.stat()).isFile(), true);
+    return 'used-pinned-file';
   }, duringAdapter);
+  if (process.platform === 'win32') assert.equal(await operation, 'used-pinned-file');
+  else await assert.rejects(() => operation, (error) => error?.code === 'ARCHIVE_UNSAFE');
+  assert.equal(replacementInstalled, process.platform !== 'win32');
+
+  const bypassFixture = await extractionFixture(t);
+  const bypassAdapter = posixAdapter(bypassFixture.plan, { staging: bypassFixture.staging });
+  const bypassCandidate = await extractValidatedArchive(bypassFixture.plan, bypassFixture.staging, bypassAdapter);
+  const bypassPath = path.join(bypassFixture.staging, 'bin', 'CLIProxyAPI');
+  await assert.rejects(
+    () => withValidatedExtractedCandidate(bypassCandidate, async () => bypassPath, bypassAdapter),
+    (error) => error?.code === 'ARCHIVE_UNSAFE'
+  );
 });
+
 test('candidate pathname swap after handle read and immediately before return is refused', async (t) => {
   const fixture = await extractionFixture(t);
   const action = { staging: fixture.staging };
   const adapter = posixAdapter(fixture.plan, action);
   let seamReached = false;
-  adapter.afterCandidateReadBeforeReturn = async ({ candidatePath }) => {
+  const candidatePath = path.join(fixture.staging, 'bin', 'CLIProxyAPI');
+  adapter.afterCandidateReadBeforeReturn = async () => {
     seamReached = true;
     await fs.rename(candidatePath, candidatePath + '.owned');
     await fs.writeFile(candidatePath, 'candidate');
@@ -679,23 +796,63 @@ test('cleanup refuses a post-validation substitution and never mutates or delete
   assert.deepEqual(mutations, []);
   assert.equal(await fs.readFile(foreignMarker, 'utf8'), 'foreign');
   assert.equal((await fs.lstat(owned)).isDirectory(), true);
-});test('production Windows bootstrap pins the bundled helper before extraction', { skip: process.platform !== 'win32' }, async (t) => {
+});
+
+test('production Windows bootstrap pins the per-user bundled helper and blocks launch-seam changes', { skip: process.platform !== 'win32' }, async (t) => {
   const fixture = await extractionFixture(t, 'zip');
   const powershell = 'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe';
   const sid = execFileSync(powershell, [
     '-NoLogo', '-NoProfile', '-NonInteractive', '-Command',
     '[Security.Principal.WindowsIdentity]::GetCurrent().User.Value'
   ], { encoding: 'utf8' }).trim();
+  let pinValidated = false;
+  let launchSeamReached = false;
   const candidate = await extractValidatedArchive(fixture.plan, fixture.staging, {
-    targetPlatform: 'win32', currentUserSid: sid
+    targetPlatform: 'win32',
+    currentUserSid: sid,
+    afterWindowsLaunchPin: async ({ launchProof }) => {
+      pinValidated = true;
+      const helperProof = launchProof.find((record) => path.win32.normalize(record.path).toLowerCase()
+        === path.win32.normalize(ARCHIVE_HELPER_PATH).toLowerCase());
+      assert.equal(helperProof.ownerSid, sid);
+      assert.equal(helperProof.currentUserCanReplace, false);
+    },
+    afterLaunchIdentityPinBeforeProcessCreate: async () => {
+      launchSeamReached = true;
+      const firstByte = (await fs.readFile(ARCHIVE_HELPER_PATH)).subarray(0, 1);
+      await assert.rejects(
+        async () => {
+          const writable = await fs.open(ARCHIVE_HELPER_PATH, 'r+');
+          try { await writable.write(firstByte, 0, 1, 0); } finally { await writable.close(); }
+        },
+        (error) => ['EPERM', 'EBUSY', 'EACCES'].includes(error?.code)
+      );
+      const moved = ARCHIVE_HELPER_PATH + '.launch-race';
+      let renamed = false;
+      try {
+        await fs.rename(ARCHIVE_HELPER_PATH, moved);
+        renamed = true;
+      } catch (error) {
+        if (!['EPERM', 'EBUSY', 'EACCES'].includes(error?.code)) throw error;
+      } finally {
+        if (renamed) await fs.rename(moved, ARCHIVE_HELPER_PATH);
+      }
+      assert.equal(renamed, false);
+    }
   });
-  assert.equal(await withValidatedExtractedCandidate(candidate, ({ path: candidatePath }) => candidatePath),
-    path.join(fixture.staging, 'bin', 'CLIProxyAPI.exe'));
-  assert.equal(await withValidatedExtractedCandidate(candidate, ({ path: candidatePath }) => candidatePath),
-    path.join(fixture.staging, 'bin', 'CLIProxyAPI.exe'));
+  assert.equal(pinValidated, true);
+  assert.equal(launchSeamReached, true);
+  assert.equal((await withValidatedExtractedCandidate(candidate, ({ read }) => read())).toString(), 'candidate');
 });
 test('bundled Windows helper performs a real protected-request ZIP extraction without executing the candidate', { skip: process.platform !== 'win32' }, async (t) => {
-  const fixture = await extractionFixture(t, 'zip');
+  const fixture = await extractionFixture(t, 'zip', {
+    entries: [
+      { name: 'bin/', directory: true },
+      { name: 'bin/deep/', directory: true },
+      { name: 'bin/deep/CLIProxyAPI.exe', content: 'candidate', mode: 0o755 },
+      { name: 'README.txt', content: 'readme' }
+    ]
+  });
   const destination = fixture.staging;
   const requestDirectory = path.join(fixture.root, 'native-request');
   const requestPath = path.join(requestDirectory, 'request.json');
@@ -730,7 +887,7 @@ test('bundled Windows helper performs a real protected-request ZIP extraction wi
   assert.equal(result.status, 0, result.stdout);
   const response = parseArchiveHelperResponse(result.stdout, { requestId });
   assert.equal(response.result.entryCount, fixture.plan.entries.length);
-  assert.equal(await fs.readFile(path.join(destination, 'bin', 'CLIProxyAPI.exe'), 'utf8'), 'candidate');
+  assert.equal(await fs.readFile(path.join(destination, 'bin', 'deep', 'CLIProxyAPI.exe'), 'utf8'), 'candidate');
   const requestIdentityBefore = await fs.lstat(requestPath);
   await fs.writeFile(requestPath, requestInput + ' ');
   const requestIdentityAfter = await fs.lstat(requestPath);
@@ -746,6 +903,86 @@ test('bundled Windows helper performs a real protected-request ZIP extraction wi
   ], { encoding: 'utf8' });
   assert.equal(refused.status, 1);
   assert.equal(JSON.parse(refused.stdout).ok, false);
+});
+test('bundled helper refuses a pre-created planned directory after its empty-root check', { skip: process.platform !== 'win32' }, async (t) => {
+  const expectedExecutable = 'CLIProxyAPI.exe';
+  const entries = [
+    { name: 'bin/', directory: true },
+    { name: 'bin/deep/', directory: true },
+    { name: 'bin/deep/' + expectedExecutable, content: 'candidate', mode: 0o755 },
+    { name: 'zz-padding.bin', content: Buffer.alloc(64 * 1024 * 1024, 0x61) }
+  ];
+  const fixture = await extractionFixture(t, 'zip', { entries, expectedExecutable });
+  const destination = fixture.staging;
+  const requestDirectory = path.join(fixture.root, 'directory-race-request');
+  const requestPath = path.join(requestDirectory, 'request.json');
+  await fs.mkdir(destination, { mode: 0o700 });
+  await fs.mkdir(requestDirectory, { mode: 0o700 });
+  const powershell = path.join(process.env.SystemRoot, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
+  const icacls = path.join(process.env.SystemRoot, 'System32', 'icacls.exe');
+  const sid = execFileSync(powershell, [
+    '-NoLogo', '-NoProfile', '-NonInteractive', '-Command',
+    '[Security.Principal.WindowsIdentity]::GetCurrent().User.Value'
+  ], { encoding: 'utf8' }).trim();
+  execFileSync(icacls, [requestDirectory, '/inheritance:r', '/grant:r', '*' + sid + ':(OI)(CI)F', '*S-1-5-18:(OI)(CI)F', '/q']);
+  const requestId = randomUUID();
+  const requestInput = buildArchiveHelperRequest({
+    requestId, archivePath: fixture.archivePath, destination,
+    archiveSha256: fixture.plan.archiveSha256, entries: helperEntries(fixture.plan)
+  });
+  await fs.writeFile(requestPath, requestInput);
+  execFileSync(icacls, [requestPath, '/inheritance:r', '/grant:r', '*' + sid + ':F', '*S-1-5-18:F', '/q']);
+  const destinationStats = await fs.lstat(destination, { bigint: true });
+  const probeScript = String.raw`$ErrorActionPreference='Stop'
+Add-Type @'
+using System; using System.IO; using System.Runtime.InteropServices; using Microsoft.Win32.SafeHandles;
+public static class ClaudexDeleteProbe {
+ [DllImport("kernel32.dll",CharSet=CharSet.Unicode,SetLastError=true)] public static extern SafeFileHandle CreateFileW(string n,uint a,FileShare s,IntPtr x,FileMode m,uint f,IntPtr t);
+}
+'@
+[Console]::Out.WriteLine('READY');[Console]::Out.Flush()
+while($true){$h=[ClaudexDeleteProbe]::CreateFileW($env:CLAUDEX_PROBE_PATH,0x10000,[IO.FileShare]::Read -bor [IO.FileShare]::Write -bor [IO.FileShare]::Delete,[IntPtr]::Zero,[IO.FileMode]::Open,0,[IntPtr]::Zero);if($h.IsInvalid){if([Runtime.InteropServices.Marshal]::GetLastWin32Error()-eq 32){[Console]::Out.WriteLine('LOCKED');[Console]::Out.Flush();break}}else{$h.Dispose()};Start-Sleep -Milliseconds 1}`;
+  const probe = spawn(powershell, [
+    '-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass',
+    '-EncodedCommand', Buffer.from(probeScript, 'utf16le').toString('base64')
+  ], { windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, CLAUDEX_PROBE_PATH: fixture.archivePath } });
+  probe.stdout.setEncoding('utf8');
+  let probeOutput = '';
+  const ready = new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error('probe did not become ready')), 10000);
+    probe.once('error', reject);
+    probe.stdout.on('data', (chunk) => {
+      probeOutput += chunk;
+      if (probeOutput.includes('READY')) { clearTimeout(timer); resolve(); }
+    });
+  });
+  await ready;
+  const child = spawn(powershell, [
+    '-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass',
+    '-File', ARCHIVE_HELPER_PATH, '-RequestPath', requestPath,
+    '-ExpectedRequestSha256', sha256(Buffer.from(requestInput)),
+    '-ExpectedDestinationVolume', String(destinationStats.dev),
+    '-ExpectedDestinationFileId', String(destinationStats.ino)
+  ], { windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
+  let stdout = '';
+  let stderr = '';
+  child.stdout.setEncoding('utf8'); child.stderr.setEncoding('utf8');
+  child.stdout.on('data', (chunk) => { stdout += chunk; });
+  child.stderr.on('data', (chunk) => { stderr += chunk; });
+  const closed = new Promise((resolve, reject) => { child.once('error', reject); child.once('close', resolve); });
+  const locked = new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error('archive lock was not observed')), 10000);
+    probe.once('error', reject);
+    probe.stdout.on('data', (chunk) => {
+      probeOutput += chunk;
+      if (probeOutput.includes('LOCKED')) { clearTimeout(timer); resolve(); }
+    });
+  });
+  await locked;
+  await fs.mkdir(path.join(destination, 'bin'));
+  assert.equal(await closed, 1, stdout + stderr);
+  assert.equal(parseArchiveHelperResponse(stdout, { requestId }).ok, false);
+  await assert.rejects(() => fs.access(path.join(destination, 'bin', 'deep', expectedExecutable)), { code: 'ENOENT' });
 });
 test('bundled helper pins or refuses a parent substitution before any foreign write', { skip: process.platform !== 'win32' }, async (t) => {
   const expectedExecutable = 'zzzzCLIProxyAPI.exe';
