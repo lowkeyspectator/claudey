@@ -1,5 +1,8 @@
 param(
-    [Parameter(Mandatory = $true)][string]$RequestPath
+    [Parameter(Mandatory = $true)][string]$RequestPath,
+    [Parameter(Mandatory = $true)][string]$ExpectedRequestSha256,
+    [Parameter(Mandatory = $true)][string]$ExpectedDestinationVolume,
+    [Parameter(Mandatory = $true)][string]$ExpectedDestinationFileId
 )
 
 $ErrorActionPreference = 'Stop'
@@ -8,6 +11,7 @@ $request = $null
 $requestStream = $null
 $archiveStream = $null
 $zip = $null
+$destinationIdentity = $null
 $invariant = [Globalization.CultureInfo]::InvariantCulture
 [Threading.Thread]::CurrentThread.CurrentCulture = $invariant
 [Threading.Thread]::CurrentThread.CurrentUICulture = $invariant
@@ -15,6 +19,59 @@ $utf8 = [Text.UTF8Encoding]::new($false)
 [Console]::OutputEncoding = $utf8
 $OutputEncoding = $utf8
 
+if (-not ('ClaudexArchiveNativeIdentity' -as [type])) {
+    Add-Type -TypeDefinition @'
+using System;
+using System.IO;
+using System.Runtime.InteropServices;
+using Microsoft.Win32.SafeHandles;
+
+public sealed class ClaudexArchiveDirectoryIdentity : IDisposable {
+    public readonly SafeFileHandle Handle;
+    public readonly uint VolumeSerialNumber;
+    public readonly ulong FileId;
+    public ClaudexArchiveDirectoryIdentity(SafeFileHandle handle, uint volume, ulong fileId) {
+        Handle = handle; VolumeSerialNumber = volume; FileId = fileId;
+    }
+    public void Dispose() { Handle.Dispose(); }
+}
+
+public static class ClaudexArchiveNativeIdentity {
+    [StructLayout(LayoutKind.Sequential)]
+    private struct BY_HANDLE_FILE_INFORMATION {
+        public uint FileAttributes;
+        public System.Runtime.InteropServices.ComTypes.FILETIME CreationTime;
+        public System.Runtime.InteropServices.ComTypes.FILETIME LastAccessTime;
+        public System.Runtime.InteropServices.ComTypes.FILETIME LastWriteTime;
+        public uint VolumeSerialNumber;
+        public uint FileSizeHigh;
+        public uint FileSizeLow;
+        public uint NumberOfLinks;
+        public uint FileIndexHigh;
+        public uint FileIndexLow;
+    }
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    private static extern SafeFileHandle CreateFileW(string name, uint access, FileShare share, IntPtr security, FileMode mode, uint flags, IntPtr template);
+    [DllImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool GetFileInformationByHandle(SafeFileHandle handle, out BY_HANDLE_FILE_INFORMATION info);
+    public static ClaudexArchiveDirectoryIdentity OpenDirectory(string path) {
+        const uint FILE_FLAG_BACKUP_SEMANTICS = 0x02000000;
+        const uint FILE_FLAG_OPEN_REPARSE_POINT = 0x00200000;
+        SafeFileHandle handle = CreateFileW(path, 0, FileShare.Read | FileShare.Write, IntPtr.Zero, FileMode.Open, FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT, IntPtr.Zero);
+        if (handle.IsInvalid) throw new IOException("Directory identity open failed.", new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error()));
+        BY_HANDLE_FILE_INFORMATION info;
+        if (!GetFileInformationByHandle(handle, out info)) {
+            int code = Marshal.GetLastWin32Error(); handle.Dispose();
+            throw new IOException("Directory identity query failed.", new System.ComponentModel.Win32Exception(code));
+        }
+        if ((info.FileAttributes & 0x400) != 0) { handle.Dispose(); throw new IOException("Directory is a reparse point."); }
+        ulong fileId = ((ulong)info.FileIndexHigh << 32) | info.FileIndexLow;
+        return new ClaudexArchiveDirectoryIdentity(handle, info.VolumeSerialNumber, fileId);
+    }
+}
+'@
+}
 function Write-Response([object]$Value, [int]$ExitCode) {
     [Console]::Out.Write(($Value | ConvertTo-Json -Compress -Depth 8))
     [Console]::Out.Flush()
@@ -72,19 +129,30 @@ function Get-DirectoryIdentity([string]$LiteralPath) {
     $safe = Assert-NoReparse $LiteralPath
     $item = Get-Item -LiteralPath $safe -Force
     if (-not $item.PSIsContainer -or ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { throw 'Destination.' }
-    return [ordered]@{ path = $item.FullName; created = $item.CreationTimeUtc.Ticks }
+    $native = [ClaudexArchiveNativeIdentity]::OpenDirectory($safe)
+    return [pscustomobject]@{ path = $item.FullName; volume = $native.VolumeSerialNumber; fileId = $native.FileId; native = $native }
 }
 
 function Assert-DirectoryIdentity([string]$LiteralPath, [object]$Identity) {
+    if ($null -eq $Identity -or $Identity.native.Handle.IsInvalid -or $Identity.native.Handle.IsClosed) { throw 'Destination identity.' }
     $current = Get-DirectoryIdentity $LiteralPath
-    if ($current.path -ne $Identity.path -or $current.created -ne $Identity.created) { throw 'Destination identity.' }
-    return $current.path
+    try {
+        if ($current.path -ne $Identity.path -or $current.volume -ne $Identity.volume -or $current.fileId -ne $Identity.fileId) { throw 'Destination identity.' }
+        return $current.path
+    } finally { $current.native.Dispose() }
 }
 
 try {
     $safeRequest = Assert-PrivateRequest $RequestPath
+    if ($ExpectedRequestSha256 -notmatch '^[a-f0-9]{64}$') { throw 'Request digest.' }
     $requestStream = [IO.File]::Open($safeRequest, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::Read)
     [void](Assert-PrivateRequest $safeRequest)
+    $requestSha = [Security.Cryptography.SHA256]::Create()
+    try {
+        $actualRequestSha256 = ([BitConverter]::ToString($requestSha.ComputeHash($requestStream))).Replace('-', '').ToLowerInvariant()
+    } finally { $requestSha.Dispose() }
+    if ($actualRequestSha256 -ne $ExpectedRequestSha256) { throw 'Request digest.' }
+    $requestStream.Position = 0
     $reader = [IO.StreamReader]::new($requestStream, $utf8, $false, 4096, $true)
     try { $raw = $reader.ReadToEnd() } finally { $reader.Dispose() }
     $request = $raw | ConvertFrom-Json
@@ -94,7 +162,9 @@ try {
         $request.operation -ne 'extractZip' -or $request.archiveSha256 -notmatch '^[a-f0-9]{64}$' -or @($request.entries).Count -gt 2048) { throw 'Request.' }
     $archive = Assert-NoReparse ([string]$request.archivePath)
     $destination = Assert-NoReparse ([string]$request.destination)
+    if ($ExpectedDestinationVolume -notmatch '^(0|[1-9][0-9]*)$' -or $ExpectedDestinationFileId -notmatch '^(0|[1-9][0-9]*)$') { throw 'Destination identity.' }
     $destinationIdentity = Get-DirectoryIdentity $destination
+    if ([string]$destinationIdentity.volume -ne $ExpectedDestinationVolume -or [string]$destinationIdentity.fileId -ne $ExpectedDestinationFileId) { throw 'Destination identity.' }
     if (@((Get-Item -LiteralPath $destination -Force).EnumerateFileSystemInfos()).Count -ne 0) { throw 'Destination.' }
     $archiveStream = [IO.File]::Open($archive, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::Read)
     $sha = [Security.Cryptography.SHA256]::Create()
@@ -171,11 +241,14 @@ try {
     [void](Assert-DirectoryIdentity $destination $destinationIdentity)
     $requestStream.Dispose()
     $requestStream = $null
+    $destinationIdentity.native.Dispose()
+    $destinationIdentity = $null
     Write-Response ([ordered]@{
         ok = $true; schemaVersion = 1; requestId = $request.requestId
         result = [ordered]@{ canonicalDestination = $destination; entryCount = $actual.Count; expandedBytes = $expanded; entries = $actual }
     }) 0
 } catch {
+    if ($null -ne $destinationIdentity) { $destinationIdentity.native.Dispose() }
     if ($null -ne $requestStream) { $requestStream.Dispose() }
     if ($null -ne $zip) { $zip.Dispose() }
     if ($null -ne $archiveStream) { $archiveStream.Dispose() }

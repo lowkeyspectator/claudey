@@ -264,8 +264,22 @@ test('checks exact numeric boundaries through a metadata-only internal seam', ()
   ]) assert.throws(() => testArchiveLimitPolicy(input.entries, input.compressed), unsafe);
   assert.doesNotThrow(() => testArchiveLimitPolicy(Array.from({ length: 2048 }, () => ({ size: 0 })), 1));
   assert.doesNotThrow(() => testArchiveLimitPolicy([{ size: 100 }], 1));
+  assert.doesNotThrow(() => testArchiveLimitPolicy([{ size: 0 }], 1, undefined, 268435456));
+  assert.throws(() => testArchiveLimitPolicy([{ size: 0 }], 1, undefined, 268435457), unsafe);
 });
 
+test('TAR entry ceiling counts PAX metadata headers at exact 2048 and rejects 2049', async (t) => {
+  const paxAndCandidate = [
+    { name: 'PaxHeader', type: 'x', content: paxRecord('path', 'bin/CLIProxyAPI') },
+    { name: 'placeholder', content: 'candidate', mode: 0o755 }
+  ];
+  const filler = (count) => Array.from({ length: count }, (_, index) => ({ name: `data/${index}`, content: '' }));
+  const exact = buildTarGz([...paxAndCandidate, ...filler(2046)]);
+  const plan = await validateBytes(t, exact, 'tar.gz', 'CLIProxyAPI');
+  assert.equal(plan.entries.length, 2047);
+  const over = buildTarGz([...paxAndCandidate, ...filler(2047)]);
+  await assert.rejects(() => validateBytes(t, over, 'tar.gz', 'CLIProxyAPI'), unsafe);
+});
 test('validates the complete supported ustar header and refuses hidden link metadata', async (t) => {
   for (const hostile of [
     { name: 'CLIProxyAPI', content: 'candidate', mode: 0o755, magic: 'bad\0\0\0' },

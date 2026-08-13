@@ -1,4 +1,5 @@
 import { spawn as spawnChild } from 'node:child_process';
+import { constants as fsConstants } from 'node:fs';
 import { createHash, randomUUID, timingSafeEqual } from 'node:crypto';
 import fs from 'node:fs/promises';
 import os from 'node:os';
@@ -28,10 +29,32 @@ const ZIP_CENTRAL_HEADER_BYTES = 46;
 const TAR_BLOCK_BYTES = 512;
 const ZIP_ALLOWED_FLAGS = 0x0800;
 const FIXED_POWERSHELL_PATH = 'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe';
+const WINDOWS_HELPER_BOOTSTRAP = String.raw`$ErrorActionPreference = 'Stop'
+$helperPath = $env:CLAUDEX_ARCHIVE_HELPER_PATH
+$helperSha256 = $env:CLAUDEX_ARCHIVE_HELPER_SHA256
+$requestPath = $env:CLAUDEX_ARCHIVE_REQUEST_PATH
+$requestSha256 = $env:CLAUDEX_ARCHIVE_REQUEST_SHA256
+$destinationVolume = $env:CLAUDEX_ARCHIVE_DESTINATION_VOLUME
+$destinationFileId = $env:CLAUDEX_ARCHIVE_DESTINATION_FILE_ID
+if ($helperSha256 -notmatch '^[a-f0-9]{64}$' -or $requestSha256 -notmatch '^[a-f0-9]{64}$' -or
+    $destinationVolume -notmatch '^(0|[1-9][0-9]*)$' -or $destinationFileId -notmatch '^(0|[1-9][0-9]*)$') { exit 1 }
+$stream = $null
+try {
+    $stream = [IO.File]::Open($helperPath, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::Read)
+    $sha = [Security.Cryptography.SHA256]::Create()
+    try { $actual = ([BitConverter]::ToString($sha.ComputeHash($stream))).Replace('-', '').ToLowerInvariant() } finally { $sha.Dispose() }
+    if ($actual -ne $helperSha256) { exit 1 }
+    $stream.Position = 0
+    $reader = [IO.StreamReader]::new($stream, [Text.UTF8Encoding]::new($false), $true, 4096, $true)
+    try { $scriptText = $reader.ReadToEnd() } finally { $reader.Dispose() }
+    & ([ScriptBlock]::Create($scriptText)) -RequestPath $requestPath -ExpectedRequestSha256 $requestSha256 -ExpectedDestinationVolume $destinationVolume -ExpectedDestinationFileId $destinationFileId
+} catch { exit 1 } finally { if ($null -ne $stream) { $stream.Dispose() } }`;
+const WINDOWS_HELPER_BOOTSTRAP_ENCODED = Buffer.from(WINDOWS_HELPER_BOOTSTRAP, 'utf16le').toString('base64');
 export const ARCHIVE_HELPER_PATH = fileURLToPath(new URL('../../scripts/windows/archive-helper.ps1', import.meta.url));
 const FIXED_POSIX_TAR_PATHS = new Set(['/usr/bin/tar', '/bin/tar']);
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const validatedPlans = new WeakSet();
+const extractedCandidates = new WeakSet();
 
 function unsafe(message = 'The release archive is unsafe.', cause) {
   return new ClaudexError('ARCHIVE_UNSAFE', message, cause ? { cause } : undefined);
@@ -96,6 +119,13 @@ function sameIdentity(stats, identity) {
   return stats.dev === identity.dev && stats.ino === identity.ino;
 }
 
+function exactIdentity(stats) {
+  return { dev: String(stats.dev), ino: String(stats.ino) };
+}
+
+function sameExactIdentity(stats, expected) {
+  return String(stats.dev) === expected.dev && String(stats.ino) === expected.ino;
+}
 function digest(bytes) {
   return createHash('sha256').update(bytes).digest('hex');
 }
@@ -176,8 +206,10 @@ function checkAggregateLimits(entries, compressedBytes, limits) {
   }
   return expandedBytes;
 }
-export function testArchiveLimitPolicy(entries, compressedBytes, overrides) {
+export function testArchiveLimitPolicy(entries, compressedBytes, overrides, archiveBytes = compressedBytes) {
   const limits = normalizeLimits(overrides);
+  checkedInteger(archiveBytes, 'archive byte count');
+  if (archiveBytes > limits.archiveBytes) throw unsafe('The archive compressed byte ceiling was exceeded.');
   return Object.freeze({
     entryCount: entries.length,
     expandedBytes: checkAggregateLimits(entries, compressedBytes, limits)
@@ -591,8 +623,8 @@ export async function validateArchive(descriptor, expectedExecutable, limitOverr
   validatedPlans.add(plan);
   return plan;
 }
-function capability(message, cause) {
-  return new ClaudexError('CAPABILITY_UNSUPPORTED', message, cause ? { cause } : undefined);
+function capability(message, cause, details) {
+  return new ClaudexError('CAPABILITY_UNSUPPORTED', message, { cause, details });
 }
 
 function prerequisite(message, cause) {
@@ -676,11 +708,14 @@ function boundedText(value, maxOutputBytes, stream) {
   }
 }
 
-function defaultRunProcess(command, args, { shell, timeoutMs, maxOutputBytes, terminationDeadlineMs = 2000 }) {
+function defaultRunProcess(command, args, {
+  shell, timeoutMs, maxOutputBytes, terminationGraceMs = 250, terminationDeadlineMs = 2000,
+  spawnChildApi = spawnChild, env
+}) {
   return new Promise((resolve, reject) => {
     let child;
     try {
-      child = spawnChild(command, args, { shell, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
+      child = spawnChildApi(command, args, { shell, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true, env });
     } catch (cause) {
       reject(prerequisite('The required archive extractor could not be started.', cause));
       return;
@@ -706,8 +741,8 @@ function defaultRunProcess(command, args, { shell, timeoutMs, maxOutputBytes, te
       child.kill();
       escalation = setTimeout(() => {
         child.kill('SIGKILL');
-        terminalDeadline = setTimeout(() => finish(reject, capability('The archive extractor exit could not be confirmed.')), terminationDeadlineMs);
-      }, 250);
+        terminalDeadline = setTimeout(() => finish(reject, capability('The archive extractor exit could not be confirmed.', undefined, { exitUnconfirmed: true })), terminationDeadlineMs);
+      }, terminationGraceMs);
     };
     timer = setTimeout(() => terminate('The archive extractor timed out.'), timeoutMs);
     const append = (stream, chunk) => {
@@ -766,17 +801,25 @@ function identity(stats) {
   return { dev: stats.dev, ino: stats.ino };
 }
 
-async function assertExactDirectory(target, expectedIdentity, fsApi, { mode, parent } = {}) {
+async function assertExactDirectory(target, expectedIdentity, fsApi, { mode, parent, enforceMode = process.platform !== 'win32' } = {}) {
   const stats = await fsApi.lstat(target);
   const canonical = await fsApi.realpath(target);
   if (!stats.isDirectory?.() || stats.isSymbolicLink?.() || stats.isReparsePoint === true || !sameHostPath(canonical, target)
     || (expectedIdentity && !sameIdentity(stats, expectedIdentity)) || (parent && stats.dev !== parent.dev)
-    || (mode !== undefined && process.platform !== 'win32' && (stats.mode & 0o777) !== mode)) {
+    || (mode !== undefined && enforceMode && (stats.mode & 0o777) !== mode)) {
     throw safety('Archive staging changed identity or protection.');
   }
   return stats;
 }
 
+async function assertExactNativeDirectory(target, expectedExactIdentity, fsApi, options) {
+  const stats = await assertExactDirectory(target, undefined, fsApi, options);
+  const exactStats = await fsApi.lstat(target, { bigint: true });
+  if (!sameExactIdentity(exactStats, expectedExactIdentity)) {
+    throw safety('Archive staging changed native filesystem identity.');
+  }
+  return stats;
+}
 async function assertExactFile(target, expectedIdentity, fsApi) {
   try {
     const stats = await fsApi.lstat(target);
@@ -790,6 +833,18 @@ async function assertExactFile(target, expectedIdentity, fsApi) {
     if (cause instanceof ClaudexError) throw cause;
     throw safety('A protected archive file could not be rechecked.', cause);
   }
+}
+async function fixedFileDigest(target, expectedIdentity, fsApi) {
+  const before = await assertExactFile(target, expectedIdentity, fsApi);
+  if (!Number.isSafeInteger(before.size) || before.size <= 0 || before.size > 16777216) {
+    throw capability('A fixed archive extractor has an unsafe size.');
+  }
+  const bytes = await fsApi.readFile(target);
+  const after = await assertExactFile(target, expectedIdentity ?? identity(before), fsApi);
+  if (!sameIdentity(before, after) || bytes.length !== before.size) {
+    throw capability('A fixed archive extractor changed while being pinned.');
+  }
+  return digest(bytes);
 }
 async function recheckArchive(plan, fsApi) {
   try {
@@ -822,7 +877,7 @@ async function createStaging(plan, stagingDir, fsApi, adapter) {
   try {
     await fsApi.mkdir(target, { recursive: false, mode: 0o700 });
     await fsApi.chmod?.(target, 0o700);
-    const created = await assertExactDirectory(target, undefined, fsApi, { mode: 0o700, parent: rootStats });
+    const created = await assertExactDirectory(target, undefined, fsApi, { mode: 0o700, parent: rootStats, enforceMode: plan.targetPlatform !== 'win32' });
     createdIdentity = identity(created);
     if (plan.targetPlatform === 'win32') {
       if (adapter.protectStaging) await adapter.protectStaging(target);
@@ -835,16 +890,22 @@ async function createStaging(plan, stagingDir, fsApi, adapter) {
         assertWindowsDacl(response.result, { expectedType: 'directory', currentUserSid: adapter.currentUserSid });
       }
     }
-    const stats = await assertExactDirectory(target, createdIdentity, fsApi, { mode: 0o700, parent: rootStats });
-    return { target, identity: identity(stats), rootStats };
+    const stats = await assertExactDirectory(target, createdIdentity, fsApi, { mode: 0o700, parent: rootStats, enforceMode: plan.targetPlatform !== 'win32' });
+    const nativeStats = await fsApi.lstat(target, { bigint: true });
+    return {
+      target, identity: identity(stats), rootStats,
+      nativeIdentity: { volume: String(nativeStats.dev), fileId: String(nativeStats.ino) }
+    };
   } catch (cause) {
     if (createdIdentity) {
       try {
         await assertExactDirectory(target, createdIdentity, fsApi, { parent: rootStats });
-        await fsApi.rm(target, { recursive: true, force: false });
       } catch {
         throw safety('Archive staging creation cleanup failed closed.', cause);
       }
+      const retained = safety('Archive staging protection failed; owned state was retained.', cause);
+      retained.details = { stagingRetained: true };
+      throw retained;
     }
     throw safety('Archive staging could not be created exclusively.', cause);
   }
@@ -907,29 +968,40 @@ function compareHelperResult(result, plan, stagingDir) {
   if (!sameWindowsPath(result.canonicalDestination, stagingDir) || result.entryCount !== plan.entries.length
     || result.expandedBytes !== plan.expandedBytes) throw unsafe('The archive helper result differs from the validated plan.');
   const expected = plan.entries.map(helperEntry);
-  if (JSON.stringify(result.entries) !== JSON.stringify(expected)) {
+  const observed = [...result.entries].sort((left, right) => Buffer.from(left.path).compare(Buffer.from(right.path)));
+  if (JSON.stringify(observed) !== JSON.stringify(expected)) {
     throw unsafe('The archive helper entries differ from the validated plan.');
   }
 }
 
-async function runWindowsExtraction(plan, stagingDir, adapter) {
+async function runWindowsExtraction(plan, staging, adapter) {
+  const fsApi = adapter.fsApi ?? fs;
   const tools = adapter.verifyWindowsTools
     ? await adapter.verifyWindowsTools()
     : {
-        powershellPath: await verifyFixedFile(FIXED_POWERSHELL_PATH, adapter.fsApi ?? fs, 'Fixed System32 PowerShell is missing.'),
-        helperPath: await verifyFixedFile(ARCHIVE_HELPER_PATH, adapter.fsApi ?? fs, 'The bundled archive helper is missing.')
+        powershellPath: await verifyFixedFile(FIXED_POWERSHELL_PATH, fsApi, 'Fixed System32 PowerShell is missing.'),
+        helperPath: await verifyFixedFile(ARCHIVE_HELPER_PATH, fsApi, 'The bundled archive helper is missing.')
       };
   if (tools.powershellPath !== FIXED_POWERSHELL_PATH || tools.helperPath !== ARCHIVE_HELPER_PATH) {
     throw capability('The Windows archive extractor identity is invalid.');
   }
+  const toolIdentities = {
+    powershell: identity(await assertExactFile(tools.powershellPath, undefined, fsApi)),
+    helper: identity(await assertExactFile(tools.helperPath, undefined, fsApi))
+  };
+  const toolDigests = {
+    powershell: await fixedFileDigest(tools.powershellPath, toolIdentities.powershell, fsApi),
+    helper: await fixedFileDigest(tools.helperPath, toolIdentities.helper, fsApi)
+  };
   const requestId = randomUUID();
   const input = buildArchiveHelperRequest({
     requestId,
     archivePath: plan.archivePath,
-    destination: stagingDir,
+    destination: staging.target,
     archiveSha256: plan.archiveSha256,
     entries: plan.entries.map(helperEntry)
   });
+  const requestSha256 = digest(Buffer.from(input, 'utf8'));
   const storage = await (adapter.createPrivateRequest ?? ((value) => defaultPrivateRequest(value, adapter)))(input);
   let response;
   let operationError;
@@ -938,31 +1010,63 @@ async function runWindowsExtraction(plan, stagingDir, adapter) {
     if (!storage || typeof storage.requestPath !== 'string' || !path.isAbsolute(storage.requestPath) || typeof storage.cleanup !== 'function') {
       throw safety('The archive helper request storage is invalid.');
     }
-    requestIdentity = identity(await assertExactFile(storage.requestPath, undefined, adapter.fsApi ?? fs));
-    await adapter.beforeExtractorSpawn?.({ plan, stagingDir, requestPath: storage.requestPath, tools });
-    await verifyFixedFile(ARCHIVE_HELPER_PATH, adapter.fsApi ?? fs, 'The bundled archive helper is missing.');
-    await recheckArchive(plan, adapter.fsApi ?? fs);
-    await assertExactDirectory(stagingDir, undefined, adapter.fsApi ?? fs, { mode: 0o700 });
-    await assertExactFile(storage.requestPath, requestIdentity, adapter.fsApi ?? fs);
+    requestIdentity = identity(await assertExactFile(storage.requestPath, undefined, fsApi));
+    await adapter.beforeExtractorSpawn?.({ plan, stagingDir: staging.target, requestPath: storage.requestPath, tools });
+    if (!sameDigest(await fixedFileDigest(tools.powershellPath, toolIdentities.powershell, fsApi), toolDigests.powershell)
+      || !sameDigest(await fixedFileDigest(tools.helperPath, toolIdentities.helper, fsApi), toolDigests.helper)) {
+      throw capability('A fixed archive extractor changed after identity pinning.');
+    }
+    await recheckArchive(plan, fsApi);
+    await assertExactDirectory(staging.target, staging.identity, fsApi, { mode: 0o700, parent: staging.rootStats, enforceMode: plan.targetPlatform !== 'win32' });
+    await assertExactFile(storage.requestPath, requestIdentity, fsApi);
+    await adapter.beforeLaunchIdentityValidation?.({
+      plan, stagingDir: staging.target, requestPath: storage.requestPath, tools, toolIdentities, requestSha256
+    });
+    if (!sameDigest(await fixedFileDigest(tools.powershellPath, toolIdentities.powershell, fsApi), toolDigests.powershell)
+      || !sameDigest(await fixedFileDigest(tools.helperPath, toolIdentities.helper, fsApi), toolDigests.helper)) {
+      throw capability('A fixed archive extractor changed after identity pinning.');
+    }
+    await recheckArchive(plan, fsApi);
+    await assertExactDirectory(staging.target, staging.identity, fsApi, { mode: 0o700, parent: staging.rootStats, enforceMode: plan.targetPlatform !== 'win32' });
+    await assertExactFile(storage.requestPath, requestIdentity, fsApi);
+    const helperEnvironment = {
+      ...process.env,
+      CLAUDEX_ARCHIVE_HELPER_PATH: tools.helperPath,
+      CLAUDEX_ARCHIVE_HELPER_SHA256: toolDigests.helper,
+      CLAUDEX_ARCHIVE_REQUEST_PATH: storage.requestPath,
+      CLAUDEX_ARCHIVE_REQUEST_SHA256: requestSha256,
+      CLAUDEX_ARCHIVE_DESTINATION_VOLUME: staging.nativeIdentity.volume,
+      CLAUDEX_ARCHIVE_DESTINATION_FILE_ID: staging.nativeIdentity.fileId
+    };
+    await adapter.afterLaunchIdentityPinBeforeProcessCreate?.({
+      plan, stagingDir: staging.target, requestPath: storage.requestPath, tools, toolIdentities,
+      requestSha256, helperEnvironment
+    });
     const result = await runProcess(tools.powershellPath, [
       '-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass',
-      '-File', tools.helperPath, '-RequestPath', storage.requestPath
-    ], { shell: false, timeoutMs: ARCHIVE_LIMITS.extractionDeadlineMs, maxOutputBytes: ARCHIVE_LIMITS.outputBytes }, adapter);
+      '-EncodedCommand', WINDOWS_HELPER_BOOTSTRAP_ENCODED
+    ], {
+      shell: false, timeoutMs: ARCHIVE_LIMITS.extractionDeadlineMs,
+      maxOutputBytes: ARCHIVE_LIMITS.outputBytes, env: helperEnvironment
+    }, adapter);
     response = parseArchiveHelperResponse(result.stdout, { requestId });
     if (result.code !== 0 || response.ok === false) throw capability('The Windows archive helper refused extraction.');
-    compareHelperResult(response.result, plan, stagingDir);
+    compareHelperResult(response.result, plan, staging.target);
   } catch (cause) {
     operationError = cause;
   }
+  if (operationError?.details?.exitUnconfirmed) {
+    operationError.details = { ...operationError.details, requestStorageRetained: true };
+    throw operationError;
+  }
   try {
-    if (requestIdentity) await assertExactFile(storage.requestPath, requestIdentity, adapter.fsApi ?? fs);
+    if (requestIdentity) await assertExactFile(storage.requestPath, requestIdentity, fsApi);
     await storage?.cleanup?.();
   } catch (cause) {
     throw safety('The archive helper request cleanup failed closed.', cause);
   }
   if (operationError) throw operationError;
 }
-
 async function runPosixExtraction(plan, stagingDir, adapter) {
   const requested = adapter.tarPath ?? '/usr/bin/tar';
   if (!FIXED_POSIX_TAR_PATHS.has(requested)) throw capability('The POSIX archive extractor path is not fixed.');
@@ -978,7 +1082,7 @@ async function runPosixExtraction(plan, stagingDir, adapter) {
 async function walkExtractedTree(plan, staging, adapter) {
   const fsApi = adapter.fsApi ?? fs;
   await assertExactDirectory(plan.stagingRoot, plan.stagingRootIdentity, fsApi);
-  await assertExactDirectory(staging.target, staging.identity, fsApi, { mode: 0o700, parent: staging.rootStats });
+  await assertExactDirectory(staging.target, staging.identity, fsApi, { mode: 0o700, parent: staging.rootStats, enforceMode: plan.targetPlatform !== 'win32' });
   const actual = [];
   async function visit(directory, relativeDirectory = '') {
     const children = await fsApi.readdir(directory, { withFileTypes: true });
@@ -1027,7 +1131,7 @@ async function walkExtractedTree(plan, staging, adapter) {
       throw unsafe('The extracted tree differs from the validated plan.');
     }
   }
-  await assertExactDirectory(staging.target, staging.identity, fsApi, { mode: 0o700, parent: staging.rootStats });
+  await assertExactDirectory(staging.target, staging.identity, fsApi, { mode: 0o700, parent: staging.rootStats, enforceMode: plan.targetPlatform !== 'win32' });
   const candidate = actual.filter((entry) => entry.type === 'file' && path.posix.basename(entry.path) === plan.expectedExecutable);
   if (candidate.length !== 1 || candidate[0].path !== plan.candidate.path || candidate[0].size !== plan.candidate.size
     || candidate[0].sha256 !== plan.candidate.sha256 || (process.platform !== 'win32' && candidate[0].mode !== plan.candidate.mode)) {
@@ -1059,27 +1163,108 @@ async function walkExtractedTree(plan, staging, adapter) {
       }
     }
   }
-  return Object.freeze({
-    path: candidate[0].destination,
+  const candidatePath = candidate[0].destination;
+  const candidateIdentity = candidate[0].identity;
+  const handleFlags = fsConstants.O_RDONLY | (fsConstants.O_NOFOLLOW ?? 0);
+  let handle;
+  let candidateExactIdentity;
+  try {
+    const beforePath = await fsApi.lstat(candidatePath);
+    const beforeCanonical = await fsApi.realpath(candidatePath);
+    if (!sameIdentity(beforePath, candidateIdentity) || beforePath.isSymbolicLink?.() || beforePath.isReparsePoint === true
+      || !sameHostPath(beforeCanonical, candidatePath)) throw unsafe('The extracted candidate changed before handle verification.');
+    handle = await fsApi.open(candidatePath, handleFlags);
+    const before = await handle.stat();
+    const exactBefore = await handle.stat({ bigint: true });
+    candidateExactIdentity = exactIdentity(exactBefore);
+    if (!before.isFile?.() || before.nlink > 1 || !sameIdentity(before, candidateIdentity)) {
+      throw unsafe('The extracted candidate handle has an unexpected identity.');
+    }
+    const bytes = await handle.readFile();
+    const after = await handle.stat();
+    if (!sameIdentity(before, after) || after.size !== bytes.length || bytes.length !== candidate[0].size
+      || !sameDigest(digest(bytes), candidate[0].sha256)) throw unsafe('The extracted candidate changed during handle verification.');
+    await adapter.afterCandidateReadBeforeReturn?.({ plan, stagingDir: staging.target, candidatePath });
+    const finalPath = await fsApi.lstat(candidatePath);
+    const finalCanonical = await fsApi.realpath(candidatePath);
+    if (!sameIdentity(finalPath, after) || finalPath.isSymbolicLink?.() || finalPath.isReparsePoint === true
+      || !sameHostPath(finalCanonical, candidatePath)) throw unsafe('The extracted candidate pathname changed before return.');
+  } finally {
+    await handle?.close();
+  }
+  const descriptor = {
+    path: candidatePath,
     size: candidate[0].size,
     sha256: candidate[0].sha256,
-    mode: plan.candidate.mode
-  });
+    mode: plan.candidate.mode,
+    identity: candidateExactIdentity
+  };
+  deepFreeze(descriptor);
+  extractedCandidates.add(descriptor);
+  return descriptor;
+}
+
+export async function revalidateExtractedCandidate(candidate, adapter = {}) {
+  if (!extractedCandidates.has(candidate) || !Object.isFrozen(candidate) || !Object.isFrozen(candidate.identity)) {
+    throw safety('Candidate use requires the original immutable extracted descriptor.');
+  }
+  const fsApi = adapter.fsApi ?? fs;
+  let handle;
+  try {
+    const pathStats = await fsApi.lstat(candidate.path, { bigint: true });
+    const canonical = await fsApi.realpath(candidate.path);
+    if (!sameExactIdentity(pathStats, candidate.identity) || pathStats.isSymbolicLink?.() || pathStats.isReparsePoint === true
+      || !sameHostPath(canonical, candidate.path)) throw unsafe('The extracted candidate changed before use.');
+    handle = await fsApi.open(candidate.path, fsConstants.O_RDONLY | (fsConstants.O_NOFOLLOW ?? 0));
+    const before = await handle.stat();
+    const exactBefore = await handle.stat({ bigint: true });
+    const bytes = await handle.readFile();
+    const after = await handle.stat();
+    if (!before.isFile?.() || before.nlink > 1 || !sameExactIdentity(exactBefore, candidate.identity) || !sameIdentity(before, after)
+      || bytes.length !== candidate.size || after.size !== bytes.length || !sameDigest(digest(bytes), candidate.sha256)) {
+      throw unsafe('The extracted candidate changed before use.');
+    }
+    return candidate;
+  } catch (cause) {
+    if (cause instanceof ClaudexError) throw cause;
+    throw unsafe('The extracted candidate could not be revalidated before use.', cause);
+  } finally {
+    await handle?.close();
+  }
 }
 
 async function cleanupOwnedStaging(staging, plan, fsApi, adapter) {
-  if (!staging?.identity) return;
-  await assertExactDirectory(plan.stagingRoot, plan.stagingRootIdentity, fsApi);
+  if (!staging?.identity) return undefined;
+  const rootStats = await assertExactDirectory(plan.stagingRoot, plan.stagingRootIdentity, fsApi);
   await adapter.beforeCleanupQuarantine?.({ plan, stagingDir: staging.target });
   await assertExactDirectory(staging.target, staging.identity, fsApi, { parent: staging.rootStats });
-  const quarantine = path.join(plan.stagingRoot, `.claudexctl-quarantine-${randomUUID()}`);
+  const quarantineParent = await fsApi.mkdtemp(path.join(plan.stagingRoot, '.claudexctl-quarantine-'));
+  await fsApi.chmod?.(quarantineParent, 0o700);
+  if (plan.targetPlatform === 'win32') {
+    if (adapter.protectStaging) await adapter.protectStaging(quarantineParent);
+    else {
+      const response = await runWindowsSecurityHelper({ request: {
+        requestId: randomUUID(), operation: 'protect', path: quarantineParent,
+        expectedType: 'directory', currentUserSid: adapter.currentUserSid
+      } }, adapter.windowsSecurityDeps);
+      assertWindowsDacl(response.result, { expectedType: 'directory', currentUserSid: adapter.currentUserSid });
+    }
+  }
+  const parentStats = await assertExactDirectory(quarantineParent, undefined, fsApi, { mode: 0o700, parent: rootStats, enforceMode: plan.targetPlatform !== 'win32' });
+  const parentIdentity = identity(parentStats);
+  const parentExactIdentity = exactIdentity(await fsApi.lstat(quarantineParent, { bigint: true }));
+  const stagingExactIdentity = { dev: staging.nativeIdentity.volume, ino: staging.nativeIdentity.fileId };
+  const quarantine = path.join(quarantineParent, 'owned-staging');
   await fsApi.rename(staging.target, quarantine);
-  await assertExactDirectory(quarantine, staging.identity, fsApi, { parent: staging.rootStats });
-  await adapter.beforeQuarantineDelete?.({ plan, quarantine });
-  await assertExactDirectory(quarantine, staging.identity, fsApi, { parent: staging.rootStats });
-  await fsApi.rm(quarantine, { recursive: true, force: false });
+  await assertExactDirectory(quarantineParent, parentIdentity, fsApi, { mode: 0o700, parent: rootStats, enforceMode: plan.targetPlatform !== 'win32' });
+  await assertExactNativeDirectory(quarantine, stagingExactIdentity, fsApi, { parent: parentStats });
+  await adapter.beforeQuarantineDelete?.({ plan, quarantine, quarantineParent });
+  await assertExactNativeDirectory(quarantine, stagingExactIdentity, fsApi, { parent: parentStats });
+  await adapter.afterQuarantineValidationBeforeDelete?.({ plan, quarantine, quarantineParent });
+  await assertExactNativeDirectory(quarantineParent, parentExactIdentity, fsApi, { mode: 0o700, parent: rootStats, enforceMode: plan.targetPlatform !== 'win32' });
+  await assertExactNativeDirectory(quarantine, stagingExactIdentity, fsApi, { parent: parentStats });
+  return Object.freeze({ retained: true, quarantineParent });
 }
-
 /** Extract an in-memory branded immutable plan and verify every materialized path. */
 export async function extractValidatedArchive(plan, stagingDir, adapter = {}) {
   if (!validatedPlans.has(plan) || !Object.isFrozen(plan) || !Object.isFrozen(plan.entries)
@@ -1093,19 +1278,29 @@ export async function extractValidatedArchive(plan, stagingDir, adapter = {}) {
     staging = await createStaging(plan, stagingDir, fsApi, adapter);
     await adapter.beforeExtractor?.({ plan, stagingDir: staging.target });
     await assertExactDirectory(plan.stagingRoot, plan.stagingRootIdentity, fsApi);
-    await assertExactDirectory(staging.target, staging.identity, fsApi, { mode: 0o700, parent: staging.rootStats });
+    await assertExactDirectory(staging.target, staging.identity, fsApi, { mode: 0o700, parent: staging.rootStats, enforceMode: plan.targetPlatform !== 'win32' });
     await recheckArchive(plan, fsApi);
-    if (plan.kind === 'zip') await runWindowsExtraction(plan, staging.target, adapter);
+    if (plan.kind === 'zip') await runWindowsExtraction(plan, staging, adapter);
     else await runPosixExtraction(plan, staging.target, adapter);
     await adapter.beforePostWalk?.({ plan, stagingDir: staging.target });
     return await walkExtractedTree(plan, staging, adapter);
   } catch (cause) {
+    if (cause instanceof ClaudexError && cause.details?.exitUnconfirmed) {
+      cause.details = { ...cause.details, stagingRetained: true };
+      throw cause;
+    }
+    let cleanup;
     try {
-      await cleanupOwnedStaging(staging, plan, fsApi, adapter);
+      cleanup = await cleanupOwnedStaging(staging, plan, fsApi, adapter);
     } catch (cleanupCause) {
       throw safety('Archive staging cleanup failed closed.', cleanupCause);
     }
-    if (cause instanceof ClaudexError) throw cause;
-    throw unsafe('Archive extraction failed safely.', cause);
+    if (cause instanceof ClaudexError) {
+      if (cleanup?.retained) cause.details = { ...cause.details, stagingRetained: true };
+      throw cause;
+    }
+    const wrapped = unsafe('Archive extraction failed safely.', cause);
+    if (cleanup?.retained) wrapped.details = { ...wrapped.details, stagingRetained: true };
+    throw wrapped;
   }
 }
