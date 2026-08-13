@@ -92,7 +92,6 @@
       margin: 0 auto 2.5rem auto;
     }
 
-    /* Step Timeline Pills */
     .timeline-nav {
       display: flex;
       justify-content: center;
@@ -182,7 +181,6 @@
     .card h3 { font-size: 1.3rem; font-weight: 600; margin-bottom: 0.5rem; }
     .card p { color: var(--text-muted); font-size: 0.95rem; margin-bottom: 1rem; }
 
-    /* OS Selector Sub-tabs */
     .os-selector {
       display: flex;
       gap: 0.5rem;
@@ -211,7 +209,6 @@
       color: #000;
     }
 
-    /* Terminal Box */
     .terminal-box {
       background: var(--bg-term);
       border: 1px solid var(--border-color);
@@ -230,11 +227,6 @@
       border-bottom: 1px solid var(--border-color);
     }
 
-    .terminal-dots { display: flex; gap: 6px; }
-    .dot { width: 10px; height: 10px; border-radius: 50%; }
-    .dot-red { background: #ff5f56; }
-    .dot-yellow { background: #ffbd2e; }
-    .dot-green { background: #27c93f; }
     .terminal-title { font-family: var(--font-mono); font-size: 0.78rem; color: var(--text-muted); }
 
     .terminal-body {
@@ -250,7 +242,7 @@
       gap: 1rem;
     }
 
-    .cmd-text { color: #ffffff; font-weight: 500; }
+    .cmd-text { color: #ffffff; font-weight: 500; word-break: break-all; }
 
     .copy-btn {
       background: rgba(255, 255, 255, 0.08);
@@ -285,7 +277,16 @@
       gap: 0.5rem;
     }
 
-    /* Simulator */
+    .fallback-note {
+      background: rgba(245, 158, 11, 0.1);
+      border: 1px solid rgba(245, 158, 11, 0.3);
+      border-radius: 8px;
+      padding: 0.75rem;
+      margin-top: 0.75rem;
+      font-size: 0.82rem;
+      color: #fbbf24;
+    }
+
     .sim-terminal {
       background: #06070a;
       border: 1px solid var(--border-color);
@@ -323,7 +324,6 @@
     .highlight-yellow { color: var(--warning); }
     .highlight-magenta { color: var(--accent-magenta); }
 
-    /* FAQ accordion */
     .faq-item {
       background: var(--bg-card);
       border: 1px solid var(--border-color);
@@ -391,7 +391,6 @@
       <h2 class="section-title">Step 0: Install Required Prerequisites (For New Systems)</h2>
       <p class="section-desc">If your system is completely fresh, follow these steps to install Node.js, Git, and Claude Code first.</p>
 
-      <!-- OS Selector Sub-tabs -->
       <div class="os-selector">
         <button class="os-btn active" id="os-win-btn" onclick="showOS('win')">Windows</button>
         <button class="os-btn" id="os-mac-btn" onclick="showOS('mac')">macOS</button>
@@ -403,7 +402,7 @@
         <div class="card">
           <div class="card-icon">1️⃣</div>
           <h3>1. Install Node.js 22+</h3>
-          <p>Run Windows Package Manager command in PowerShell:</p>
+          <p>Method A: If <code>winget</code> is available on your Windows:</p>
           <div class="terminal-box">
             <div class="terminal-header"><span class="terminal-title">PowerShell</span></div>
             <div class="terminal-body">
@@ -413,13 +412,28 @@
               </div>
             </div>
           </div>
+
+          <div class="fallback-note">
+            ⚡ <strong>No <code>winget</code>? Use Direct PowerShell Installer (Method B):</strong>
+            <div class="terminal-box" style="margin-top: 0.5rem;">
+              <div class="terminal-header"><span class="terminal-title">PowerShell (Direct Auto-Install)</span></div>
+              <div class="terminal-body">
+                <div class="command-line">
+                  <span class="cmd-text">Invoke-WebRequest -Uri "https://nodejs.org/dist/v22.20.0/node-v22.20.0-x64.msi" -OutFile "$env:TEMP\node.msi"; Start-Process msiexec.exe -ArgumentList "/i $env:TEMP\node.msi /passive" -Wait</span>
+                  <button class="copy-btn" id="c1b" onclick="copyText('Invoke-WebRequest -Uri &quot;https://nodejs.org/dist/v22.20.0/node-v22.20.0-x64.msi&quot; -OutFile &quot;$env:TEMP\\node.msi&quot;; Start-Process msiexec.exe -ArgumentList &quot;/i $env:TEMP\\node.msi /passive&quot; -Wait', 'c1b')">Copy</button>
+                </div>
+              </div>
+            </div>
+            Or download directly from: <a href="https://nodejs.org/en/download" target="_blank" style="color: var(--accent-cyan);">nodejs.org/en/download</a>
+          </div>
+
           <div class="check-box">✓ Verify: <code>node --version</code> (Must be &ge; 22.20.0)</div>
         </div>
 
         <div class="card">
           <div class="card-icon">2️⃣</div>
           <h3>2. Install Git</h3>
-          <p>Install Git for version control and repository management:</p>
+          <p>Method A (winget):</p>
           <div class="terminal-box">
             <div class="terminal-header"><span class="terminal-title">PowerShell</span></div>
             <div class="terminal-body">
@@ -429,13 +443,17 @@
               </div>
             </div>
           </div>
+          <div class="fallback-note">
+            ⚡ <strong>No <code>winget</code>? Download Official Git Installer:</strong><br>
+            Download directly from: <a href="https://git-scm.com/download/win" target="_blank" style="color: var(--accent-cyan);">git-scm.com/download/win</a>
+          </div>
           <div class="check-box">✓ Verify: <code>git --version</code></div>
         </div>
 
         <div class="card">
           <div class="card-icon">3️⃣</div>
           <h3>3. Install Claude Code</h3>
-          <p>Install the official Claude Code CLI tool globally via npm:</p>
+          <p>Install official Claude Code CLI tool globally via npm:</p>
           <div class="terminal-box">
             <div class="terminal-header"><span class="terminal-title">PowerShell</span></div>
             <div class="terminal-body">
@@ -705,6 +723,11 @@
     <section id="step-6" style="display: none;">
       <h2 class="section-title">Step 6: FAQ & Troubleshooting</h2>
       <p class="section-desc">Solutions for common beginner issues.</p>
+
+      <div class="faq-item">
+        <div class="faq-q">Q: What if 'winget' is not recognized on Windows?</div>
+        <div class="faq-a">Use the 1-line PowerShell auto-installer provided in Step 0 (Method B) or download the MSI directly from <a href="https://nodejs.org" target="_blank" style="color: var(--accent-cyan);">nodejs.org</a>.</div>
+      </div>
 
       <div class="faq-item">
         <div class="faq-q">Q: PowerShell script execution is disabled on Windows?</div>
