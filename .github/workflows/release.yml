@@ -1,0 +1,457 @@
+name: release
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Exact existing vMAJOR.MINOR.PATCH tag to publish
+        required: true
+        type: string
+      validation_run_id:
+        description: Workflow run containing the 11 release-bound validation reports
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release-context:
+    if: github.ref_type == 'tag'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    outputs:
+      version: ${{ steps.release_context.outputs.version }}
+    steps:
+      - name: Checkout exact tag revision
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - name: Bind tag, version, and immutable source revision
+        id: release_context
+        shell: bash
+        env:
+          RELEASE_TAG: ${{ inputs.release_tag }}
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF_TYPE" = tag
+          test "$GITHUB_REF_NAME" = "$RELEASE_TAG"
+          case "$RELEASE_TAG" in v0.0.0|v[0-9]*.[0-9]*.[0-9]*) ;; *) exit 1 ;; esac
+          version="${RELEASE_TAG#v}"
+          node -e "if(!/^(?:0|[1-9][0-9]*)\\.(?:0|[1-9][0-9]*)\\.(?:0|[1-9][0-9]*)$/.test(process.argv[1]))process.exit(1)" "$version"
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          git diff --exit-code
+          printf 'version=%s\n' "$version" >> "$GITHUB_OUTPUT"
+
+  node-lane-freshness:
+    needs: release-context
+    permissions:
+      contents: read
+    uses: ./.github/workflows/upstream-compatibility.yml
+
+  build-windows-shims:
+    needs: [release-context, node-lane-freshness]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            arch: x64
+          - os: windows-11-arm
+            arch: arm64
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    steps:
+      - name: Checkout exact tag revision
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - name: Resolve reviewed floor Node lane
+        id: lane
+        shell: powershell
+        run: |
+          $lanes = Get-Content -Raw -LiteralPath .\ci\node-lanes.json | ConvertFrom-Json
+          [IO.File]::AppendAllText($env:GITHUB_OUTPUT, "node_version=$($lanes.floor)`n", [Text.UTF8Encoding]::new($false))
+      - name: Install reviewed floor Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: ${{ steps.lane.outputs.node_version }}
+          check-latest: false
+      - name: Build and capture-test native shim
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
+          if (-not (Test-Path -LiteralPath $vswhere -PathType Leaf)) { exit 1 }
+          $component = if ('${{ matrix.arch }}' -eq 'x64') { 'Microsoft.VisualStudio.Component.VC.Tools.x86.x64' } else { 'Microsoft.VisualStudio.Component.VC.Tools.ARM64' }
+          $installation = (& $vswhere '-latest' '-products' '*' '-requires' $component '-property' 'installationPath').Trim()
+          $devShell = Join-Path $installation 'Common7\Tools\Launch-VsDevShell.ps1'
+          if (-not [IO.Path]::IsPathRooted($installation) -or -not (Test-Path -LiteralPath $devShell -PathType Leaf)) { exit 1 }
+          $targetArch = if ('${{ matrix.arch }}' -eq 'x64') { 'amd64' } else { 'arm64' }
+          & $devShell -Arch $targetArch -HostArch 'amd64' -SkipAutomaticLocation
+          if ($null -eq (Get-Command 'cl.exe' -CommandType Application -ErrorAction SilentlyContinue)) { exit 1 }
+          & ./scripts/build-windows-shim.ps1 -Architecture '${{ matrix.arch }}' -SourceRevision $env:GITHUB_SHA -OutputDirectory (Join-Path $pwd 'native-artifacts')
+          node .\scripts\verify-release-artifacts.mjs --verify-shim --descriptor "native-artifacts\claudex-windows-${{ matrix.arch }}.exe.json" --shim "native-artifacts\claudex-windows-${{ matrix.arch }}.exe" --target "windows-${{ matrix.arch }}" --source-revision $env:GITHUB_SHA
+      - name: Upload immutable native shim and descriptor
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        with:
+          name: native-shim-windows-${{ matrix.arch }}-${{ github.sha }}
+          path: |
+            native-artifacts/claudex-windows-${{ matrix.arch }}.exe
+            native-artifacts/claudex-windows-${{ matrix.arch }}.exe.json
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 0
+          overwrite: false
+
+  test-matrix:
+    needs: [release-context, node-lane-freshness, build-windows-shims]
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, windows-11-arm, macos-15-intel, macos-15, ubuntu-24.04, ubuntu-24.04-arm]
+        lane: [floor, lts, current]
+        include:
+          - os: windows-latest
+            shell_kind: windows
+            arch: x64
+          - os: windows-11-arm
+            shell_kind: windows
+            arch: arm64
+          - os: macos-15-intel
+            shell_kind: posix
+            arch: x64
+          - os: macos-15
+            shell_kind: posix
+            arch: arm64
+          - os: ubuntu-24.04
+            shell_kind: posix
+            arch: x64
+          - os: ubuntu-24.04-arm
+            shell_kind: posix
+            arch: arm64
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    steps:
+      - name: Checkout exact tag revision
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - name: Download x64 native shim proof
+        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5.0.0
+        with:
+          name: native-shim-windows-x64-${{ github.sha }}
+          path: native-artifacts
+      - name: Download ARM64 native shim proof
+        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5.0.0
+        with:
+          name: native-shim-windows-arm64-${{ github.sha }}
+          path: native-artifacts
+      - name: Resolve reviewed Node lane on Windows
+        id: windows_lane
+        if: matrix.shell_kind == 'windows'
+        shell: powershell
+        run: |
+          $lanes = Get-Content -Raw -LiteralPath .\ci\node-lanes.json | ConvertFrom-Json
+          $nodeVersion = [string]$lanes.'${{ matrix.lane }}'
+          [IO.File]::AppendAllText($env:GITHUB_OUTPUT, "node_version=$nodeVersion`n", [Text.UTF8Encoding]::new($false))
+      - name: Resolve reviewed Node lane on POSIX
+        id: posix_lane
+        if: matrix.shell_kind == 'posix'
+        shell: bash
+        run: node -e "const f=require('./ci/node-lanes.json');require('fs').appendFileSync(process.env.GITHUB_OUTPUT,'node_version='+f[process.argv[1]]+'\n')" '${{ matrix.lane }}'
+      - name: Install exact reviewed Node lane
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: ${{ steps.windows_lane.outputs.node_version || steps.posix_lane.outputs.node_version }}
+          check-latest: false
+      - name: Create runtime secret canary on Windows
+        if: matrix.shell_kind == 'windows'
+        shell: powershell
+        run: node -e "require('fs').appendFileSync(process.env.GITHUB_ENV,'CLAUDEX_SECRET_CANARY='+require('crypto').randomBytes(32).toString('hex')+'\n')"
+      - name: Create runtime secret canary on POSIX
+        if: matrix.shell_kind == 'posix'
+        shell: bash
+        run: node -e "require('fs').appendFileSync(process.env.GITHUB_ENV,'CLAUDEX_SECRET_CANARY='+require('crypto').randomBytes(32).toString('hex')+'\n')"
+      - name: Verify consumed shim proofs and run Windows gates
+        if: matrix.shell_kind == 'windows'
+        shell: powershell
+        run: |
+          node .\scripts\verify-release-artifacts.mjs --verify-shim --descriptor native-artifacts\claudex-windows-x64.exe.json --shim native-artifacts\claudex-windows-x64.exe --target windows-x64 --source-revision $env:GITHUB_SHA
+          node .\scripts\verify-release-artifacts.mjs --verify-shim --descriptor native-artifacts\claudex-windows-arm64.exe.json --shim native-artifacts\claudex-windows-arm64.exe --target windows-arm64 --source-revision $env:GITHUB_SHA
+          if ((node -p process.arch) -ne '${{ matrix.arch }}') { exit 1 }
+          npm.cmd run check
+          npm.cmd test
+          npm.cmd run check
+      - name: Verify consumed shim proofs and run POSIX gates
+        if: matrix.shell_kind == 'posix'
+        shell: bash
+        run: |
+          set -euo pipefail
+          node scripts/verify-release-artifacts.mjs --verify-shim --descriptor native-artifacts/claudex-windows-x64.exe.json --shim native-artifacts/claudex-windows-x64.exe --target windows-x64 --source-revision "$GITHUB_SHA"
+          node scripts/verify-release-artifacts.mjs --verify-shim --descriptor native-artifacts/claudex-windows-arm64.exe.json --shim native-artifacts/claudex-windows-arm64.exe --target windows-arm64 --source-revision "$GITHUB_SHA"
+          test "$(node -p process.arch)" = '${{ matrix.arch }}'
+          npm run check
+          npm test
+          npm run check
+
+  package-release:
+    needs: [release-context, node-lane-freshness, build-windows-shims, test-matrix]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Checkout exact tag revision
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - name: Install reviewed floor Node
+        id: package_lane
+        shell: bash
+        run: node -e "const f=require('./ci/node-lanes.json');require('fs').appendFileSync(process.env.GITHUB_OUTPUT,'node_version='+f.floor+'\n')"
+      - name: Install exact reviewed floor Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: ${{ steps.package_lane.outputs.node_version }}
+          check-latest: false
+      - name: Download both verified native shims
+        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5.0.0
+        with:
+          pattern: native-shim-*-${{ github.sha }}
+          path: native-artifacts
+          merge-multiple: true
+      - name: Assemble deterministic release set
+        shell: bash
+        env:
+          VERSION: ${{ needs['release-context'].outputs.version }}
+        run: |
+          set -euo pipefail
+          node scripts/verify-release-artifacts.mjs --verify-shim --descriptor native-artifacts/claudex-windows-x64.exe.json --shim native-artifacts/claudex-windows-x64.exe --target windows-x64 --source-revision "$GITHUB_SHA"
+          node scripts/verify-release-artifacts.mjs --verify-shim --descriptor native-artifacts/claudex-windows-arm64.exe.json --shim native-artifacts/claudex-windows-arm64.exe --target windows-arm64 --source-revision "$GITHUB_SHA"
+          mkdir -m 700 package-output release
+          node scripts/package.mjs --root . --out package-output --version "$VERSION" --source-revision "$GITHUB_SHA"
+          cp "package-output/claudex-manager-$VERSION.tar.gz" "release/claudex-manager-$VERSION.tar.gz"
+          cp "package-output/claudex-manager-$VERSION.spdx.json" "release/claudex-manager-$VERSION.spdx.json"
+          cp native-artifacts/claudex-windows-x64.exe native-artifacts/claudex-windows-arm64.exe release/
+          cp install.sh install.ps1 release/
+          node scripts/assemble-release-manifest.mjs --payload-descriptor "package-output/claudex-manager-$VERSION.tar.gz.json" --sbom-descriptor "package-output/claudex-manager-$VERSION.spdx.json.descriptor.json" --shim-x64-descriptor native-artifacts/claudex-windows-x64.exe.json --shim-arm64-descriptor native-artifacts/claudex-windows-arm64.exe.json --artifacts release --out release/project-manifest.json
+          node scripts/verify-release-artifacts.mjs --write-checksums --artifacts release --manifest release/project-manifest.json --out release/SHA256SUMS
+          node scripts/verify-release-artifacts.mjs --verify --artifacts release --manifest release/project-manifest.json --checksums release/SHA256SUMS
+      - name: Upload immutable complete release set
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        with:
+          name: release-set-${{ github.sha }}
+          path: release/*
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 0
+          overwrite: false
+
+  redownload-rehash:
+    needs: [release-context, package-release]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout verifier at exact tag revision
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - name: Re-download immutable release set
+        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5.0.0
+        with:
+          name: release-set-${{ github.sha }}
+          path: release
+      - name: Rehash every manifest, checksum, SBOM, shim, payload, and bootstrap subject
+        run: node scripts/verify-release-artifacts.mjs --verify --artifacts release --manifest release/project-manifest.json --checksums release/SHA256SUMS
+
+  bootstrap-smoke:
+    needs: [release-context, package-release, redownload-rehash]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            shell_kind: windows
+          - os: windows-11-arm
+            shell_kind: windows
+          - os: macos-15-intel
+            shell_kind: posix
+          - os: macos-15
+            shell_kind: posix
+          - os: ubuntu-24.04
+            shell_kind: posix
+          - os: ubuntu-24.04-arm
+            shell_kind: posix
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
+    steps:
+      - name: Checkout exact tag revision
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - name: Install reviewed floor Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22.20.0
+      - name: Download verified release set
+        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5.0.0
+        with:
+          name: release-set-${{ github.sha }}
+          path: release
+      - name: Rehash packaged bytes and run Windows package/bootstrap smoke
+        if: matrix.shell_kind == 'windows'
+        shell: powershell
+        run: |
+          node .\scripts\verify-release-artifacts.mjs --verify --artifacts release --manifest release\project-manifest.json --checksums release\SHA256SUMS
+          node --test test\integration\package.test.js test\integration\bootstrap-posix.test.js test\integration\bootstrap-windows.test.js
+      - name: Rehash packaged bytes and run POSIX package/bootstrap smoke
+        if: matrix.shell_kind == 'posix'
+        shell: bash
+        run: |
+          set -euo pipefail
+          node scripts/verify-release-artifacts.mjs --verify --artifacts release --manifest release/project-manifest.json --checksums release/SHA256SUMS
+          node --test test/integration/package.test.js test/integration/bootstrap-posix.test.js test/integration/bootstrap-windows.test.js
+
+  validation-reports:
+    needs: [release-context, package-release]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Checkout exact tag revision
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - name: Download exact release manifest
+        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5.0.0
+        with:
+          name: release-set-${{ github.sha }}
+          path: release
+      - name: Download release-bound manual validation reports
+        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5.0.0
+        with:
+          pattern: validation-report-*
+          path: validation-reports
+          merge-multiple: true
+          repository: ${{ github.repository }}
+          run-id: ${{ inputs.validation_run_id }}
+          github-token: ${{ github.token }}
+      - name: Enforce verified private reporting and exact report set
+        shell: bash
+        run: |
+          set -euo pipefail
+          node -e "if(require('fs').readFileSync('SECURITY.md','utf8').includes('PRIVATE_REPORTING_NOT_VERIFIED'))process.exit(1)"
+          node scripts/e2e-validate-report.mjs --manifest release/project-manifest.json \
+            --report validation-reports/windows-10-1809-x64.json \
+            --report validation-reports/windows-11-arm64.json \
+            --report validation-reports/macos-13-x64.json \
+            --report validation-reports/macos-13-arm64.json \
+            --report validation-reports/wsl.json \
+            --report validation-reports/current-windows-x64.json \
+            --report validation-reports/current-windows-arm64.json \
+            --report validation-reports/current-darwin-x64.json \
+            --report validation-reports/current-darwin-arm64.json \
+            --report validation-reports/current-linux-x64.json \
+            --report validation-reports/current-linux-arm64.json
+
+  provenance:
+    needs: [release-context, node-lane-freshness, build-windows-shims, test-matrix, package-release, redownload-rehash, bootstrap-smoke, validation-reports]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      actions: read
+      id-token: write
+      attestations: write
+    steps:
+      - name: Checkout exact tag revision
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - name: Download exact release set
+        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5.0.0
+        with:
+          name: release-set-${{ github.sha }}
+          path: release
+      - name: Rehash immediately before attestation
+        run: node scripts/verify-release-artifacts.mjs --verify --artifacts release --manifest release/project-manifest.json --checksums release/SHA256SUMS
+      - name: Attest every exact checksum subject
+        id: attest
+        uses: actions/attest@508db95dd578ae2727ebd6217d5ba78e4fbda05d # v4.2.1
+        with:
+          subject-checksums: release/SHA256SUMS
+          show-summary: true
+      - name: Verify produced signed attestations and exact subjects
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          test -s '${{ steps.attest.outputs['bundle-path'] }}'
+          mkdir -m 700 attestation-results
+          while read -r digest name; do
+            test -n "$digest" && test -n "$name"
+            gh attestation verify "release/$name" --repo "$GITHUB_REPOSITORY" \
+              --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/release.yml" \
+              --source-digest "$GITHUB_SHA" --source-ref "$GITHUB_REF" --format json \
+              > "attestation-results/$name.attestation.json"
+          done < release/SHA256SUMS
+          node scripts/verify-release-artifacts.mjs --verify-attestations --artifacts release --manifest release/project-manifest.json --checksums release/SHA256SUMS --results attestation-results
+          cp '${{ steps.attest.outputs['bundle-path'] }}' attestation-results/provenance.bundle.jsonl
+      - name: Upload bounded verified provenance evidence
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        with:
+          name: verified-provenance-${{ github.sha }}
+          path: attestation-results/*
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 0
+          overwrite: false
+
+  publish:
+    needs: [provenance, validation-reports, bootstrap-smoke, redownload-rehash, package-release, test-matrix, build-windows-shims, node-lane-freshness, release-context]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: write
+      actions: read
+      attestations: read
+    steps:
+      - name: Checkout exact tag revision without persisted credentials
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - name: Download exact release set
+        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5.0.0
+        with:
+          name: release-set-${{ github.sha }}
+          path: release
+      - name: Download verified provenance evidence
+        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5.0.0
+        with:
+          name: verified-provenance-${{ github.sha }}
+          path: provenance
+      - name: Final local and remote provenance verification
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          node scripts/verify-release-artifacts.mjs --verify --artifacts release --manifest release/project-manifest.json --checksums release/SHA256SUMS
+          mkdir -m 700 final-attestation-results
+          while read -r digest name; do
+            gh attestation verify "release/$name" --repo "$GITHUB_REPOSITORY" \
+              --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/release.yml" \
+              --source-digest "$GITHUB_SHA" --source-ref "$GITHUB_REF" --format json \
+              > "final-attestation-results/$name.attestation.json"
+          done < release/SHA256SUMS
+          node scripts/verify-release-artifacts.mjs --verify-attestations --artifacts release --manifest release/project-manifest.json --checksums release/SHA256SUMS --results final-attestation-results
+      - name: Publish immutable GitHub release only after every dependency succeeds
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+        run: gh release create "$RELEASE_TAG" release/* provenance/provenance.bundle.jsonl --repo "$GITHUB_REPOSITORY" --verify-tag --generate-notes --title "$RELEASE_TAG"
