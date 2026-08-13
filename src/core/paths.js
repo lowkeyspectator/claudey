@@ -30,6 +30,10 @@ function canonicalRoot(root, pathApi, label, safety, { wsl = false } = {}) {
   if (!pathApi.isAbsolute(root)) throw safetyRefusal(`${label} must be an absolute path.`);
   if (pathApi === path.win32 && root.startsWith('\\\\')) throw safetyRefusal(`${label} cannot be a UNC path.`);
 
+  if (wsl && !Array.isArray(safety.mountTable)) {
+    throw safetyRefusal('WSL managed roots require authoritative mount metadata.');
+  }
+
   const normalized = pathApi.normalize(root);
   if (normalized === pathApi.parse(normalized).root) throw safetyRefusal(`${label} cannot be a filesystem root.`);
   inspectRoot(normalized, safety);

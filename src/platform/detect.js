@@ -30,6 +30,9 @@ function architectureWarnings(runtimeArch, nativeArch) {
 export function detectPlatform(input = {}) {
   const { runtimePlatform, runtimeArch } = runtimeInfo(input);
   const nativeArch = input.nativeArch ?? runtimeArch;
+  if (!['x64', 'arm64'].includes(nativeArch)) {
+    throw unsupported('This native architecture is not supported.');
+  }
   const platform = detectors[runtimePlatform](input);
   return {
     ...platform,

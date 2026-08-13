@@ -75,6 +75,7 @@
     { "id": "win-pre-1809", "input": { "runtime": { "platform": "win32", "arch": "x64" }, "windowsVersion": { "major": 10, "minor": 0, "build": 17762 } } },
     { "id": "win-8.1", "input": { "runtime": { "platform": "win32", "arch": "x64" }, "windowsVersion": { "major": 6, "minor": 3, "build": 9600 } } },
     { "id": "win-ia32", "input": { "runtime": { "platform": "win32", "arch": "ia32" }, "windowsVersion": { "major": 10, "minor": 0, "build": 19045 } } },
+    { "id": "win-riscv64-native", "input": { "runtime": { "platform": "win32", "arch": "x64" }, "nativeArch": "riscv64", "windowsVersion": { "major": 10, "minor": 0, "build": 19045 } } },
     { "id": "mac-12", "input": { "runtime": { "platform": "darwin", "arch": "x64" }, "macVersion": "12.6.9" } },
     { "id": "mac-ia32", "input": { "runtime": { "platform": "darwin", "arch": "ia32" }, "macVersion": "13.0.0" } },
     { "id": "ubuntu-19", "input": { "runtime": { "platform": "linux", "arch": "x64" }, "osRelease": { "ID": "ubuntu", "VERSION_ID": "19.10" }, "processReport": { "header": { "glibcVersionRuntime": "2.30" } } } },

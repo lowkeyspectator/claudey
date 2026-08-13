@@ -60,6 +60,7 @@
       "id": "wsl-custom-xdg",
       "platform": { "family": "linux", "runtimePlatform": "linux", "runtimeArch": "x64", "isWsl": true, "wslVersion": 2 },
       "env": { "HOME": "/home/casey", "XDG_DATA_HOME": "/var/home/casey/data", "XDG_CONFIG_HOME": "/var/home/casey/config", "XDG_STATE_HOME": "/var/home/casey/state" },
+      "safety": { "mountTable": [] },
       "expected": {
         "managerRoot": "/var/home/casey/data/claudexctl",
         "releaseRoot": "/var/home/casey/data/claudexctl/releases",
@@ -74,6 +75,7 @@
       "id": "wsl-fallback-xdg",
       "platform": { "family": "linux", "runtimePlatform": "linux", "runtimeArch": "arm64", "isWsl": true, "wslVersion": 1 },
       "env": { "HOME": "/home/casey" },
+      "safety": { "mountTable": [] },
       "expected": {
         "managerRoot": "/home/casey/.local/share/claudexctl",
         "releaseRoot": "/home/casey/.local/share/claudexctl/releases",

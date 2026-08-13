@@ -11,9 +11,9 @@ const fixturesPath = path.resolve(path.dirname(fileURLToPath(import.meta.url)), 
 const fixtures = JSON.parse(await fs.readFile(fixturesPath, 'utf8'));
 
 test('derives exact per-user Windows, macOS, Linux, and WSL managed roots without creating them', () => {
-  for (const { id, platform, env, expected } of fixtures.valid) {
-    assert.deepEqual(getManagedPaths(platform, env), expected, id);
-    assert.deepEqual(getManagedPathsFromPlatform(platform, env), expected, `${id} public adapter`);
+  for (const { id, platform, env, safety, expected } of fixtures.valid) {
+    assert.deepEqual(getManagedPaths(platform, env, safety), expected, id);
+    assert.deepEqual(getManagedPathsFromPlatform(platform, env, safety), expected, `${id} public adapter`);
   }
 });
 
@@ -23,6 +23,22 @@ test('refuses WSL roots on Windows mounts and unsafe home or XDG roots', () => {
   }
   assert.throws(
     () => getManagedPaths({ family: 'linux' }, { HOME: '/home/casey' }, { inspectPath: () => ({ isReparsePoint: true }) }),
+    (error) => error.code === 'SAFETY_REFUSAL'
+  );
+});
+
+test('requires WSL mount metadata and refuses a custom Windows mount root', () => {
+  const platform = { family: 'linux', isWsl: true };
+  assert.throws(
+    () => getManagedPaths(platform, { HOME: '/home/casey' }),
+    (error) => error.code === 'SAFETY_REFUSAL'
+  );
+  assert.throws(
+    () => getManagedPaths(
+      platform,
+      { HOME: '/home/casey', XDG_STATE_HOME: '/windows-share/casey/state' },
+      { mountTable: [{ mountPoint: '/windows-share', source: 'D:' }] }
+    ),
     (error) => error.code === 'SAFETY_REFUSAL'
   );
 });
