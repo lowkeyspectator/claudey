@@ -1,0 +1,16 @@
+{
+  "name": "claudexctl",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22.20.0"
+  },
+  "scripts": {
+    "check": "node scripts/check.mjs",
+    "test": "node --test",
+    "test:unit": "node --test test/unit",
+    "test:integration": "node --test test/integration",
+    "test:e2e:fixtures": "node --test test/e2e",
+    "test:e2e:live": "node test/e2e/live/probe.mjs"
+  }
+}
