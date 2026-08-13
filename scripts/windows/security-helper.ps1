@@ -5,6 +5,10 @@ param(
 
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
+$request = $null
+$invariantCulture = [System.Globalization.CultureInfo]::InvariantCulture
+[System.Threading.Thread]::CurrentThread.CurrentCulture = $invariantCulture
+[System.Threading.Thread]::CurrentThread.CurrentUICulture = $invariantCulture
 $utf8NoBom = [System.Text.UTF8Encoding]::new($false)
 [Console]::OutputEncoding = $utf8NoBom
 $OutputEncoding = $utf8NoBom
@@ -24,7 +28,7 @@ function Assert-NoReparsePath([string]$LiteralPath) {
     if ([string]::IsNullOrWhiteSpace($LiteralPath) -or $LiteralPath -match '[\x00\r\n]' -or -not [IO.Path]::IsPathRooted($LiteralPath)) { throw 'Unsafe path.' }
     $fullPath = [IO.Path]::GetFullPath($LiteralPath)
     $root = [IO.Path]::GetPathRoot($fullPath)
-    $relative = $fullPath.Substring($root.Length).TrimStart('\\')
+    $relative = $fullPath.Substring($root.Length).TrimStart('\')
     $current = $root
     foreach ($segment in @($relative -split '\\' | Where-Object { $_ })) {
         $current = Join-Path -Path $current -ChildPath $segment
@@ -34,8 +38,41 @@ function Assert-NoReparsePath([string]$LiteralPath) {
     return $fullPath
 }
 
+function Assert-PrivateRequestAcl([string]$LiteralPath, [string]$ExpectedType) {
+    $safePath = Assert-NoReparsePath $LiteralPath
+    $item = Get-Item -LiteralPath $safePath -Force
+    $actualType = if ($item.PSIsContainer) { 'directory' } else { 'file' }
+    if ($actualType -ne $ExpectedType) { throw 'Private request path type mismatch.' }
+    [void](Assert-NoReparsePath $safePath)
+    $acl = Get-Acl -LiteralPath $safePath
+    $currentUserSid = [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+    $ownerSid = $acl.GetOwner([System.Security.Principal.SecurityIdentifier]).Value
+    if ($ownerSid -ne $currentUserSid -or -not $acl.AreAccessRulesProtected) { throw 'Private request ACL is not protected.' }
+    $rules = @($acl.GetAccessRules($true, $true, [System.Security.Principal.SecurityIdentifier]))
+    if ($rules.Count -ne 2) { throw 'Private request ACL is not exclusive.' }
+    $allowed = @($currentUserSid, 'S-1-5-18')
+    foreach ($rule in $rules) {
+        if ($rule.IsInherited -or $rule.AccessControlType -ne [System.Security.AccessControl.AccessControlType]::Allow) { throw 'Private request ACL contains an unsafe rule.' }
+        if ($rule.IdentityReference.Value -notin $allowed) { throw 'Private request ACL contains a foreign SID.' }
+        if (($rule.FileSystemRights -band [System.Security.AccessControl.FileSystemRights]::FullControl) -ne [System.Security.AccessControl.FileSystemRights]::FullControl) { throw 'Private request ACL is insufficient.' }
+        if ($ExpectedType -eq 'directory') {
+            $requiredInheritance = [System.Security.AccessControl.InheritanceFlags]::ContainerInherit -bor [System.Security.AccessControl.InheritanceFlags]::ObjectInherit
+            if (($rule.InheritanceFlags -band $requiredInheritance) -ne $requiredInheritance) { throw 'Private request directory ACL does not propagate.' }
+        } elseif ($rule.InheritanceFlags -ne [System.Security.AccessControl.InheritanceFlags]::None) {
+            throw 'Private request file ACL has unexpected inheritance flags.'
+        }
+    }
+    if (@($rules | ForEach-Object { $_.IdentityReference.Value } | Select-Object -Unique).Count -ne 2) { throw 'Private request ACL identities are incomplete.' }
+    return $safePath
+}
+
 try {
     $safeRequestPath = Assert-NoReparsePath $RequestPath
+    $safeRequestDirectory = Assert-NoReparsePath ([IO.Path]::GetDirectoryName($safeRequestPath))
+    [void](Assert-PrivateRequestAcl $safeRequestDirectory 'directory')
+    $safeRequestPath = Assert-PrivateRequestAcl $safeRequestPath 'file'
+    [void](Assert-NoReparsePath $safeRequestDirectory)
+    [void](Assert-NoReparsePath $safeRequestPath)
     $raw = [IO.File]::ReadAllText($safeRequestPath, $utf8NoBom)
     $request = $raw | ConvertFrom-Json
     $required = @('schemaVersion', 'requestId', 'operation', 'path', 'expectedType', 'currentUserSid')
@@ -71,6 +108,6 @@ try {
     $result = [ordered]@{ canonicalPath = $item.FullName; type = $type; isReparsePoint = $false; ownerSid = $owner; daclProtected = [bool]$acl.AreAccessRulesProtected; aces = $aces }
     Write-Response ([ordered]@{ ok = $true; schemaVersion = 1; requestId = $request.requestId; result = $result }) 0
 } catch {
-    $requestId = if ($request -and $request.requestId) { [string]$request.requestId } else { '' }
+    $requestId = if ($null -ne $request -and $null -ne $request.requestId) { [string]$request.requestId } else { '' }
     Fail $requestId 'SAFETY_REFUSAL' 'Managed path is not eligible for permission mutation.'
 }

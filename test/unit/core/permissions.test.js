@@ -1,7 +1,9 @@
 import assert from 'node:assert/strict';
+import { EventEmitter } from 'node:events';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import { PassThrough } from 'node:stream';
 import test from 'node:test';
 
 import { assertProtected, atomicReplace } from '../../../src/core/permissions.js';
@@ -151,84 +153,314 @@ test('builds and parses the strict schema-1 Windows helper protocol', async () =
 
   assert.throws(
     () => parseSecurityHelperResponse(`${request}\n${request}`, { requestId: '11111111-1111-4111-8111-111111111111' }),
-    (error) => error?.code === 'SAFETY_REFUSAL'
+    (error) => error?.code === 'CAPABILITY_UNSUPPORTED'
   );
 });
 
-test('rejects unexpected Windows helper output after a fixed no-stdin invocation', async (t) => {
-  const root = await tempRoot(t);
-  const launches = [];
-  await assert.rejects(
-    () => runWindowsSecurityHelper({
-      helperPath: 'C:\\managed\\security-helper.ps1', requestDirectory: root,
-      powershellPath: 'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe',
-      request: {
-        requestId: '11111111-1111-4111-8111-111111111111', operation: 'inspect',
-        path: 'C:\\managed\\state', expectedType: 'directory', currentUserSid: 'S-1-5-21-1-2-3-4'
-      },
-      spawn: async (command, args, options) => {
-        launches.push({ command, args, options });
-        return { code: 0, stdout: '{}\nnoise', stderr: '' };
-      }
-    }),
-    (error) => error?.code === 'SAFETY_REFUSAL'
-  );
-  assert.equal(launches.length, 1);
-  assert.equal(launches[0].command, 'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe');
-  assert.deepEqual(launches[0].args.slice(0, -1), [
-    '-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass',
-    '-File', 'C:\\managed\\security-helper.ps1', '-RequestPath'
-  ]);
-  assert.equal(launches[0].options.input, undefined);
-  assert.equal(launches[0].options.shell, false);
-  assert.equal(launches[0].options.windowsHide, true);
-});
-test('writes one private request file, passes its path, and removes it after the helper exits', async (t) => {
-  const root = await tempRoot(t);
+function successfulHelperResponse(request) {
+  return JSON.stringify({
+    ok: true, schemaVersion: 1, requestId: request.requestId,
+    result: {
+      canonicalPath: request.path, type: request.expectedType, isReparsePoint: false,
+      ownerSid: request.currentUserSid, daclProtected: true,
+      aces: [
+        { type: 'allow', sid: request.currentUserSid, rights: 'full-control', inherited: false },
+        { type: 'allow', sid: 'S-1-5-18', rights: 'full-control', inherited: false }
+      ]
+    }
+  });
+}
+
+test('uses only canonical fixed system executables and the bundled helper identity', async () => {
   const request = {
     requestId: '77777777-7777-4777-8777-777777777777', operation: 'inspect',
     path: 'C:\\managed\\state', expectedType: 'directory', currentUserSid: 'S-1-5-21-1-2-3-4'
   };
-  let requestPath;
+  const launches = [];
   const response = await runWindowsSecurityHelper({
-    helperPath: 'C:\\managed\\security-helper.ps1', request, requestDirectory: root,
-    powershellPath: 'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe',
+    request,
+    helperPath: 'C:\\attacker\\System32\\WindowsPowerShell\\v1.0\\security-helper.ps1',
+    powershellPath: 'D:\\attacker\\System32\\WindowsPowerShell\\v1.0\\powershell.exe',
+    icaclsPath: 'D:\\attacker\\System32\\icacls.exe',
+    requestDirectory: 'C:\\attacker\\requests'
+  }, {
     spawn: async (command, args, options) => {
-      requestPath = args.at(-1);
-      assert.equal(command, 'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe');
-      assert.deepEqual(args.slice(0, -1), [
-        '-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass',
-        '-File', 'C:\\managed\\security-helper.ps1', '-RequestPath'
-      ]);
-      assert.equal(options.input, undefined);
+      launches.push({ command, args, options });
+      if (command.endsWith('\\icacls.exe')) return { code: 0, stdout: 'processed', stderr: '' };
+      const requestPath = args.at(-1);
       assert.deepEqual(JSON.parse(await fs.readFile(requestPath, 'utf8')), JSON.parse(buildSecurityHelperRequest(request)));
-      return { code: 0, stderr: '', stdout: JSON.stringify({
-        ok: true, schemaVersion: 1, requestId: request.requestId,
-        result: {
-          canonicalPath: request.path, type: 'directory', isReparsePoint: false,
-          ownerSid: request.currentUserSid, daclProtected: true,
-          aces: [
-            { type: 'allow', sid: request.currentUserSid, rights: 'full-control', inherited: false },
-            { type: 'allow', sid: 'S-1-5-18', rights: 'full-control', inherited: false }
-          ]
-        }
-      }) };
+      return { code: 0, stderr: '', stdout: successfulHelperResponse(request) };
     }
   });
   assert.equal(response.ok, true);
-  assert.equal(path.dirname(requestPath), root);
-  await assert.rejects(() => fs.access(requestPath), { code: 'ENOENT' });
+  assert.equal(launches.length, 3);
+  assert.equal(launches[0].command, 'C:\\Windows\\System32\\icacls.exe');
+  assert.equal(launches[1].command, 'C:\\Windows\\System32\\icacls.exe');
+  assert.equal(launches[2].command, 'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe');
+  assert.deepEqual(launches[2].args.slice(0, -1), [
+    '-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass',
+    '-File', path.resolve('scripts/windows/security-helper.ps1'), '-RequestPath'
+  ]);
+  assert.equal(launches[2].options.shell, false);
+  assert.equal(launches[2].options.input, undefined);
+  assert.notEqual(path.dirname(launches[2].args.at(-1)), 'C:\\attacker\\requests');
+  await assert.rejects(() => fs.access(path.dirname(launches[2].args.at(-1))), { code: 'ENOENT' });
 });
-test('fails closed when either helper output stream exceeds its cap', async (t) => {
-  const root = await tempRoot(t);
+
+test('fails closed when either helper output stream exceeds its cap', async () => {
   await assert.rejects(() => runWindowsSecurityHelper({
-    helperPath: 'C:\\managed\\security-helper.ps1', requestDirectory: root,
-    powershellPath: 'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe',
     maxOutputBytes: 8,
     request: {
       requestId: '88888888-8888-4888-8888-888888888888', operation: 'inspect',
       path: 'C:\\managed\\state', expectedType: 'directory', currentUserSid: 'S-1-5-21-1-2-3-4'
-    },
-    spawn: async () => ({ code: 0, stdout: '{}', stderr: 'too much diagnostic output' })
+    }
+  }, {
+    spawn: async (command) => command.endsWith('\\icacls.exe')
+      ? { code: 0, stdout: '', stderr: '' }
+      : { code: 0, stdout: '{}', stderr: 'too much diagnostic output' }
+  }), (error) => error?.code === 'CAPABILITY_UNSUPPORTED');
+});
+function fakeProtectedRun(request, extraDeps = {}) {
+  return runWindowsSecurityHelper({ request, timeoutMs: 50 }, {
+    spawn: async (command) => command.endsWith('\\icacls.exe')
+      ? { code: 0, stdout: '', stderr: '' }
+      : { code: 0, stdout: successfulHelperResponse(request), stderr: '' },
+    ...extraDeps
+  });
+}
+
+test('assertProtected derives the bundled Windows helper without a caller path', async () => {
+  const launches = [];
+  const currentUserSid = 'S-1-5-21-1-2-3-4';
+  const result = await assertProtected({
+    target: 'C:\\managed\\state', type: 'directory', platform: 'win32', currentUserSid
+  }, {
+    spawn: async (command, args) => {
+      launches.push({ command, args });
+      if (command.endsWith('\\icacls.exe')) return { code: 0, stdout: '', stderr: '' };
+      const request = JSON.parse(await fs.readFile(args.at(-1), 'utf8'));
+      return { code: 0, stdout: successfulHelperResponse(request), stderr: '' };
+    }
+  });
+  assert.equal(result.ownerSid, currentUserSid);
+  assert.equal(launches.at(-1).args.at(-3), path.resolve('scripts/windows/security-helper.ps1'));
+});
+
+test('fails closed and retains evidence when request cleanup encounters residue', async () => {
+  const request = {
+    requestId: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc', operation: 'inspect',
+    path: 'C:\\managed\\state', expectedType: 'directory', currentUserSid: 'S-1-5-21-1-2-3-4'
+  };
+  let directoryPath;
+  await assert.rejects(() => fakeProtectedRun(request, {
+    beforeCleanup: async (storage) => {
+      directoryPath = storage.directoryPath;
+      await fs.writeFile(path.join(directoryPath, 'unexpected.txt'), 'residue');
+    }
   }), (error) => error?.code === 'SAFETY_REFUSAL');
+  assert.equal(await fs.readFile(path.join(directoryPath, 'unexpected.txt'), 'utf8'), 'residue');
+  await fs.rm(directoryPath, { recursive: true, force: true });
+});
+
+test('fails closed without deleting through a swapped request directory', async () => {
+  const request = {
+    requestId: 'dddddddd-dddd-4ddd-8ddd-dddddddddddd', operation: 'inspect',
+    path: 'C:\\managed\\state', expectedType: 'directory', currentUserSid: 'S-1-5-21-1-2-3-4'
+  };
+  let originalDirectory;
+  let replacementDirectory;
+  await assert.rejects(() => fakeProtectedRun(request, {
+    beforeCleanup: async ({ directoryPath }) => {
+      replacementDirectory = directoryPath;
+      originalDirectory = `${directoryPath}-original`;
+      await fs.rename(directoryPath, originalDirectory);
+      await fs.mkdir(replacementDirectory);
+      await fs.writeFile(path.join(replacementDirectory, 'sentinel.txt'), 'replacement');
+    }
+  }), (error) => error?.code === 'SAFETY_REFUSAL');
+  assert.equal(await fs.readFile(path.join(replacementDirectory, 'sentinel.txt'), 'utf8'), 'replacement');
+  assert.equal(JSON.parse(await fs.readFile(path.join(originalDirectory, 'request.json'), 'utf8')).requestId, request.requestId);
+  await fs.rm(originalDirectory, { recursive: true, force: true });
+  await fs.rm(replacementDirectory, { recursive: true, force: true });
+});
+
+test('fails closed when deletion fails and confirms request residue remains', async () => {
+  const request = {
+    requestId: 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee', operation: 'inspect',
+    path: 'C:\\managed\\state', expectedType: 'directory', currentUserSid: 'S-1-5-21-1-2-3-4'
+  };
+  let directoryPath;
+  const fsApi = {
+    ...fs,
+    rm: async (target, options) => {
+      if (path.basename(target) === 'request.json') {
+        const error = new Error('simulated deletion failure');
+        error.code = 'EACCES';
+        throw error;
+      }
+      return fs.rm(target, options);
+    }
+  };
+  await assert.rejects(() => fakeProtectedRun(request, {
+    fsApi,
+    beforeCleanup: ({ directoryPath: value }) => { directoryPath = value; }
+  }), (error) => error?.code === 'SAFETY_REFUSAL');
+  assert.equal(JSON.parse(await fs.readFile(path.join(directoryPath, 'request.json'), 'utf8')).requestId, request.requestId);
+  await fs.rm(directoryPath, { recursive: true, force: true });
+});
+
+test('rejects a canonical executable identity mismatch before launching anything', async () => {
+  const request = {
+    requestId: 'ffffffff-ffff-4fff-8fff-ffffffffffff', operation: 'inspect',
+    path: 'C:\\managed\\state', expectedType: 'directory', currentUserSid: 'S-1-5-21-1-2-3-4'
+  };
+  let launches = 0;
+  const fsApi = {
+    ...fs,
+    realpath: async (target) => target.toLowerCase().endsWith('\\powershell.exe')
+      ? 'D:\\attacker\\System32\\WindowsPowerShell\\v1.0\\powershell.exe'
+      : fs.realpath(target)
+  };
+  await assert.rejects(() => runWindowsSecurityHelper({ request }, {
+    fsApi,
+    spawn: async () => { launches += 1; return { code: 0, stdout: '', stderr: '' }; }
+  }), (error) => error?.code === 'CAPABILITY_UNSUPPORTED');
+  assert.equal(launches, 0);
+});
+
+test('timeout kills the child and waits for confirmed close before rejecting', async () => {
+  const request = {
+    requestId: '12121212-1212-4121-8121-121212121212', operation: 'inspect',
+    path: 'C:\\managed\\state', expectedType: 'directory', currentUserSid: 'S-1-5-21-1-2-3-4'
+  };
+  const events = [];
+  let confirmClose;
+  let reportKilled;
+  const killed = new Promise((resolve) => { reportKilled = resolve; });
+  const spawnChild = (command) => {
+    const child = new EventEmitter();
+    child.stdout = new PassThrough();
+    child.stderr = new PassThrough();
+    child.kill = () => {
+      events.push('kill');
+      confirmClose = () => { events.push('close'); child.emit('close', 1); };
+      reportKilled();
+      return true;
+    };
+    if (command.endsWith('\\icacls.exe')) setImmediate(() => child.emit('close', 0));
+    return child;
+  };
+  let settled = false;
+  const outcome = runWindowsSecurityHelper({ request, timeoutMs: 20 }, { spawnChild });
+  outcome.catch(() => { settled = true; });
+  await killed;
+  await new Promise((resolve) => setTimeout(resolve, 5));
+  assert.equal(settled, false);
+  confirmClose();
+  await assert.rejects(() => outcome,
+    (error) => { events.push('rejected'); return error?.code === 'CAPABILITY_UNSUPPORTED'; });
+  assert.deepEqual(events, ['kill', 'close', 'rejected']);
+});
+test('refuses a bundled helper that resolves through a reparse identity', async () => {
+  const request = {
+    requestId: '13131313-1313-4131-8131-131313131313', operation: 'inspect',
+    path: 'C:\\managed\\state', expectedType: 'directory', currentUserSid: 'S-1-5-21-1-2-3-4'
+  };
+  const expectedHelper = path.resolve('scripts/windows/security-helper.ps1').toLowerCase();
+  let launches = 0;
+  const fsApi = {
+    ...fs,
+    lstat: async (target) => {
+      const stats = await fs.lstat(target);
+      if (path.normalize(target).toLowerCase() !== expectedHelper) return stats;
+      return {
+        ...stats,
+        isSymbolicLink: () => true,
+        isFile: () => stats.isFile(),
+        isDirectory: () => stats.isDirectory()
+      };
+    }
+  };
+  await assert.rejects(() => runWindowsSecurityHelper({ request }, {
+    fsApi,
+    spawn: async () => { launches += 1; return { code: 0, stdout: '', stderr: '' }; }
+  }), (error) => error?.code === 'CAPABILITY_UNSUPPORTED');
+  assert.equal(launches, 0);
+});
+test('cleans the exact dedicated directory when DACL bootstrap fails before request creation', async () => {
+  const request = {
+    requestId: '15151515-1515-4151-8151-151515151515', operation: 'inspect',
+    path: 'C:\\managed\\state', expectedType: 'directory', currentUserSid: 'S-1-5-21-1-2-3-4'
+  };
+  const listRequestDirectories = async () => new Set((await fs.readdir(os.tmpdir()))
+    .filter((name) => name.startsWith('claudexctl-security-')));
+  const before = await listRequestDirectories();
+  let extras = [];
+  try {
+    await assert.rejects(() => runWindowsSecurityHelper({ request }, {
+      spawn: async (command) => command.endsWith('\\icacls.exe')
+        ? { code: 1, stdout: '', stderr: '' }
+        : { code: 0, stdout: successfulHelperResponse(request), stderr: '' }
+    }), (error) => error?.code === 'CAPABILITY_UNSUPPORTED');
+    const after = await listRequestDirectories();
+    extras = [...after].filter((name) => !before.has(name));
+    assert.deepEqual(extras, []);
+  } finally {
+    await Promise.all(extras.map((name) => fs.rm(path.join(os.tmpdir(), name), { recursive: true, force: true })));
+  }
+});
+test('cleans the exact request file and directory when file DACL protection fails', async () => {
+  const request = {
+    requestId: '16161616-1616-4161-8161-161616161616', operation: 'inspect',
+    path: 'C:\\managed\\state', expectedType: 'directory', currentUserSid: 'S-1-5-21-1-2-3-4'
+  };
+  const listRequestDirectories = async () => new Set((await fs.readdir(os.tmpdir()))
+    .filter((name) => name.startsWith('claudexctl-security-')));
+  const before = await listRequestDirectories();
+  let icaclsCalls = 0;
+  let extras = [];
+  try {
+    await assert.rejects(() => runWindowsSecurityHelper({ request }, {
+      spawn: async (command) => {
+        if (command.endsWith('\\icacls.exe')) {
+          icaclsCalls += 1;
+          return { code: icaclsCalls === 2 ? 1 : 0, stdout: '', stderr: '' };
+        }
+        return { code: 0, stdout: successfulHelperResponse(request), stderr: '' };
+      }
+    }), (error) => error?.code === 'CAPABILITY_UNSUPPORTED');
+    const after = await listRequestDirectories();
+    extras = [...after].filter((name) => !before.has(name));
+    assert.deepEqual(extras, []);
+  } finally {
+    await Promise.all(extras.map((name) => fs.rm(path.join(os.tmpdir(), name), { recursive: true, force: true })));
+  }
+});
+test('escalates a timed-out child once and still rejects only after close', async () => {
+  const request = {
+    requestId: '17171717-1717-4171-8171-171717171717', operation: 'inspect',
+    path: 'C:\\managed\\state', expectedType: 'directory', currentUserSid: 'S-1-5-21-1-2-3-4'
+  };
+  const signals = [];
+  const spawnChild = (command) => {
+    const child = new EventEmitter();
+    child.stdout = new PassThrough();
+    child.stderr = new PassThrough();
+    let fallbackClose;
+    child.kill = (signal) => {
+      signals.push(signal ?? 'TERM');
+      if (signal === 'SIGKILL') {
+        clearTimeout(fallbackClose);
+        setImmediate(() => child.emit('close', 1));
+      } else {
+        fallbackClose = setTimeout(() => child.emit('close', 1), 500);
+      }
+      return true;
+    };
+    if (command.endsWith('\\icacls.exe')) setImmediate(() => child.emit('close', 0));
+    return child;
+  };
+  await assert.rejects(() => runWindowsSecurityHelper({ request, timeoutMs: 20 }, { spawnChild }),
+    (error) => error?.code === 'CAPABILITY_UNSUPPORTED');
+  assert.deepEqual(signals, ['TERM', 'SIGKILL']);
 });

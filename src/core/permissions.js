@@ -19,15 +19,17 @@ function relativeChild(root, target, platform) {
   return pathApiFor(platform).relative(root, target);
 }
 
-export async function assertProtected({ target, type, mode, platform = process.platform, currentUserSid, helperPath }, deps = {}) {
+export async function assertProtected({ target, type, mode, platform = process.platform, currentUserSid }, deps = {}) {
   if (platform !== 'win32') return assertPosixProtection({ target, type, mode }, { lstat: deps.lstat });
-  if (!currentUserSid || !helperPath) throw safetyRefusal('Windows protection verification requires a verified helper identity.');
+  if (!currentUserSid) throw safetyRefusal('Windows protection verification requires the current user SID.');
   const response = await runWindowsSecurityHelper({
-    helperPath,
     request: {
       requestId: crypto.randomUUID(), operation: 'inspect', path: target, expectedType: type, currentUserSid
-    },
-    spawn: deps.spawn
+    }
+  }, {
+    spawn: deps.spawn,
+    spawnChild: deps.spawnChild,
+    fsApi: deps.fsApi
   });
   return assertWindowsDacl(response.result, { expectedType: type, currentUserSid });
 }

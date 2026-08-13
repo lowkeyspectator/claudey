@@ -2,14 +2,33 @@ import { spawn as spawnChild } from 'node:child_process';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 import { ClaudexError } from '../core/errors.js';
 
 const systemSid = 'S-1-5-18';
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const fixedPowerShellPath = 'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe';
+const fixedIcaclsPath = 'C:\\Windows\\System32\\icacls.exe';
+const bundledHelperPath = fileURLToPath(new URL('../../scripts/windows/security-helper.ps1', import.meta.url));
+const defaultTimeoutMs = 120_000;
+const defaultOutputLimitBytes = 64 * 1024;
+const defaultTerminationGraceMs = 250;
 
-function safetyRefusal(message) {
-  return new ClaudexError('SAFETY_REFUSAL', message);
+function fail(code, message, cause) {
+  return new ClaudexError(code, message, cause ? { cause } : undefined);
+}
+
+function safetyRefusal(message, cause) {
+  return fail('SAFETY_REFUSAL', message, cause);
+}
+
+function capabilityUnsupported(message, cause) {
+  return fail('CAPABILITY_UNSUPPORTED', message, cause);
+}
+
+function prerequisiteMissing(message, cause) {
+  return fail('PREREQUISITE_MISSING', message, cause);
 }
 
 function assertExactKeys(value, keys) {
@@ -57,18 +76,18 @@ function assertResult(result) {
 
 export function parseSecurityHelperResponse(stdout, { requestId } = {}) {
   if (typeof stdout !== 'string' || stdout.trim() === '' || stdout.trim().split(/\r?\n/).length !== 1) {
-    throw safetyRefusal('Windows helper must write exactly one JSON response.');
+    throw capabilityUnsupported('Windows helper must write exactly one JSON response.');
   }
   let response;
   try {
     response = JSON.parse(stdout.trim());
-  } catch {
-    throw safetyRefusal('Windows helper response is not valid JSON.');
+  } catch (error) {
+    throw capabilityUnsupported('Windows helper response is not valid JSON.', error);
   }
   if (response?.ok === true) {
     assertExactKeys(response, ['ok', 'schemaVersion', 'requestId', 'result']);
     if (response.schemaVersion !== 1 || !uuidPattern.test(response.requestId) || response.requestId !== requestId) {
-      throw safetyRefusal('Windows helper response identity is invalid.');
+      throw capabilityUnsupported('Windows helper response identity is invalid.');
     }
     assertResult(response.result);
     return response;
@@ -76,122 +95,259 @@ export function parseSecurityHelperResponse(stdout, { requestId } = {}) {
   if (response?.ok === false) {
     assertExactKeys(response, ['ok', 'schemaVersion', 'requestId', 'code', 'message']);
     if (response.schemaVersion !== 1 || response.requestId !== requestId || typeof response.code !== 'string' || typeof response.message !== 'string') {
-      throw safetyRefusal('Windows helper error response is invalid.');
+      throw capabilityUnsupported('Windows helper error response is invalid.');
     }
     return response;
   }
-  throw safetyRefusal('Windows helper response has an invalid envelope.');
+  throw capabilityUnsupported('Windows helper response has an invalid envelope.');
 }
-
-const defaultTimeoutMs = 10_000;
-const defaultOutputLimitBytes = 64 * 1024;
 
 function assertBoundedText(value, name, maxOutputBytes) {
   if (typeof value !== 'string' || Buffer.byteLength(value, 'utf8') > maxOutputBytes) {
-    throw safetyRefusal(`Windows helper ${name} exceeded its permitted output.`);
+    throw capabilityUnsupported(`Windows helper ${name} exceeded its permitted output.`);
   }
   return value;
 }
 
-function resolvePowerShellPath(powershellPath) {
-  const defaultPath = path.win32.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
-  const candidate = powershellPath ?? defaultPath;
-  const normalized = typeof candidate === 'string' ? path.win32.normalize(candidate) : '';
-  const fixedTail = normalized.toLowerCase().endsWith('\\system32\\windowspowershell\\v1.0\\powershell.exe');
-  if (typeof candidate !== 'string' || !path.win32.isAbsolute(candidate) || /[\0\r\n]/.test(candidate) || !fixedTail) {
-    throw safetyRefusal('Windows helper PowerShell executable is invalid.');
-  }
-  return normalized;
+function sameWindowsPath(left, right) {
+  return path.win32.normalize(left).toLowerCase() === path.win32.normalize(right).toLowerCase();
 }
 
-async function writePrivateRequestFile(input, { fsApi = fs, requestDirectory } = {}) {
-  const directory = requestDirectory ?? os.tmpdir();
-  if (typeof directory !== 'string' || directory.length === 0 || /[\0\r\n]/.test(directory)) {
-    throw safetyRefusal('Windows helper request directory is invalid.');
+function isReparseStat(stats) {
+  return stats.isSymbolicLink?.() === true;
+}
+
+async function walkNoReparse(absolutePath, fsApi) {
+  const normalized = path.win32.normalize(absolutePath);
+  const root = path.win32.parse(normalized).root;
+  let current = root;
+  for (const segment of normalized.slice(root.length).split('\\').filter(Boolean)) {
+    current = path.win32.join(current, segment);
+    const stats = await fsApi.lstat(current);
+    if (isReparseStat(stats)) throw capabilityUnsupported('A trusted Windows path contains a reparse point.');
   }
-  const requestPath = path.join(directory, `.claudexctl-security-${crypto.randomUUID()}.json`);
-  let handle;
+}
+
+async function verifyTrustedPath(exactPath, { type, fsApi }) {
+  if (!path.win32.isAbsolute(exactPath) || /[\0\r\n]/.test(exactPath)) {
+    throw capabilityUnsupported('A trusted Windows path is invalid.');
+  }
   try {
-    handle = await fsApi.open(requestPath, 'wx', 0o600);
-    await handle.writeFile(input, 'utf8');
-    await handle.sync();
-    await handle.close();
-    handle = undefined;
-    await fsApi.chmod(requestPath, 0o600);
-    return requestPath;
+    await walkNoReparse(exactPath, fsApi);
+    const canonical = await fsApi.realpath(exactPath);
+    if (!sameWindowsPath(canonical, exactPath)) throw capabilityUnsupported('A trusted Windows path changed identity.');
+    const stats = await fsApi.lstat(exactPath);
+    if ((type === 'file' && !stats.isFile()) || (type === 'directory' && !stats.isDirectory())) {
+      throw capabilityUnsupported('A trusted Windows path has the wrong type.');
+    }
+    return path.win32.normalize(exactPath);
   } catch (error) {
-    await handle?.close().catch(() => {});
-    await fsApi.rm(requestPath, { force: true }).catch(() => {});
-    throw error;
+    if (error instanceof ClaudexError) throw error;
+    if (error?.code === 'ENOENT') throw prerequisiteMissing('A required fixed Windows helper executable is missing.', error);
+    throw capabilityUnsupported('A trusted Windows path could not be verified.', error);
   }
 }
 
-function defaultSpawn(command, args, { shell, windowsHide, timeoutMs, maxOutputBytes }) {
+function identityOf(stats) {
+  return { dev: stats.dev, ino: stats.ino, birthtimeMs: stats.birthtimeMs };
+}
+
+function sameIdentity(stats, identity) {
+  return stats.dev === identity.dev && stats.ino === identity.ino && stats.birthtimeMs === identity.birthtimeMs;
+}
+
+async function verifyGeneratedIdentity(target, identity, { type, fsApi, parent }) {
+  await walkNoReparse(target, fsApi);
+  const canonical = await fsApi.realpath(target);
+  if (!sameWindowsPath(canonical, target)) throw safetyRefusal('Windows helper request storage changed identity.');
+  if (parent && !sameWindowsPath(path.win32.dirname(canonical), parent)) throw safetyRefusal('Windows helper request escaped its directory.');
+  const stats = await fsApi.lstat(target);
+  if (!sameIdentity(stats, identity) || (type === 'file' ? !stats.isFile() : !stats.isDirectory())) {
+    throw safetyRefusal('Windows helper request storage changed identity.');
+  }
+  return canonical;
+}
+
+function defaultSpawn(command, args, {
+  shell, windowsHide, timeoutMs, maxOutputBytes,
+  terminationGraceMs = defaultTerminationGraceMs,
+  spawnChildApi = spawnChild
+}) {
   return new Promise((resolve, reject) => {
-    const child = spawnChild(command, args, { shell, stdio: ['ignore', 'pipe', 'pipe'], windowsHide });
+    let child;
+    try {
+      child = spawnChildApi(command, args, { shell, stdio: ['ignore', 'pipe', 'pipe'], windowsHide });
+    } catch (error) {
+      reject(prerequisiteMissing('A required Windows helper could not be started.', error));
+      return;
+    }
     let stdout = '';
     let stderr = '';
+    let terminationReason;
+    let timeout;
+    let escalation;
     let settled = false;
+    const clearTimers = () => {
+      clearTimeout(timeout);
+      clearTimeout(escalation);
+    };
     const finish = (callback, value) => {
       if (settled) return;
       settled = true;
-      clearTimeout(timer);
+      clearTimers();
       callback(value);
     };
     const terminate = (message) => {
+      if (terminationReason) return;
+      terminationReason = message;
       child.kill();
-      finish(reject, safetyRefusal(message));
+      escalation = setTimeout(() => child.kill('SIGKILL'), terminationGraceMs);
     };
-    const timer = setTimeout(() => terminate('Windows helper timed out.'), timeoutMs);
+    timeout = setTimeout(() => terminate('Windows helper timed out.'), timeoutMs);
     child.stdout.setEncoding('utf8');
     child.stderr.setEncoding('utf8');
     child.stdout.on('data', (chunk) => {
+      if (terminationReason) return;
       stdout += chunk;
       if (Buffer.byteLength(stdout, 'utf8') > maxOutputBytes) terminate('Windows helper stdout exceeded its permitted output.');
     });
     child.stderr.on('data', (chunk) => {
+      if (terminationReason) return;
       stderr += chunk;
       if (Buffer.byteLength(stderr, 'utf8') > maxOutputBytes) terminate('Windows helper stderr exceeded its permitted output.');
     });
-    child.once('error', (error) => finish(reject, error));
-    child.once('close', (code) => finish(resolve, { code, stdout, stderr }));
+    child.once('error', (error) => {
+      if (!terminationReason) finish(reject, prerequisiteMissing('A required Windows helper failed to start.', error));
+    });
+    child.once('close', (code) => {
+      if (terminationReason) finish(reject, capabilityUnsupported(terminationReason));
+      else finish(resolve, { code, stdout, stderr });
+    });
   });
 }
 
-export async function runWindowsSecurityHelper({
-  helperPath,
-  request,
-  powershellPath,
-  requestDirectory,
-  timeoutMs = defaultTimeoutMs,
-  maxOutputBytes = defaultOutputLimitBytes,
-  spawn = defaultSpawn,
-  fsApi = fs
-}) {
-  if (typeof helperPath !== 'string' || !path.win32.isAbsolute(helperPath) || /[\0\r\n]/.test(helperPath)) {
-    throw safetyRefusal('Windows helper path is invalid.');
+async function runProcess(command, args, options, deps) {
+  const runner = deps.spawn ?? ((cmd, argv, opts) => defaultSpawn(cmd, argv, { ...opts, spawnChildApi: deps.spawnChild }));
+  const result = await runner(command, args, options);
+  assertBoundedText(result?.stdout, 'stdout', options.maxOutputBytes);
+  assertBoundedText(result?.stderr, 'stderr', options.maxOutputBytes);
+  return result;
+}
+
+async function protectRequestPath(target, { directory, currentUserSid, icaclsPath, limits, deps }) {
+  const inheritance = directory ? '(OI)(CI)' : '';
+  const args = [
+    target,
+    '/inheritance:r',
+    '/grant:r',
+    `*${currentUserSid}:${inheritance}F`,
+    `*${systemSid}:${inheritance}F`,
+    '/q'
+  ];
+  const result = await runProcess(icaclsPath, args, limits, deps);
+  if (result.code !== 0) throw capabilityUnsupported('Windows request DACL protection failed.');
+}
+
+async function confirmAbsent(target, fsApi) {
+  try {
+    await fsApi.lstat(target);
+  } catch (error) {
+    if (error?.code === 'ENOENT') return;
+    throw error;
   }
+  throw safetyRefusal('Windows helper request cleanup left residue.');
+}
+
+async function cleanupRequestStorage(storage, fsApi) {
+  if (!storage.directoryIdentity) return;
+  if (storage.fileIdentity) {
+    await verifyGeneratedIdentity(storage.requestPath, storage.fileIdentity, {
+      type: 'file', fsApi, parent: storage.directoryPath
+    });
+    await fsApi.rm(storage.requestPath);
+    await confirmAbsent(storage.requestPath, fsApi);
+  }
+  await verifyGeneratedIdentity(storage.directoryPath, storage.directoryIdentity, { type: 'directory', fsApi });
+  await fsApi.rmdir(storage.directoryPath);
+  await confirmAbsent(storage.directoryPath, fsApi);
+}
+
+async function createProtectedRequest(input, { currentUserSid, icaclsPath, limits, deps }) {
+  const fsApi = deps.fsApi ?? fs;
+  const storage = {};
+  let handle;
+  try {
+    storage.directoryPath = await fsApi.mkdtemp(path.join(os.tmpdir(), 'claudexctl-security-'));
+    storage.directoryIdentity = identityOf(await fsApi.lstat(storage.directoryPath));
+    await walkNoReparse(storage.directoryPath, fsApi);
+    const canonicalDirectory = await fsApi.realpath(storage.directoryPath);
+    if (!sameWindowsPath(canonicalDirectory, storage.directoryPath)) {
+      throw safetyRefusal('Windows helper request directory changed identity.');
+    }
+    storage.directoryPath = canonicalDirectory;
+    await protectRequestPath(storage.directoryPath, { directory: true, currentUserSid, icaclsPath, limits, deps });
+    await verifyGeneratedIdentity(storage.directoryPath, storage.directoryIdentity, { type: 'directory', fsApi });
+    storage.requestPath = path.join(storage.directoryPath, 'request.json');
+    handle = await fsApi.open(storage.requestPath, 'wx');
+    await handle.writeFile(input, 'utf8');
+    await handle.sync();
+    await handle.close();
+    handle = undefined;
+    storage.fileIdentity = identityOf(await fsApi.lstat(storage.requestPath));
+    await protectRequestPath(storage.requestPath, { directory: false, currentUserSid, icaclsPath, limits, deps });
+    await verifyGeneratedIdentity(storage.requestPath, storage.fileIdentity, {
+      type: 'file', fsApi, parent: storage.directoryPath
+    });
+    return storage;
+  } catch (error) {
+    await handle?.close().catch(() => {});
+    error.requestStorage = storage;
+    throw error;
+  }
+}
+export async function runWindowsSecurityHelper({
+  request,
+  timeoutMs = defaultTimeoutMs,
+  maxOutputBytes = defaultOutputLimitBytes
+}, deps = {}) {
   if (!Number.isInteger(timeoutMs) || timeoutMs <= 0 || !Number.isInteger(maxOutputBytes) || maxOutputBytes <= 0) {
     throw safetyRefusal('Windows helper execution limits are invalid.');
   }
+  const fsApi = deps.fsApi ?? fs;
   const input = buildSecurityHelperRequest(request);
-  const requestPath = await writePrivateRequestFile(input, { fsApi, requestDirectory });
+  const limits = { shell: false, windowsHide: true, timeoutMs, maxOutputBytes };
+  const powershellPath = await verifyTrustedPath(fixedPowerShellPath, { type: 'file', fsApi });
+  const icaclsPath = await verifyTrustedPath(fixedIcaclsPath, { type: 'file', fsApi });
+  const helperPath = await verifyTrustedPath(bundledHelperPath, { type: 'file', fsApi });
+  let storage;
+  let operationError;
+  let response;
   try {
-    const result = await spawn(resolvePowerShellPath(powershellPath), [
+    storage = await createProtectedRequest(input, {
+      currentUserSid: request.currentUserSid, icaclsPath, limits, deps: { ...deps, fsApi }
+    });
+    const result = await runProcess(powershellPath, [
       '-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass',
-      '-File', helperPath, '-RequestPath', requestPath
-    ], { shell: false, windowsHide: true, timeoutMs, maxOutputBytes });
-    assertBoundedText(result?.stdout, 'stdout', maxOutputBytes);
-    assertBoundedText(result?.stderr, 'stderr', maxOutputBytes);
-    const response = parseSecurityHelperResponse(result.stdout, { requestId: request.requestId });
-    if (result?.code !== 0 || response.ok === false) {
+      '-File', helperPath, '-RequestPath', storage.requestPath
+    ], limits, deps);
+    response = parseSecurityHelperResponse(result.stdout, { requestId: request.requestId });
+    if (result.code !== 0 || response.ok === false) {
       throw new ClaudexError(response.code ?? 'SAFETY_REFUSAL', response.message ?? 'Windows helper refused the operation.');
     }
-    return response;
-  } finally {
-    await fsApi.rm(requestPath, { force: true }).catch(() => {});
+  } catch (error) {
+    operationError = error;
+    storage ??= error.requestStorage;
   }
+  try {
+    await deps.beforeCleanup?.({ ...storage });
+    await cleanupRequestStorage(storage ?? {}, fsApi);
+  } catch (cleanupError) {
+    throw safetyRefusal('Windows helper request cleanup failed closed.', cleanupError);
+  }
+  if (operationError) throw operationError;
+  return response;
 }
+
 export function assertWindowsDacl(result, { expectedType, currentUserSid }) {
   if (result.isReparsePoint || result.type !== expectedType || !result.daclProtected || result.ownerSid !== currentUserSid) {
     throw safetyRefusal('Windows managed path protection is invalid.');

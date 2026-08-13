@@ -9,13 +9,20 @@ import test from 'node:test';
 import { assertWindowsDacl, runWindowsSecurityHelper } from '../../src/platform/windows-helpers.js';
 
 const helperPath = path.resolve('scripts/windows/security-helper.ps1');
+const powershellPath = 'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe';
+const icaclsPath = 'C:\\Windows\\System32\\icacls.exe';
 
 function invokeRawHelper(request) {
   const directory = mkdtempSync(path.join(os.tmpdir(), 'claudexctl-request-'));
   const requestPath = path.join(directory, 'request.json');
-  writeFileSync(requestPath, JSON.stringify(request), { encoding: 'utf8', mode: 0o600 });
+  const ownerSid = execFileSync(powershellPath, [
+    '-NoLogo', '-NoProfile', '-NonInteractive', '-Command', '[System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value'
+  ], { encoding: 'utf8' }).trim();
+  execFileSync(icaclsPath, [directory, '/inheritance:r', '/grant:r', `*${ownerSid}:(OI)(CI)F`, '*S-1-5-18:(OI)(CI)F', '/q']);
+  writeFileSync(requestPath, JSON.stringify(request), { encoding: 'utf8' });
+  execFileSync(icaclsPath, [requestPath, '/inheritance:r', '/grant:r', `*${ownerSid}:F`, '*S-1-5-18:F', '/q']);
   try {
-    return spawnSync(process.env.SystemRoot + '\\System32\\WindowsPowerShell\\v1.0\\powershell.exe', [
+    return spawnSync(powershellPath, [
       '-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', helperPath, '-RequestPath', requestPath
     ], { encoding: 'utf8' });
   } finally {
@@ -26,7 +33,7 @@ function invokeRawHelper(request) {
 test('Windows helper inspects a private directory with one JSON response', { skip: process.platform !== 'win32' }, async (t) => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'claudexctl-dacl-'));
   t.after(() => fs.rm(root, { recursive: true, force: true }));
-  const currentUserSid = execFileSync('powershell.exe', [
+  const currentUserSid = execFileSync(powershellPath, [
     '-NoProfile', '-NonInteractive', '-Command', '[System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value'
   ], { encoding: 'utf8' }).trim();
 
@@ -45,7 +52,7 @@ test('Windows helper inspects a private directory with one JSON response', { ski
 test('Windows helper protects a private directory with exactly the owner and LocalSystem ACEs', { skip: process.platform !== 'win32' }, async (t) => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'claudexctl-dacl-protect-'));
   t.after(() => fs.rm(root, { recursive: true, force: true }));
-  const currentUserSid = execFileSync('powershell.exe', [
+  const currentUserSid = execFileSync(powershellPath, [
     '-NoProfile', '-NonInteractive', '-Command', '[System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value'
   ], { encoding: 'utf8' }).trim();
 
@@ -88,7 +95,7 @@ test('Windows helper refuses a junction before inspecting its target', { skip: p
   });
   const junction = path.join(root, 'junction');
   await fs.symlink(outside, junction, 'junction');
-  const currentUserSid = execFileSync('powershell.exe', [
+  const currentUserSid = execFileSync(powershellPath, [
     '-NoProfile', '-NonInteractive', '-Command', '[System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value'
   ], { encoding: 'utf8' }).trim();
   const result = invokeRawHelper({
@@ -106,7 +113,7 @@ test('Windows helper refuses a reparse-point ancestor without following it', { s
   await fs.writeFile(path.join(outside, 'child.txt'), 'outside');
   const ancestor = path.join(root, 'ancestor');
   await fs.symlink(outside, ancestor, 'junction');
-  const currentUserSid = execFileSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', '[System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value'], { encoding: 'utf8' }).trim();
+  const currentUserSid = execFileSync(powershellPath, ['-NoProfile', '-NonInteractive', '-Command', '[System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value'], { encoding: 'utf8' }).trim();
   const result = invokeRawHelper({ schemaVersion: 1, requestId: '99999999-9999-4999-8999-999999999999', operation: 'inspect', path: path.join(ancestor, 'child.txt'), expectedType: 'file', currentUserSid });
   assert.notEqual(result.status, 0);
   assert.equal(JSON.parse(result.stdout).code, 'SAFETY_REFUSAL');
@@ -115,9 +122,77 @@ test('Windows helper refuses a reparse-point ancestor without following it', { s
 test('Windows helper stdout is a single UTF-8 JSON object', { skip: process.platform !== 'win32' }, async (t) => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'claudexctl-dacl-utf8-'));
   t.after(() => fs.rm(root, { recursive: true, force: true }));
-  const currentUserSid = execFileSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', '[System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value'], { encoding: 'utf8' }).trim();
+  const currentUserSid = execFileSync(powershellPath, ['-NoProfile', '-NonInteractive', '-Command', '[System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value'], { encoding: 'utf8' }).trim();
   const result = invokeRawHelper({ schemaVersion: 1, requestId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', operation: 'inspect', path: root, expectedType: 'directory', currentUserSid });
   assert.equal(result.stderr, '');
   assert.equal(result.stdout.includes('\n'), false);
   assert.equal(JSON.parse(Buffer.from(result.stdout, 'utf8').toString('utf8')).ok, true);
+});
+test('Windows helper refuses an unprotected request file before reading valid content', { skip: process.platform !== 'win32' }, async (t) => {
+  const target = await fs.mkdtemp(path.join(os.tmpdir(), 'claudexctl-dacl-unprotected-target-'));
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'claudexctl-dacl-unprotected-request-'));
+  t.after(async () => { await fs.rm(target, { recursive: true, force: true }); await fs.rm(directory, { recursive: true, force: true }); });
+  const requestPath = path.join(directory, 'request.json');
+  const currentUserSid = execFileSync('C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe', [
+    '-NoLogo', '-NoProfile', '-NonInteractive', '-Command', '[System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value'
+  ], { encoding: 'utf8' }).trim();
+  await fs.writeFile(requestPath, JSON.stringify({
+    schemaVersion: 1, requestId: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', operation: 'inspect',
+    path: target, expectedType: 'directory', currentUserSid
+  }));
+  const result = spawnSync(powershellPath, [
+    '-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass',
+    '-File', helperPath, '-RequestPath', requestPath
+  ], { encoding: 'utf8' });
+  assert.notEqual(result.status, 0);
+  assert.equal(result.stderr, '');
+  assert.equal(result.stdout.includes('\n'), false);
+  assert.equal(JSON.parse(result.stdout).code, 'SAFETY_REFUSAL');
+});
+
+test('Windows helper emits one UTF-8 JSON error for unsafe RequestPath before parsing', { skip: process.platform !== 'win32' }, () => {
+  const result = spawnSync(powershellPath, [
+    '-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass',
+    '-File', helperPath, '-RequestPath', '.'
+  ], { encoding: 'buffer' });
+  const stdout = result.stdout.toString('utf8');
+  assert.notEqual(result.status, 0);
+  assert.equal(result.stderr.length, 0);
+  assert.equal(stdout.includes('\n'), false);
+  assert.deepEqual(Object.keys(JSON.parse(stdout)).sort(), ['code', 'message', 'ok', 'requestId', 'schemaVersion']);
+});
+test('Windows helper refuses a protected request file with a foreign Everyone ACE', { skip: process.platform !== 'win32' }, async (t) => {
+  const target = await fs.mkdtemp(path.join(os.tmpdir(), 'claudexctl-dacl-foreign-ace-target-'));
+  const directory = mkdtempSync(path.join(os.tmpdir(), 'claudexctl-dacl-foreign-ace-request-'));
+  t.after(async () => { await fs.rm(target, { recursive: true, force: true }); rmSync(directory, { recursive: true, force: true }); });
+  const requestPath = path.join(directory, 'request.json');
+  const ownerSid = execFileSync(powershellPath, ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command', '[System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value'], { encoding: 'utf8' }).trim();
+  execFileSync(icaclsPath, [directory, '/inheritance:r', '/grant:r', `*${ownerSid}:(OI)(CI)F`, '*S-1-5-18:(OI)(CI)F', '/q']);
+  writeFileSync(requestPath, JSON.stringify({
+    schemaVersion: 1, requestId: '14141414-1414-4141-8141-141414141414', operation: 'inspect',
+    path: target, expectedType: 'directory', currentUserSid: ownerSid
+  }), { encoding: 'utf8' });
+  execFileSync(icaclsPath, [requestPath, '/inheritance:r', '/grant:r', `*${ownerSid}:F`, '*S-1-5-18:F', '*S-1-1-0:R', '/q']);
+  const result = spawnSync(powershellPath, ['-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', helperPath, '-RequestPath', requestPath], { encoding: 'utf8' });
+  assert.notEqual(result.status, 0);
+  assert.equal(JSON.parse(result.stdout).code, 'SAFETY_REFUSAL');
+});
+
+test('Windows helper emits one UTF-8 JSON error for malformed protected request JSON', { skip: process.platform !== 'win32' }, () => {
+  const directory = mkdtempSync(path.join(os.tmpdir(), 'claudexctl-dacl-malformed-request-'));
+  const requestPath = path.join(directory, 'request.json');
+  const ownerSid = execFileSync(powershellPath, ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command', '[System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value'], { encoding: 'utf8' }).trim();
+  execFileSync(icaclsPath, [directory, '/inheritance:r', '/grant:r', `*${ownerSid}:(OI)(CI)F`, '*S-1-5-18:(OI)(CI)F', '/q']);
+  writeFileSync(requestPath, '{not-json', { encoding: 'utf8' });
+  execFileSync(icaclsPath, [requestPath, '/inheritance:r', '/grant:r', `*${ownerSid}:F`, '*S-1-5-18:F', '/q']);
+  try {
+    const result = spawnSync(powershellPath, ['-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', helperPath, '-RequestPath', requestPath], { encoding: 'buffer' });
+    const stdout = result.stdout.toString('utf8');
+    assert.notEqual(result.status, 0);
+    assert.equal(result.stderr.length, 0);
+    assert.equal(stdout.includes('\n'), false);
+    assert.equal(JSON.parse(stdout).requestId, '');
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
 });
