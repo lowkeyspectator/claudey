@@ -204,6 +204,7 @@ export function validateProjectReleaseManifest(value) {
       const shim = value.shims[target];
       if (!exact(shim, ['name', 'sha256', 'size', 'compiler'])) throw failure('MANIFEST_INVALID');
       artifact({ name: shim.name, sha256: shim.sha256, size: shim.size }); compiler(shim.compiler);
+      if (shim.name !== `claudex-${target}.exe`) throw failure('MANIFEST_INVALID');
     }
     if (value.shims['windows-x64'].name === value.shims['windows-arm64'].name || !exact(value.targets, TARGETS)) throw failure('MANIFEST_INVALID');
     for (const target of TARGETS) {
@@ -262,8 +263,8 @@ async function cli(argv) {
   await fs.mkdir(out, { recursive: true, mode: 0o700 });
   await fs.writeFile(path.join(out, built.payloadDescriptor.artifact.name), built.archiveBytes, { mode: 0o600 });
   await fs.writeFile(path.join(out, `${built.payloadDescriptor.artifact.name}.json`), `${JSON.stringify(built.payloadDescriptor)}\n`, { mode: 0o600 });
-  await fs.writeFile(path.join(out, built.sbomDescriptor.name), built.sbomBytes, { mode: 0o600 });
-  await fs.writeFile(path.join(out, `${built.sbomDescriptor.name}.descriptor.json`), `${JSON.stringify(built.sbomDescriptor)}\n`, { mode: 0o600 });
+  await fs.writeFile(path.join(out, built.sbomDescriptor.artifact.name), built.sbomBytes, { mode: 0o600 });
+  await fs.writeFile(path.join(out, `${built.sbomDescriptor.artifact.name}.descriptor.json`), `${JSON.stringify(built.sbomDescriptor)}\n`, { mode: 0o600 });
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) {

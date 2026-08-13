@@ -59,7 +59,7 @@ test('portable C quote implementation passes the same vectors when a local C com
 test('build script has fixed x64/ARM64 schemas and records immutable compiler, flags, compatibility, hash, and size', async (t) => {
   const script = await fs.readFile(path.join(root, 'scripts/build-windows-shim.ps1'), 'utf8');
   for (const token of ['ValidateSet(\'x64\', \'arm64\')', 'managerShimCompatibilityVersion',
-    'compiler', 'flags', 'sha256', 'size', 'windows-${Architecture}', 'cmake.exe',
+    'SourceRevision', 'sourceRevision', 'compiler', 'flags', 'sha256', 'size', 'windows-${Architecture}', 'cmake.exe',
     'windows-shim-capture.mjs']) assert.match(script, new RegExp(token.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
 
   if (process.platform !== 'win32' || spawnSync('where.exe', ['cmake.exe'], { encoding: 'utf8' }).status !== 0
@@ -69,10 +69,12 @@ test('build script has fixed x64/ARM64 schemas and records immutable compiler, f
   }
   const output = path.join(root, '.tmp-native-shim-test');
   const built = spawnSync('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File',
-    path.join(root, 'scripts/build-windows-shim.ps1'), '-Architecture', 'x64', '-OutputDirectory', output],
+    path.join(root, 'scripts/build-windows-shim.ps1'), '-Architecture', 'x64', '-SourceRevision', 'a'.repeat(40),
+    '-OutputDirectory', output],
   { cwd: root, encoding: 'utf8' });
   assert.equal(built.status, 0, built.stderr);
   const descriptor = JSON.parse(await fs.readFile(path.join(output, 'claudex-windows-x64.exe.json'), 'utf8'));
   assert.match(descriptor.sha256, /^[0-9a-f]{64}$/u);
   assert.equal(descriptor.managerShimCompatibilityVersion, 1);
+  assert.equal(descriptor.sourceRevision, 'a'.repeat(40));
 });

@@ -57,7 +57,9 @@ export function buildSpdxDocument({ managerVersion, sourceRevision, inventory } 
     ]
     };
     const bytes = canonical(document);
-    return Object.freeze({ bytes, descriptor: Object.freeze({ name: `claudex-manager-${managerVersion}.spdx.json`,
-      sha256: hash(bytes), size: bytes.length }) });
+    const artifact = Object.freeze({ name: `claudex-manager-${managerVersion}.spdx.json`,
+      sha256: hash(bytes), size: bytes.length });
+    return Object.freeze({ bytes, descriptor: Object.freeze({ schemaVersion: 1, kind: 'manager-sbom',
+      managerVersion, sourceRevision, artifact }) });
   } catch { throw failure(); }
 }

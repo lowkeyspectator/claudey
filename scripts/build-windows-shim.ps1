@@ -3,6 +3,9 @@ param(
   [Parameter(Mandatory = $true)]
   [ValidateSet('x64', 'arm64')]
   [string]$Architecture,
+  [Parameter(Mandatory = $true)]
+  [ValidatePattern('^(?:[0-9a-f]{40}|[0-9a-f]{64})$')]
+  [string]$SourceRevision,
   [string]$SourceRoot = (Split-Path -Parent $PSScriptRoot),
   [Parameter(Mandatory = $true)]
   [string]$OutputDirectory
@@ -39,6 +42,7 @@ $compilerVersion = [Diagnostics.FileVersionInfo]::GetVersionInfo($cl).FileVersio
 $descriptor = [ordered]@{
   schemaVersion = 1
   target = "windows-${Architecture}"
+  sourceRevision = $SourceRevision
   name = $artifactName
   sha256 = $digest
   size = [int64]$file.Length

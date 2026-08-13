@@ -112,8 +112,9 @@ test('SPDX inventory and descriptors are deterministic and bind every packaged f
   assert.equal(document.creationInfo.created, '1970-01-01T00:00:00Z');
   assert.deepEqual(document.files.map(({ fileName }) => fileName), packaged.inventory.map(({ path }) => path));
   assert.deepEqual(first.descriptor, {
-    name: 'claudex-manager-1.0.0.spdx.json',
-    sha256: crypto.createHash('sha256').update(first.bytes).digest('hex'), size: first.bytes.length
+    schemaVersion: 1, kind: 'manager-sbom', managerVersion: '1.0.0', sourceRevision: REVISION,
+    artifact: { name: 'claudex-manager-1.0.0.spdx.json',
+      sha256: crypto.createHash('sha256').update(first.bytes).digest('hex'), size: first.bytes.length }
   });
   assert.equal(first.bytes.includes(Buffer.from('task18-private-secret-canary')), false);
 });
@@ -148,7 +149,13 @@ test('schema-1 project manifest accepts the complete six-target fixture and reje
     (value) => { value.targets['darwin-arm64'].shim = 'claudex-windows-arm64.exe'; },
     (value) => { value.provenanceSubjects[0].sha256 = 'f'.repeat(64); },
     (value) => { value.managerShimCompatibilityVersion = 0; },
-    (value) => { value.shims['windows-x64'].compiler.flags.push(7); }
+    (value) => { value.shims['windows-x64'].compiler.flags.push(7); },
+    (value) => {
+      value.shims['windows-x64'].name = 'foreign-x64.exe';
+      value.targets['windows-x64'].shim = 'foreign-x64.exe';
+      value.provenanceSubjects.find(({ name }) => name === 'claudex-windows-x64.exe').name = 'foreign-x64.exe';
+      value.provenanceSubjects.sort((left, right) => left.name.localeCompare(right.name, 'en'));
+    }
   ]) {
     const candidate = structuredClone(valid); mutate(candidate);
     assert.throws(() => validateProjectReleaseManifest(candidate), (error) => error.code === 'MANIFEST_INVALID');
