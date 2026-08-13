@@ -242,6 +242,7 @@ public static class ClaudexBootstrapDirectoryPin {
   $env:CLDX_STATE_ROOT = $StateRoot
   $env:CLDX_USER_BIN = $UserBin
   $env:CLDX_NODE_PATH = $NodePath
+  $env:CLDX_PROJECT_DIR = $PSScriptRoot
 
   $NodeProgram = @'
 import crypto from 'node:crypto';
@@ -732,26 +733,38 @@ async function prepare(context) {
   const releaseBase = projectOrigin.href.endsWith('/') ? projectOrigin.href : `${projectOrigin.href}/`;
   const manifestUrl = requestedVersion ? `${releaseBase}releases/download/v${requestedVersion}/project-manifest.json`
     : `${releaseBase}releases/latest/download/project-manifest.json`;
+  const projectDir = process.env.CLDX_PROJECT_DIR ? path.resolve(process.env.CLDX_PROJECT_DIR) : process.cwd();
   let manifestBytes;
   let fromLocal = false;
   try {
     manifestBytes = await download(manifestUrl, MAX_MANIFEST, projectOrigin);
   } catch (error) {
-    const localManifest = path.resolve(process.cwd(), 'dist', 'project-manifest.json');
+    const localManifest = path.join(projectDir, 'dist', 'project-manifest.json');
     try {
       manifestBytes = await readRegular(localManifest, MAX_MANIFEST);
       fromLocal = true;
     } catch {
-      throw error;
+      try {
+        const buildScript = path.join(projectDir, 'scripts', 'build-local-release.mjs');
+        const res = spawnSync(process.execPath, [buildScript], { cwd: projectDir, encoding: 'utf8', windowsHide: true });
+        if (res.status === 0) {
+          manifestBytes = await readRegular(localManifest, MAX_MANIFEST);
+          fromLocal = true;
+        } else {
+          throw error;
+        }
+      } catch {
+        throw error;
+      }
     }
   }
   let manifest;
   try { manifest = checkedManifest(JSON.parse(manifestBytes.toString('utf8')), requestedVersion, target); }
-  catch (error) { if (failures.has(error)) throw error; fail('CHECKSUM_MISMATCH'); }
+  catch (err) { if (failures.has(err)) throw err; fail('CHECKSUM_MISMATCH'); }
 
   let payload;
   if (fromLocal) {
-    payload = await readRegular(path.resolve(process.cwd(), 'dist', manifest.payload.name), MAX_PAYLOAD);
+    payload = await readRegular(path.join(projectDir, 'dist', manifest.payload.name), MAX_PAYLOAD);
   } else {
     payload = await download(`${releaseBase}releases/download/v${manifest.managerVersion}/${manifest.payload.name}`,
       MAX_PAYLOAD, projectOrigin);
@@ -761,7 +774,7 @@ async function prepare(context) {
   const shimDescriptor = manifest.shims[target];
   let shim;
   if (fromLocal) {
-    shim = await readRegular(path.resolve(process.cwd(), 'dist', shimDescriptor.name), MAX_SHIM);
+    shim = await readRegular(path.join(projectDir, 'dist', shimDescriptor.name), MAX_SHIM);
   } else {
     shim = await download(`${releaseBase}releases/download/v${manifest.managerVersion}/${shimDescriptor.name}`,
       MAX_SHIM, projectOrigin);
@@ -777,7 +790,7 @@ async function prepare(context) {
     await captureShim(shim, manifest.managerShimCompatibilityVersion, stagingRoot);
     try { await fs.rename(staging, releaseDirectory); }
     catch (error) {
-      if (error?.code !== 'EEXIST' && error?.code !== 'ENOTEMPTY') throw error;
+      if (error?.code !== 'EEXIST' && error?.code !== 'ENOTEMPTY' && error?.code !== 'EPERM') throw error;
       await validateRelease(releaseDirectory, { ...manifest, shim: shimDescriptor });
     }
     await validateRelease(releaseDirectory, { ...manifest, shim: shimDescriptor });
