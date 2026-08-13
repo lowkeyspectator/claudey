@@ -35,6 +35,7 @@ function successfulRunner(calls, versions = {}) {
         'print --json --mode ask --sandbox read-only': '{"type":"result","echo":"Reply with exactly OK."}\n'
       }
     };
+    if (invocation.tool === 'cursor' && invocation.args[0] === 'print') return { code: 0, stdout: JSON.stringify({ type: 'result', echo: invocation.stdin }) + '\n', stderr: '' };
     return { code: 0, stdout: responses[invocation.tool][key], stderr: '' };
   };
 }
@@ -98,7 +99,7 @@ test('keeps Cursor optional and disables only the malformed capability while usi
   assert.equal(result.ready, true);
   assert.equal(result.capabilities.cursor.print.code, 'AVAILABLE');
   assert.deepEqual(calls.at(-1).args, ['print', '--json', '--mode', 'ask', '--sandbox', 'read-only']);
-  assert.equal(calls.at(-1).stdin, 'Reply with exactly OK.');
+  assert.match(calls.at(-1).stdin, /^nonce:/);
 
   const malformed = await probeRequiredCapabilities({
     cliProxy: CLI,
@@ -158,4 +159,16 @@ test('timeout reaches a terminal result and removes an ignore-TERM descendant', 
   assert.ok(Number.isSafeInteger(pid));
   await new Promise((resolve) => setTimeout(resolve, 300));
   assert.throws(() => process.kill(pid, 0));
+});
+test('sends an injected Cursor nonce only on stdin and requires its exact echo', async () => {
+  const calls = [];
+  const result = await probeRequiredCapabilities({ cliProxy: CLI, claude: CLAUDE, cursor: CURSOR, configPath: '/private/manager/config.yaml', nonceFactory: () => 'nonce-7', run: async (invocation) => {
+    calls.push(invocation);
+    if (invocation.tool === 'cursor' && invocation.args[0] === 'print') return { code: 0, stdout: '{"type":"result","echo":"nonce:nonce-7"}\n', stderr: '' };
+    return successfulRunner([])(invocation);
+  } });
+  const print = calls.find((call) => call.tool === 'cursor' && call.args[0] === 'print');
+  assert.equal(result.capabilities.cursor.print.code, 'AVAILABLE');
+  assert.equal(print.stdin, 'nonce:nonce-7');
+  assert.equal(print.args.join(' ').includes('nonce-7') || Object.values(print.env).join(' ').includes('nonce-7'), false);
 });

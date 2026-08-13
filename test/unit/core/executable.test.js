@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { resolveVerifiedExecutable } from '../../../src/core/executable.js';
+import { resolveVerifiedExecutable, revalidateExecutable } from '../../../src/core/executable.js';
 
 const CLAUDE_EXE = 'C:\\Tools\\Claude\\claude.exe';
 const NODE_EXE = 'C:\\Users\\person\\AppData\\Roaming\\npm\\node.exe';
@@ -81,4 +81,12 @@ test('rejects unknown command shims and npm shims with quoted extras, foreign en
 
 test('requires filesystem inspection rather than trusting a caller supplied native identity', () => {
   assert.throws(() => resolveVerifiedExecutable({ command: 'claude', platform: 'win32', candidates: [native()] }), (error) => error.code === 'PREREQUISITE_MISSING');
+});
+
+test('revalidates a bound native identity and refuses a leaf swap before spawn', () => {
+  const records = new Map([['C:\\Tools\\Claude\\claude.exe', native()]]);
+  const adapter = { inspect: (path) => records.get(path) };
+  const resolved = checked({ command: 'claude', platform: 'win32', candidates: [native()], adapter });
+  records.set(CLAUDE_EXE, { ...native(), stableId: 'swapped' });
+  assert.equal(revalidateExecutable(resolved, adapter), false);
 });

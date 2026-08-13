@@ -18,6 +18,8 @@ function isSafeNative(candidate, platform) {
     && (platform !== 'win32' || candidate.path.toLowerCase().endsWith('.exe')));
 }
 
+function bind(result, records) { Object.defineProperty(result, '_binding', { value: Object.freeze(records), enumerable: false }); return Object.freeze(result); }
+
 function resolveNpmShim(command, candidate, platform) {
   const knownEntry = KNOWN_NPM_ENTRIES[command];
   if (platform !== 'win32' || !knownEntry || !candidate || candidate.type !== 'npm-shim') refusal('Executable shim is not supported');
@@ -38,8 +40,18 @@ export function resolveVerifiedExecutable({ command, platform, candidates, expec
   const nativeCandidates = inspected.filter((candidate) => candidate?.type === 'native');
   if (nativeCandidates.length > 1 || nativeCandidates.some((candidate) => !isSafeNative(candidate, platform))) refusal('Executable identity is ambiguous or unsafe');
   const result = nativeCandidates.length === 1
-    ? { kind: 'native', executablePath: nativeCandidates[0].canonicalPath, argsPrefix: [], identity: nativeCandidates[0].canonicalPath }
+    ? bind({ kind: 'native', executablePath: nativeCandidates[0].canonicalPath, argsPrefix: [], identity: nativeCandidates[0].canonicalPath }, [{ path: nativeCandidates[0].canonicalPath, canonicalPath: nativeCandidates[0].canonicalPath, stableId: nativeCandidates[0].stableId ?? nativeCandidates[0].canonicalPath }])
     : inspected.length === 1 ? resolveNpmShim(command, inspected[0], platform) : refusal('Executable identity is ambiguous or unsafe');
   if (expectedIdentity !== undefined && result.identity !== expectedIdentity) throw new ClaudexError('PROCESS_IDENTITY_MISMATCH', 'Executable identity changed');
   return result;
+}
+
+export function revalidateExecutable(resolved, adapter) {
+  if (!resolved || !Array.isArray(resolved._binding) || !adapter || typeof adapter.inspect !== 'function') return false;
+  try {
+    return resolved._binding.every((record) => {
+      const actual = adapter.inspect(record.path);
+      return actual && actual.path === record.path && actual.canonicalPath === record.canonicalPath && actual.isLink === false && actual.reparse !== true && (actual.stableId ?? actual.canonicalPath) === record.stableId;
+    });
+  } catch { return false; }
 }

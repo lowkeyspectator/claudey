@@ -1,4 +1,5 @@
 import { spawn } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
 
 const BASELINES = Object.freeze({ cliProxy: '7.2.130', claude: '2.1.229' });
 const MAX_OUTPUT_BYTES = 16_384;
@@ -105,7 +106,7 @@ function disabled(keys) {
   return Object.fromEntries(keys.map((key) => [key, unsupported()]));
 }
 
-export async function probeRequiredCapabilities({ cliProxy, claude, cursor, configPath, run = runFixedCommand } = {}) {
+export async function probeRequiredCapabilities({ cliProxy, claude, cursor, configPath, nonceFactory = randomUUID, run = runFixedCommand } = {}) {
   const cliVersion = await versionCapability(run, 'cliProxy', cliProxy, 'CLIProxyAPI', BASELINES.cliProxy);
   if (!cliVersion.available) return { ready: false, capabilities: { cliProxy: { version: cliVersion, ...disabled(['loginCodex', 'loginAntigravity', 'config', 'help']) }, claude: disabled(['version', 'model', 'plugin', 'mcp', 'environment']), cursor: cursor ? disabled(['version', 'status', 'models', 'print']) : { integration: { available: true, code: 'NOT_REQUIRED' } } } };
   const cliHelp = await jsonCapability(run, 'cliProxy', cliProxy, ['--help', '--json'], (value) => hasExactKeys(value, ['commands', 'loginModes', 'configSelection']) && Array.isArray(value.commands) && value.commands.includes('login') && value.commands.includes('config') && Array.isArray(value.loginModes) && value.loginModes.includes('codex') && value.loginModes.includes('antigravity') && value.configSelection === true);
@@ -121,11 +122,14 @@ export async function probeRequiredCapabilities({ cliProxy, claude, cursor, conf
     environment: await jsonCapability(run, 'claude', claude, ['environment', '--json'], (value) => hasExactKeys(value, ['gatewayVariables']) && Array.isArray(value.gatewayVariables) && value.gatewayVariables.length === 2 && value.gatewayVariables.includes('ANTHROPIC_BASE_URL') && value.gatewayVariables.includes('ANTHROPIC_AUTH_TOKEN'))
   };
   if (!allAvailable(claudeCapabilities)) return { ready: false, capabilities: { cliProxy: cliCapabilities, claude: claudeCapabilities, cursor: cursor ? disabled(['version', 'status', 'models', 'print']) : { integration: { available: true, code: 'NOT_REQUIRED' } } } };
+  const cursorNonce = cursor ? nonceFactory() : null;
+  const cursorPrompt = cursor ? 'nonce:' + cursorNonce : null;
+
   const cursorCapabilities = cursor ? {
     version: await versionCapability(run, 'cursor', cursor, 'Cursor Agent', '0.0.0'),
     status: await jsonCapability(run, 'cursor', cursor, ['status', '--json'], (value) => hasExactKeys(value, ['authenticated']) && typeof value.authenticated === 'boolean'),
     models: await jsonCapability(run, 'cursor', cursor, ['models', '--json'], (value) => hasExactKeys(value, ['models']) && Array.isArray(value.models) && value.models.every((model) => hasExactKeys(model, ['id']) && typeof model.id === 'string')),
-    print: await jsonCapability(run, 'cursor', cursor, ['print', '--json', '--mode', 'ask', '--sandbox', 'read-only'], (value) => hasExactKeys(value, ['type', 'echo']) && value.type === 'result' && value.echo === CURSOR_PROMPT, { stdin: CURSOR_PROMPT })
+    print: await jsonCapability(run, 'cursor', cursor, ['print', '--json', '--mode', 'ask', '--sandbox', 'read-only'], (value) => hasExactKeys(value, ['type', 'echo']) && value.type === 'result' && value.echo === cursorPrompt, { stdin: cursorPrompt })
   } : { integration: { available: true, code: 'NOT_REQUIRED' } };
   return { ready: true, capabilities: { cliProxy: cliCapabilities, claude: claudeCapabilities, cursor: cursorCapabilities } };
 }
