@@ -7,15 +7,20 @@ const managementCases = [
   { argv: ['setup', '--version', 'v7.2.130', '--port', '8317', '--with-cursor', '--no-start', '--no-path', '--yes'], command: ['setup'], options: { version: '7.2.130', port: 8317, withCursor: true, noStart: true, noPath: true, yes: true } },
   { argv: ['install', '--version', '7.2.130', '--port', '1024', '--yes'], command: ['install'], options: { version: '7.2.130', port: 1024, yes: true } },
   { argv: ['auth', 'codex', '--device-code', '--callback-port', '65535'], command: ['auth', 'codex'], options: { deviceCode: true, callbackPort: 65535 } },
+  { argv: ['auth', 'codex', '--no-browser'], command: ['auth', 'codex'], options: { noBrowser: true } },
   { argv: ['auth', 'antigravity', '--no-browser', '--callback-port', '8317'], command: ['auth', 'antigravity'], options: { noBrowser: true, callbackPort: 8317 } },
   { argv: ['start', '--foreground'], command: ['start'], options: { foreground: true } },
   { argv: ['stop'], command: ['stop'], options: {} },
   { argv: ['restart'], command: ['restart'], options: {} },
   { argv: ['status', '--json'], command: ['status'], options: { json: true } },
-  { argv: ['doctor'], command: ['doctor'], options: {} },
+  { argv: ['doctor', '--json'], command: ['doctor'], options: { json: true } },
   { argv: ['update', '--check'], command: ['update'], options: { check: true } },
+  { argv: ['update', '--version', 'v7.2.130', '--yes'], command: ['update'], options: { version: '7.2.130', yes: true } },
   { argv: ['rollback', '--version', 'v7.2.130', '--yes'], command: ['rollback'], options: { version: '7.2.130', yes: true } },
   { argv: ['models', 'codex'], command: ['models', 'codex'], options: {} },
+  { argv: ['models', 'antigravity'], command: ['models', 'antigravity'], options: {} },
+  { argv: ['models', 'cursor'], command: ['models', 'cursor'], options: {} },
+  { argv: ['models', 'all'], command: ['models', 'all'], options: {} },
   { argv: ['config', 'set', 'port', '8317', '--yes'], command: ['config', 'set', 'port'], options: { port: 8317, yes: true } },
   { argv: ['cursor', 'enable', '--scope', 'local'], command: ['cursor', 'enable'], options: { scope: 'local' } },
   { argv: ['cursor', 'disable', '--scope', 'user'], command: ['cursor', 'disable'], options: { scope: 'user' } },
@@ -23,7 +28,7 @@ const managementCases = [
   { argv: ['cursor', 'login'], command: ['cursor', 'login'], options: {} },
   { argv: ['cursor', 'repo', 'add', 'C:\\work\\repo'], command: ['cursor', 'repo', 'add'], options: { path: 'C:\\work\\repo' } },
   { argv: ['cursor', 'repo', 'list'], command: ['cursor', 'repo', 'list'], options: {} },
-  { argv: ['cursor', 'repo', 'remove'], command: ['cursor', 'repo', 'remove'], options: {} },
+  { argv: ['cursor', 'repo', 'remove', 'C:\\work\\repo'], command: ['cursor', 'repo', 'remove'], options: { path: 'C:\\work\\repo' } },
   { argv: ['cursor', 'writes', 'enable', '--yes'], command: ['cursor', 'writes', 'enable'], options: { yes: true } },
   { argv: ['cursor', 'writes', 'disable'], command: ['cursor', 'writes', 'disable'], options: {} },
   { argv: ['cursor', 'approve', 'approval-id'], command: ['cursor', 'approve'], options: { approvalId: 'approval-id' } },
@@ -48,16 +53,56 @@ test('normalizes CI into noninteractive mode', () => {
   });
 });
 
+test('accepts global noninteractive before and after a management command', () => {
+  assert.deepEqual(parseManagementArgs(['--non-interactive', 'doctor']), {
+    command: ['doctor'], options: { nonInteractive: true }
+  });
+  assert.deepEqual(parseManagementArgs(['doctor', '--non-interactive']), {
+    command: ['doctor'], options: { nonInteractive: true }
+  });
+});
+
 test('rejects conflicting, duplicate, unknown, and missing management options', () => {
   for (const argv of [
     ['auth', 'codex', '--device-code', '--no-browser'],
     ['update', '--check', '--version', '7.2.130'],
+    ['update', '--check', '--yes'],
     ['setup', '--yes', '--yes'],
     ['start', '--unknown'],
     ['setup', '--port'],
     ['config', 'set', 'port', '1023'],
     ['cursor', 'writes', 'enable'],
     ['cursor', 'approve']
+  ]) {
+    assert.throws(() => parseManagementArgs(argv), (error) => error.code === 'USAGE_ERROR', argv.join(' '));
+  }
+});
+
+test('rejects a missing operand for every valued command option', () => {
+  for (const argv of [
+    ['setup', '--version'],
+    ['setup', '--port'],
+    ['install', '--version'],
+    ['install', '--port'],
+    ['auth', 'codex', '--callback-port'],
+    ['auth', 'antigravity', '--callback-port'],
+    ['update', '--version'],
+    ['rollback', '--version'],
+    ['config', 'set', 'port'],
+    ['cursor', 'enable', '--scope'],
+    ['cursor', 'approve']
+  ]) {
+    assert.throws(() => parseManagementArgs(argv), (error) => error.code === 'USAGE_ERROR', argv.join(' '));
+  }
+  assert.throws(() => parseLauncherArgs(['--model']), (error) => error.code === 'USAGE_ERROR');
+});
+
+test('cursor repo permits at most one non-option path operand', () => {
+  for (const argv of [
+    ['cursor', 'repo', 'add', '--unsafe'],
+    ['cursor', 'repo', 'remove', '--unsafe'],
+    ['cursor', 'repo', 'add', 'C:\\work\\repo', 'extra'],
+    ['cursor', 'repo', 'remove', 'C:\\work\\repo', 'extra']
   ]) {
     assert.throws(() => parseManagementArgs(argv), (error) => error.code === 'USAGE_ERROR', argv.join(' '));
   }

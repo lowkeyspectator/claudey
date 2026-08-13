@@ -13,20 +13,33 @@ test('Secret cannot cross serialization boundaries', () => {
   assert.equal(secret.withValue((value) => value.length), 32);
 });
 
-test('Secret refuses disposal and callback misuse without revealing bytes', () => {
+test('Secret refuses access after disposal', () => {
   const secret = Secret.fromBytes(Buffer.from('canary-secret'));
   secret.dispose();
   assert.throws(() => secret.withValue(() => 'unused'), /SECRET_DISPOSED/);
 });
 
+test('Secret wipes the callback-scoped byte copy after the callback returns', () => {
+  const secret = Secret.fromBytes(Buffer.from('canary-secret'));
+  let retained;
+  assert.equal(secret.withValue((value) => {
+    retained = value;
+    return value.length;
+  }), 13);
+  assert.deepEqual(retained, Buffer.alloc(13));
+});
+
 test('approval prompt normalization preserves exact UTF-8 scalar input', () => {
   const crlf = normalizePromptForApproval('line\r\nnext');
   const lf = normalizePromptForApproval('line\nnext');
-  const composed = normalizePromptForApproval('é');
+  const composed = normalizePromptForApproval('\u00e9');
   const decomposed = normalizePromptForApproval('e\u0301');
   assert.notEqual(crlf.sha256, lf.sha256);
   assert.notEqual(composed.sha256, decomposed.sha256);
+  assert.deepEqual(composed.utf8, Buffer.from([0xc3, 0xa9]));
   assert.equal(normalizePromptForApproval(' keep ').utf8.toString('utf8'), ' keep ');
+  assert.notEqual(normalizePromptForApproval('keep').sha256, normalizePromptForApproval(' keep').sha256);
+  assert.notEqual(normalizePromptForApproval('keep').sha256, normalizePromptForApproval('keep ').sha256);
 });
 
 test('approval prompt normalization rejects NUL and non-string input', () => {

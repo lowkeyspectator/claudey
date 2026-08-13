@@ -25,7 +25,12 @@ export class Secret {
 
   withValue(callback) {
     if (this.#bytes === undefined) throw safetyError('SECRET_DISPOSED');
-    return callback(Buffer.from(this.#bytes));
+    const scoped = Buffer.from(this.#bytes);
+    try {
+      return callback(scoped);
+    } finally {
+      scoped.fill(0);
+    }
   }
 
   dispose() {

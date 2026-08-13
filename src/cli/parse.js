@@ -105,6 +105,7 @@ export function parseManagementArgs(argv, environment = process.env) {
   else if (first === 'update') {
     consume(1, optionSets.update);
     assertNoMutuallyExclusive(options, 'check', 'version');
+    if (options.check && options.yes) throw usage('--yes is not allowed with update --check.');
   } else if (first === 'rollback') consume(1, optionSets.rollback);
   else if (first === 'uninstall') consume(1, optionSets.uninstall);
   else if (first === 'models') {
@@ -147,7 +148,10 @@ export function parseManagementArgs(argv, environment = process.env) {
     }
     if (second === 'repo') {
       if (!['add', 'list', 'remove'].includes(third)) throw usage('cursor repo requires add, list, or remove.');
-      const path = tokens[3];
+      const operands = tokens.slice(3);
+      if (operands.length > 1) throw usage(`cursor repo ${third} accepts at most one PATH.`);
+      const path = operands[0];
+      if (path?.startsWith('--')) throw usage(`Unknown option: ${path}.`);
       if (third === 'list' && path !== undefined) throw usage('cursor repo list accepts no path.');
       if ((third === 'add' || third === 'remove') && path !== undefined) setOption(options, 'path', path);
       return { command: ['cursor', 'repo', third], options };

@@ -1,4 +1,4 @@
 #!/usr/bin/env node
-import { main } from '../src/cli/main.js';
+import { run } from '../src/cli/main.js';
 
-main();
+process.exitCode = run();
