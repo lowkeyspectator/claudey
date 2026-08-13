@@ -50,7 +50,8 @@ async function gitCapability(target, systemAdapter) {
   try { result = await systemAdapter.probeGitVersion(request); } catch { return unavailable(); }
   if (!result || result.code !== 0 || result.stderr !== '' || typeof result.stdout !== 'string'
     || Buffer.byteLength(result.stdout, 'utf8') > request.maxStdoutBytes) return unavailable();
-  const match = /^git version ((?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)(?:\.windows\.(?:0|[1-9]\d*))?)\n$/.exec(result.stdout);
+  const match = /^git version ((?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)(?:\.windows\.(?:0|[1-9]\d*))?)\n$/.exec(result.stdout)
+    ?? /^git version ((?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)) \(Apple Git-(?:0|[1-9]\d{0,5})\)\n$/.exec(result.stdout);
   return match ? available({ executable: target, version: match[1] }) : unavailable();
 }
 export async function assessPrerequisites({

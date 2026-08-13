@@ -140,11 +140,20 @@ test('uses an exact bounded Git version probe and rejects confused output', asyn
   assert.equal(Object.isFrozen(observed), true);
   assert.equal(Object.isFrozen(observed.args), true);
 
+  const apple = await assessPrerequisites(input({
+    cursorWorktreeRequested: true,
+    systemAdapter: {
+      ...systemAdapter,
+      probeGitVersion: async () => ({ code: 0, stdout: 'git version 2.39.5 (Apple Git-154)\n', stderr: '' })
+    }
+  }));
+  assert.equal(apple.capabilities.git.version, '2.39.5');
   for (const response of [
     { code: 1, stdout: 'git version 2.50.1\n', stderr: '' },
     { code: 0, stdout: 'git version 2.50.1\n', stderr: 'warning' },
     { code: 0, stdout: 'git version 2.50\n', stderr: '' },
-    { code: 0, stdout: 'prefix git version 2.50.1\n', stderr: '' }
+    { code: 0, stdout: 'prefix git version 2.50.1\n', stderr: '' },
+    { code: 0, stdout: 'git version 2.39.5 (Other Git-154)\n', stderr: '' }
   ]) {
     const refused = await assessPrerequisites(input({
       cursorWorktreeRequested: true,
