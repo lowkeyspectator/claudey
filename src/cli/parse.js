@@ -62,6 +62,9 @@ function parseOptionList(argv, options, allowed) {
       if (scope !== 'user' && scope !== 'local') throw usage('--scope must be user or local.');
       setOption(options, key, scope);
       index += 1;
+    } else if (value === 'string') {
+      setOption(options, key, requireValue(argv, index, token));
+      index += 1;
     } else {
       setOption(options, key);
     }
@@ -83,6 +86,10 @@ const optionSets = {
   cursorScope: flags([['--scope', 'scope', 'scope']]),
   cursorInstall: flags([['--yes', 'yes']]),
   cursorWritesEnable: flags([['--yes', 'yes']]),
+  cursorMcpServe: flags([
+    ['--source-root', 'sourceRoot', 'string'], ['--installation-id', 'installationId', 'string'],
+    ['--manager-root', 'managerRoot', 'string']
+  ]),
   uninstall: flags([['--dry-run', 'dryRun'], ['--purge-auth', 'purgeAuth'], ['--yes', 'yes']])
 };
 
@@ -131,6 +138,11 @@ export function parseManagementArgs(argv, environment = process.env) {
     }
     if (second === 'install') { consume(2, optionSets.cursorInstall); return { command: ['cursor', 'install'], options }; }
     if (second === 'login') { consume(2, new Map()); return { command: ['cursor', 'login'], options }; }
+    if (second === 'mcp-serve') {
+      consume(2, optionSets.cursorMcpServe);
+      if (!options.installationId || !options.managerRoot) throw usage('cursor mcp-serve requires installation and manager identities.');
+      return { command: ['cursor', 'mcp-serve'], options };
+    }
     if (second === 'approve') {
       const approvalId = tokens[2];
       if (!approvalId || approvalId.startsWith('--')) throw usage('cursor approve requires APPROVAL_ID.');
@@ -149,10 +161,16 @@ export function parseManagementArgs(argv, environment = process.env) {
     if (second === 'repo') {
       if (!['add', 'list', 'remove'].includes(third)) throw usage('cursor repo requires add, list, or remove.');
       const operands = tokens.slice(3);
-      if (operands.length > 1) throw usage(`cursor repo ${third} accepts at most one PATH.`);
-      const path = operands[0];
-      if (path?.startsWith('--')) throw usage(`Unknown option: ${path}.`);
+      let selectedPath;
+      for (const operand of operands) {
+        if (operand === '--yes') setOption(options, 'yes');
+        else if (operand.startsWith('--')) throw usage(`Unknown option: ${operand}.`);
+        else if (selectedPath !== undefined) throw usage(`cursor repo ${third} accepts at most one PATH.`);
+        else selectedPath = operand;
+      }
+      const path = selectedPath;
       if (third === 'list' && path !== undefined) throw usage('cursor repo list accepts no path.');
+      if (third === 'list' && options.yes) throw usage('cursor repo list accepts no confirmation.');
       if ((third === 'add' || third === 'remove') && path !== undefined) setOption(options, 'path', path);
       return { command: ['cursor', 'repo', third], options };
     }

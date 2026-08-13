@@ -86,7 +86,8 @@ export function createCursorWorktreeService({
     || !runContext || typeof runContext !== 'object' || Array.isArray(runContext)) throw failure();
   const context = freeze({ ...runContext });
   return freeze({
-    async run(rawInput) {
+    async run(rawInput, { signal } = {}) {
+      if (signal !== undefined && (!signal || typeof signal.addEventListener !== 'function')) throw failure();
       if (!writesEnabled) throw failure('CAPABILITY_UNSUPPORTED');
       const input = checkedInput(rawInput);
       let baseCommit;
@@ -120,7 +121,10 @@ export function createCursorWorktreeService({
       let delegated;
       let state = 'retained';
       try {
-        delegated = await runner.run({ ...context, mode: 'worktree', prompt: input.prompt, model: input.model, scope });
+        delegated = await runner.run({
+          ...context, mode: 'worktree', prompt: input.prompt, model: input.model, scope,
+          ...(signal === undefined ? {} : { signal })
+        });
       } catch { state = 'retained-failed'; }
       let collected;
       try { collected = checkedCollected(await collectResult(worktreePath)); }

@@ -66,7 +66,8 @@ export function createCursorReadonlyService({ snapshotService, runner, captureSo
     || typeof captureSourceFingerprint !== 'function' || !runContext || typeof runContext !== 'object' || Array.isArray(runContext)) throw safety();
   const context = freeze({ ...runContext });
 
-  const execute = async (mode, rawInput) => {
+  const execute = async (mode, rawInput, { signal } = {}) => {
+    if (signal !== undefined && (!signal || typeof signal.addEventListener !== 'function')) throw safety();
     const input = checkedInput(rawInput);
     let before;
     try { before = fingerprint(await captureSourceFingerprint(input.repository.root)); } catch { throw safety(); }
@@ -77,7 +78,8 @@ export function createCursorReadonlyService({ snapshotService, runner, captureSo
         repository: input.repository,
         ...(Object.hasOwn(input, 'paths') ? { paths: [...input.paths] } : {})
       }, async (snapshot) => runner.run({
-        ...context, mode, prompt: input.prompt, model: input.model, scope: snapshot.scope
+        ...context, mode, prompt: input.prompt, model: input.model, scope: snapshot.scope,
+        ...(signal === undefined ? {} : { signal })
       }));
     } catch (error) { caught = publicFailure(error); }
     let after;
@@ -89,7 +91,7 @@ export function createCursorReadonlyService({ snapshotService, runner, captureSo
   };
 
   return freeze({
-    ask: (input) => execute('ask', input),
-    plan: (input) => execute('plan', input)
+    ask: (input, options) => execute('ask', input, options),
+    plan: (input, options) => execute('plan', input, options)
   });
 }

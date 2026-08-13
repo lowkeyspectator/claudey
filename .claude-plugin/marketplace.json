@@ -1,0 +1,15 @@
+{
+  "name": "claudex",
+  "owner": {
+    "name": "Claudex"
+  },
+  "description": "Constrained local Claudex integrations.",
+  "plugins": [
+    {
+      "name": "cursor-agent",
+      "source": "./plugins/cursor-agent",
+      "version": "1.0.0",
+      "description": "Delegates bounded model, ask, plan, and explicitly approved worktree operations to Cursor Agent."
+    }
+  ]
+}

@@ -77,7 +77,8 @@ test('first write request creates only a bound approval and neither worktree nor
 test('second request consumes exact approval immediately before fixed worktree creation, scans links, runs, and retains result', async () => {
   const repo = await repository();
   const f = fixture();
-  const result = await f.service.run(input(repo, { approvalId: 'approval-1' }));
+  const controller = new AbortController();
+  const result = await f.service.run(input(repo, { approvalId: 'approval-1' }), { signal: controller.signal });
   assert.deepEqual(f.events.map(([event]) => event), [
     'resolve-base', 'consume-approval', 'add-worktree', 'scan-links', 'run-cursor', 'collect-result'
   ]);
@@ -85,6 +86,7 @@ test('second request consumes exact approval immediately before fixed worktree c
     branch: 'claudex/cursor-abc123', path: '/home/casey/.local/state/claudexctl/worktrees/abc123', commit: COMMIT
   });
   assert.equal(f.events[4][1].scope.kind, 'worktree');
+  assert.equal(f.events[4][1].signal, controller.signal);
   assert.equal(Object.hasOwn(f.events[4][1], 'repository'), false);
   assert.equal(result.state, 'retained');
   assert.equal(result.branch, 'claudex/cursor-abc123');

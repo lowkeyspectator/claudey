@@ -62,7 +62,8 @@ test('ask and plan run only in disposable snapshots and leave source files/index
   const repo = await repository();
   for (const mode of ['ask', 'plan']) {
     const f = fixture();
-    const result = await f.service[mode](input(repo));
+    const controller = new AbortController();
+    const result = await f.service[mode](input(repo), { signal: controller.signal });
     assert.equal(result.mode, mode);
     assert.equal(result.result.untrusted, true);
     assert.deepEqual(f.source, { files: 'files:1', index: 'index:1', head: 'head:1', branch: 'main', refs: 'refs:1', untracked: 'untracked:1' });
@@ -72,6 +73,7 @@ test('ask and plan run only in disposable snapshots and leave source files/index
     const run = f.events.find(([event]) => event === 'runner')[1];
     assert.equal(run.mode, mode);
     assert.equal(run.scope.cwd, '/tmp/snapshot-1');
+    assert.equal(run.signal, controller.signal);
     assert.equal(Object.hasOwn(run, 'repository'), false);
   }
 });
