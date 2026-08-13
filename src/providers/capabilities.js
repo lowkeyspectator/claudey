@@ -147,12 +147,20 @@ export function runFixedCommand({ executablePath, args, shell, stdin, env, timeo
       clearTimeout(hardTimer);
       clearTimeout(terminalTimer);
       signal?.removeEventListener('abort', stop);
+      child.stdin.destroy();
+      child.stdout.destroy();
+      child.stderr.destroy();
+      child.unref();
       resolve({ code, stdout: stdout.toString('utf8'), stderr: stderr.toString('utf8') });
     };
     const killTree = (signalName) => {
       try {
         if (process.platform !== 'win32' && child.pid) process.kill(-child.pid, signalName);
-        else child.kill(signalName);
+        else if (child.pid && typeof process.env.SystemRoot === 'string' && /^[A-Za-z]:\\[^\r\n]+$/.test(process.env.SystemRoot)) {
+          const taskkill = process.env.SystemRoot + '\\System32\\taskkill.exe';
+          const killer = spawn(taskkill, ['/pid', String(child.pid), '/t', '/f'], { shell: false, stdio: 'ignore', windowsHide: true });
+          killer.unref();
+        } else child.kill(signalName);
       } catch { /* child already exited */ }
     };
     const stop = () => {
@@ -175,4 +183,13 @@ export function runFixedCommand({ executablePath, args, shell, stdin, env, timeo
     if (signal?.aborted) stop(); else signal?.addEventListener('abort', stop, { once: true });
     try { if (stdin === null) child.stdin.end(); else child.stdin.end(stdin); } catch { stop(); }
   });
+}
+export function resolveCursorExecutable({ candidates } = {}) {
+  if (!Array.isArray(candidates)) { const error = new Error('CAPABILITY_UNSUPPORTED'); error.code = 'CAPABILITY_UNSUPPORTED'; throw error; }
+  for (const command of ['cursor-agent', 'agent']) {
+    const matches = candidates.filter((candidate) => candidate?.command === command && candidate.target?.verified === true && isSafeIdentity(candidate.target) && typeof candidate.target.revalidate === 'function');
+    if (matches.length === 1) return matches[0].target;
+    if (matches.length > 1) break;
+  }
+  const error = new Error('CAPABILITY_UNSUPPORTED'); error.code = 'CAPABILITY_UNSUPPORTED'; throw error;
 }

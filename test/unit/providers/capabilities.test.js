@@ -1,7 +1,9 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import process from 'node:process';
+import { fileURLToPath } from 'node:url';
 
-import { probeRequiredCapabilities, runFixedCommand, validateAuthenticatedModelCatalog } from '../../../src/providers/capabilities.js';
+import { probeRequiredCapabilities, runFixedCommand, validateAuthenticatedModelCatalog, resolveCursorExecutable } from '../../../src/providers/capabilities.js';
 
 const CLI = { executablePath: '/fixtures/fake-cliproxy', argsPrefix: [], identity: '/fixtures/fake-cliproxy', revalidate: async () => true };
 const CLAUDE = { executablePath: '/fixtures/fake-claude', argsPrefix: [], identity: '/fixtures/fake-claude', revalidate: async () => true };
@@ -139,4 +141,21 @@ test('does not spawn when identity revalidation fails', async () => {
   const result = await probeRequiredCapabilities({ cliProxy: { ...CLI, revalidate: async () => false }, claude: CLAUDE, run: async () => { called = true; return { code: 0, stdout: '', stderr: '' }; } });
   assert.equal(result.ready, false);
   assert.equal(called, false);
+});
+test('prefers verified cursor-agent and only accepts agent after Cursor identity verification', () => {
+  const candidates = [
+    { command: 'agent', target: { executablePath: '/bin/agent', argsPrefix: [], identity: 'agent', verified: true, revalidate: async () => true } },
+    { command: 'cursor-agent', target: { executablePath: '/bin/cursor-agent', argsPrefix: [], identity: 'cursor-agent', verified: true, revalidate: async () => true } }
+  ];
+  assert.equal(resolveCursorExecutable({ candidates }).identity, 'cursor-agent');
+  assert.throws(() => resolveCursorExecutable({ candidates: [{ command: 'agent', target: { executablePath: '/bin/agent', argsPrefix: [], identity: 'agent', verified: false, revalidate: async () => false } }] }), (error) => error.code === 'CAPABILITY_UNSUPPORTED');
+});
+test('timeout reaches a terminal result and removes an ignore-TERM descendant', { skip: process.platform === 'win32' }, async () => {
+  const fixture = fileURLToPath(new URL('../../fixtures/bin/fake-process-tree.js', import.meta.url));
+  const result = await runFixedCommand({ executablePath: process.execPath, args: [fixture, 'ignore-tree'], shell: false, stdin: null, env: {}, timeoutMs: 30, maxStdoutBytes: 64, maxStderrBytes: 64 });
+  const pid = Number(result.stdout.trim());
+  assert.equal(result.code, -1);
+  assert.ok(Number.isSafeInteger(pid));
+  await new Promise((resolve) => setTimeout(resolve, 300));
+  assert.throws(() => process.kill(pid, 0));
 });
