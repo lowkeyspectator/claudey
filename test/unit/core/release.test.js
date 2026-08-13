@@ -72,6 +72,7 @@ test('resolves an explicit baseline release from the exact tag endpoint', async 
   assert.equal(release.tag, 'v7.2.130');
   assert.equal(release.asset.name, 'CLIProxyAPI_7.2.130_windows_amd64.zip');
   assert.equal(release.checksumAsset.url, DIGEST_URL);
+  assert.equal(Object.hasOwn(release, 'assets'), false);
 });
 
 test('rejects malformed or below-baseline explicit versions before any HTTP request', async () => {
@@ -145,6 +146,23 @@ test('rejects duplicate stable versions and unsafe release assets', async () => 
   );
 });
 
+test('rejects a release asset URL that carries a query token', async () => {
+  const archiveName = 'CLIProxyAPI_7.2.130_windows_amd64.zip';
+  const release = stableRelease({ assets: [
+    releaseAsset({
+      name: archiveName,
+      url: `${archiveUrl(archiveName)}?token=opaque`,
+      contentType: 'application/zip'
+    }),
+    releaseAsset({ name: 'checksums.txt', url: DIGEST_URL, contentType: 'text/plain' })
+  ] });
+  const http = createReleaseHttp({ routes: new Map([[TAG_URL, { chunks: [JSON.stringify(release)] }]]) });
+
+  await assert.rejects(
+    () => resolveRelease({ requestedVersion: '7.2.130', platform: { platform: 'win32', arch: 'x64' }, http }),
+    (error) => error instanceof ClaudexError && error.code === 'NETWORK_FAILURE'
+  );
+});
 test('rejects a same-target _no-plugin archive even when the exact archive exists', async () => {
   const noPluginName = 'CLIProxyAPI_7.2.130_windows_amd64_no-plugin.zip';
   const release = stableRelease({ assets: [

@@ -63,7 +63,7 @@ export function parseChecksumManifest(text, requestedAssetName) {
     const line = normalizeLogicalLine(rawLine, expectedName);
     if (line === '' || line.startsWith('#')) continue;
     const record = parseRecord(line, expectedName);
-    if (record.assetName.toLowerCase() !== expectedName.toLowerCase()) continue;
+    if (record.assetName !== expectedName) continue;
     if (selected !== undefined) throw integrityError('The release checksum artifact is ambiguous.', expectedName);
     selected = record.digest;
   }

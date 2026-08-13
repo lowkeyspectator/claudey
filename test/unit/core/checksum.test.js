@@ -63,6 +63,15 @@ test('parses exactly one lowercase or uppercase SHA-256 record for the selected 
   });
 });
 
+test('requires a case-sensitive exact archive basename in checksum records', () => {
+  const asset = assetDescriptor();
+  const mixedCaseName = `cli${asset.name.slice(3)}`;
+
+  assert.throws(
+    () => parseChecksumManifest(`${HELLO_DIGEST}  ${mixedCaseName}\n`, asset.name),
+    expectsIntegrityFailure
+  );
+});
 test('rejects absent, duplicate, malformed, and path-bearing checksum rows without leaking manifest text', () => {
   const asset = assetDescriptor();
   const cases = [

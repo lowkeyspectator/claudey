@@ -327,7 +327,7 @@ function validateAsset(asset, { tag, expectedName, kind, checksum = false }) {
     throw networkFailure('Release asset metadata exceeded the allowed byte limit.');
   }
   const parsed = validateOfficialUrl(asset.browser_download_url, 'download');
-  if (parsed.pathname !== `/router-for-me/CLIProxyAPI/releases/download/${tag}/${asset.name}`) {
+  if (parsed.search || parsed.pathname !== `/router-for-me/CLIProxyAPI/releases/download/${tag}/${asset.name}`) {
     throw networkFailure('Release asset URL was not canonical.', asset.browser_download_url);
   }
   if (!checksum && !allowedContentType(kind, asset.content_type)) {
@@ -338,7 +338,7 @@ function validateAsset(asset, { tag, expectedName, kind, checksum = false }) {
   }
   return Object.freeze({
     name: asset.name,
-    url: parsed.href,
+    url: expectedAssetUrl(tag, asset.name),
     size: asset.size,
     contentType: asset.content_type,
     ...(checksum ? { kind: 'checksum' } : { kind })
@@ -367,8 +367,7 @@ function describeRelease(record, requested, platform) {
     version,
     tag,
     asset: asset ? Object.freeze({ ...asset, ...validateAsset(matchingArchiveAssets[0], { tag, expectedName: asset.name, kind: asset.kind }) }) : undefined,
-    checksumAsset: validateAsset(checksumAssets[0], { tag, checksum: true }),
-    assets: Object.freeze(record.assets.map((candidate) => Object.freeze({ name: candidate.name, url: candidate.browser_download_url, size: candidate.size, contentType: candidate.content_type })))
+    checksumAsset: validateAsset(checksumAssets[0], { tag, checksum: true })
   });
 }
 
