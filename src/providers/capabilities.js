@@ -1,6 +1,8 @@
 import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 
+import { getVerifiedInvocation, isVerifiedExecutable, revalidateExecutable } from '../core/executable.js';
+
 const BASELINES = Object.freeze({ cliProxy: '7.2.130', claude: '2.1.229' });
 const MAX_OUTPUT_BYTES = 16_384;
 const TIMEOUT_MS = 3_000;
@@ -15,6 +17,12 @@ function available(details = {}) {
   return { available: true, code: 'AVAILABLE', ...details };
 }
 
+function decodeBounded(bytes, limit) {
+  for (let length = Math.min(bytes.length, limit); length >= 0; length -= 1) {
+    try { return new TextDecoder('utf-8', { fatal: true }).decode(bytes.subarray(0, length)); } catch { /* trim incomplete or invalid trailing bytes */ }
+  }
+  return '';
+}
 function byteLength(value) {
   return Buffer.byteLength(value, 'utf8');
 }
@@ -48,33 +56,15 @@ function hasExactKeys(value, keys) {
     && Object.keys(value).length === keys.length && keys.every((key) => Object.hasOwn(value, key)));
 }
 
-function isStructuredIdentity(identity) {
-  if (!identity || typeof identity !== 'object' || !Object.isFrozen(identity)
-    || identity.schemaVersion !== 1 || !['native', 'node-entry'].includes(identity.kind)
-    || typeof identity.command !== 'string' || typeof identity.platform !== 'string'
-    || !Array.isArray(identity.candidatePaths) || identity.candidatePaths.length === 0
-    || !Array.isArray(identity.components) || identity.components.length === 0) return false;
-  return identity.components.every((component) => hasExactKeys(component, [
-    'path', 'type', 'dev', 'ino', 'birthtimeMs', 'mode', 'size', 'mtimeMs', 'ctimeMs'
-  ]) || hasExactKeys(component, ['path', 'type', 'dev', 'ino', 'birthtimeMs']));
-}
-
-function isSafeIdentity(target) {
-  return Boolean(target && Object.isFrozen(target)
-    && typeof target.executablePath === 'string'
-    && (/^\//.test(target.executablePath) || /^[A-Za-z]:\\/.test(target.executablePath))
-    && !/[\u0000-\u001f\u007f]/.test(target.executablePath)
-    && Array.isArray(target.argsPrefix) && target.argsPrefix.every((argument) => typeof argument === 'string')
-    && isStructuredIdentity(target.identity) && typeof target.revalidate === 'function');
-}
-
 async function invoke(run, tool, target, args, { stdin = null, env = {} } = {}) {
-  if (!isSafeIdentity(target) || !args.every((argument) => typeof argument === 'string') || !(typeof stdin === 'string' || stdin === null)) return null;
-  try { if (await target.revalidate() !== true) return null; } catch { return null; }
+  if (!isVerifiedExecutable(target) || !args.every((argument) => typeof argument === 'string') || !(typeof stdin === 'string' || stdin === null)) return null;
+  try { if (await revalidateExecutable(target) !== true) return null; } catch { return null; }
+  const trusted = getVerifiedInvocation(target);
+  if (!trusted) return null;
   const invocation = {
     tool,
-    executablePath: target.executablePath,
-    args: [...target.argsPrefix, ...args],
+    executablePath: trusted.executablePath,
+    args: [...trusted.argsPrefix, ...args],
     shell: false,
     stdin,
     env: { ...env },
@@ -109,12 +99,14 @@ function disabled(keys, code = 'CAPABILITY_UNSUPPORTED') {
   return Object.fromEntries(keys.map((key) => [key, unsupported(code)]));
 }
 
-export function validateAuthenticatedModelCatalog(response) {
-  if (!response || typeof response !== 'object' || Array.isArray(response) || Object.keys(response).length !== 1 || !Array.isArray(response.data)) return false;
+export function validateAuthenticatedModelCatalog(response, { allowPreAuthEmpty = false } = {}) {
+  if (!hasExactKeys(response, ['object', 'data']) || response.object !== 'list' || !Array.isArray(response.data)) return false;
+  if (response.data.length === 0) return allowPreAuthEmpty === true;
   const seen = new Set();
   return response.data.every((model) => {
-    if (!hasExactKeys(model, ['id', 'object', 'owned_by']) || typeof model.id !== 'string' || !model.id
-      || model.object !== 'model' || !['codex', 'antigravity'].includes(model.owned_by) || seen.has(model.id)) return false;
+    if (!hasExactKeys(model, ['id', 'object', 'created', 'owned_by']) || typeof model.id !== 'string' || !model.id
+      || model.object !== 'model' || !Number.isSafeInteger(model.created) || model.created < 0
+      || !['codex', 'antigravity'].includes(model.owned_by) || seen.has(model.id)) return false;
     seen.add(model.id);
     return true;
   });
@@ -138,9 +130,9 @@ function advertisedTool(capabilities, names) {
 }
 
 async function probeCursorCapabilities(cursor, { run, nonceFactory }) {
-  if (!isSafeIdentity(cursor)) return cursorUnavailable();
+  if (!isVerifiedExecutable(cursor)) return cursorUnavailable();
   let identityOk = false;
-  try { identityOk = await cursor.revalidate() === true; } catch { identityOk = false; }
+  try { identityOk = await revalidateExecutable(cursor) === true; } catch { identityOk = false; }
   const identity = identityOk ? available() : unsupported();
   if (!identity.available) return cursorUnavailable('CAPABILITY_UNSUPPORTED', identity);
   const version = await versionCapability(run, 'cursor', cursor, 'Cursor Agent', '0.0.0');
@@ -155,11 +147,13 @@ async function probeCursorCapabilities(cursor, { run, nonceFactory }) {
   const status = hasExactKeys(statusValue, ['authenticated']) && typeof statusValue.authenticated === 'boolean'
     ? (statusValue.authenticated ? available() : unsupported('AUTH_REQUIRED'))
     : unsupported();
-  const models = await jsonCapability(run, 'cursor', cursor, ['models', '--json'], (value) => {
+  const validateModels = (value) => {
     if (!hasExactKeys(value, ['models']) || !Array.isArray(value.models)) return false;
     const seen = new Set();
     return value.models.every((model) => hasExactKeys(model, ['id']) && typeof model.id === 'string' && model.id.length > 0 && !seen.has(model.id) && (seen.add(model.id), true));
-  });
+  };
+  let models = await jsonCapability(run, 'cursor', cursor, ['models', '--json'], validateModels);
+  if (!models.available) models = await jsonCapability(run, 'cursor', cursor, ['--list-models', '--json'], validateModels);
   const jsonPrint = await jsonCapability(run, 'cursor', cursor, ['probe', 'json', '--json'],
     (value) => hasExactKeys(value, ['type', 'capability', 'framing']) && value.type === 'probe' && value.capability === 'json' && value.framing === 'json-lines');
   const stdin = await jsonCapability(run, 'cursor', cursor, ['probe', 'stdin', '--json'],
@@ -190,10 +184,14 @@ export async function probeRequiredCapabilities({ cliProxy, claude, cursor, nonc
   if (!cliVersion.available) {
     return resultEnvelope({ version: cliVersion, ...disabled(['loginCodex', 'loginAntigravity', 'config', 'help']) }, disabled(['version', 'model', 'plugin', 'mcp', 'environment']), cursor ? cursorUnavailable() : { integration: available({ required: false }) });
   }
-  const cliHelp = await jsonCapability(run, 'cliProxy', cliProxy, ['--help', '--json'], (value) => hasExactKeys(value, ['commands', 'loginModes', 'configSelection'])
-    && Array.isArray(value.commands) && value.commands.includes('login') && value.commands.includes('config')
-    && Array.isArray(value.loginModes) && value.loginModes.includes('codex') && value.loginModes.includes('antigravity') && value.configSelection === true);
-  const cliCapabilities = { version: cliVersion, loginCodex: cliHelp, loginAntigravity: cliHelp, config: cliHelp, help: cliHelp };
+  const cliHelp = await jsonCapability(run, 'cliProxy', cliProxy, ['--help', '--json'], (value) => hasExactKeys(value, ['commands', 'loginModes'])
+    && Array.isArray(value.commands) && value.commands.length === 2 && value.commands.includes('login') && value.commands.includes('config')
+    && Array.isArray(value.loginModes) && value.loginModes.length === 2 && value.loginModes.includes('codex') && value.loginModes.includes('antigravity'));
+  const requiredKeys = ['host', 'port', 'tls', 'remote-management', 'auth-dir', 'api-keys', 'debug', 'commercial-mode', 'logging-to-file', 'usage-statistics-enabled', 'pprof', 'plugins', 'ws-auth'];
+  const cliConfig = await jsonCapability(run, 'cliProxy', cliProxy, ['config', 'probe', '--json'], (value) => hasExactKeys(value, ['explicitConfigSelection', 'requiredKeys', 'commercialMode'])
+    && value.explicitConfigSelection === true && Array.isArray(value.requiredKeys) && JSON.stringify(value.requiredKeys) === JSON.stringify(requiredKeys)
+    && hasExactKeys(value.commercialMode, ['requiredValue', 'requestLoggingDisabled']) && value.commercialMode.requiredValue === true && value.commercialMode.requestLoggingDisabled === true);
+  const cliCapabilities = { version: cliVersion, loginCodex: cliHelp, loginAntigravity: cliHelp, config: cliConfig, help: cliHelp };
   if (!allAvailable(cliCapabilities)) {
     return resultEnvelope(cliCapabilities, disabled(['version', 'model', 'plugin', 'mcp', 'environment']), cursor ? cursorUnavailable() : { integration: available({ required: false }) });
   }
@@ -219,10 +217,12 @@ export async function probeRequiredCapabilities({ cliProxy, claude, cursor, nonc
   return resultEnvelope(cliCapabilities, claudeCapabilities, cursorCapabilities);
 }
 
-async function runTaskkill(pid, force) {
-  const systemRoot = process.env.SystemRoot;
-  if (typeof systemRoot !== 'string' || !/^[A-Za-z]:\\[^\r\n]+$/.test(systemRoot)) return { confirmed: false, error: 'TASKKILL_UNAVAILABLE' };
-  const executablePath = `${systemRoot}\\System32\\taskkill.exe`;
+async function runTaskkill(taskkill, pid, force) {
+  if (!isVerifiedExecutable(taskkill) || await revalidateExecutable(taskkill) !== true) return { acknowledged: false, error: 'TASKKILL_UNAVAILABLE' };
+  const trusted = getVerifiedInvocation(taskkill);
+  if (!trusted || trusted.argsPrefix.length !== 0 || !trusted.executablePath.toLowerCase().endsWith('\\taskkill.exe')) return { acknowledged: false, error: 'TASKKILL_UNAVAILABLE' };
+  const systemDirectory = trusted.executablePath.slice(0, trusted.executablePath.lastIndexOf('\\'));
+  const systemRoot = systemDirectory.slice(0, systemDirectory.lastIndexOf('\\'));
   const args = ['/pid', String(pid), '/t', ...(force ? ['/f'] : [])];
   return new Promise((resolve) => {
     let settled = false;
@@ -238,42 +238,48 @@ async function runTaskkill(pid, force) {
       resolve(result);
     };
     try {
-      killer = spawn(executablePath, args, { shell: false, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'], env: { SystemRoot: systemRoot, WINDIR: process.env.WINDIR ?? systemRoot } });
-    } catch { finish({ confirmed: false, error: 'TASKKILL_FAILED' }); return; }
+      killer = spawn(trusted.executablePath, args, { shell: false, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'], env: { SystemRoot: systemRoot, WINDIR: systemRoot } });
+    } catch { finish({ acknowledged: false, error: 'TASKKILL_FAILED' }); return; }
     let stderr = '';
     killer.stderr.on('data', (chunk) => { if (stderr.length < 1_024) stderr += chunk.toString('utf8').slice(0, 1_024 - stderr.length); });
-    killer.once('error', () => finish({ confirmed: false, error: 'TASKKILL_FAILED' }));
+    killer.once('error', () => finish({ acknowledged: false, error: 'TASKKILL_FAILED' }));
     killer.once('close', (code) => finish(code === 0
-      ? { confirmed: true }
-      : { confirmed: false, error: /access is denied/i.test(stderr) ? 'ACCESS_DENIED' : 'TASKKILL_FAILED' }));
-    timer = setTimeout(() => { try { killer.kill('SIGKILL'); } catch { /* already exited */ } finish({ confirmed: false, error: 'TASKKILL_TIMEOUT' }); }, HARD_KILL_DELAY_MS);
+      ? { acknowledged: true }
+      : { acknowledged: false, error: /access is denied/i.test(stderr) ? 'ACCESS_DENIED' : 'TASKKILL_FAILED' }));
+    timer = setTimeout(() => { try { killer.kill('SIGKILL'); } catch { /* already exited */ } finish({ acknowledged: false, error: 'TASKKILL_TIMEOUT' }); }, HARD_KILL_DELAY_MS);
   });
 }
 
-async function defaultTreeTerminator({ pid, force }) {
-  if (!Number.isSafeInteger(pid) || pid < 1) return { confirmed: false, error: 'INVALID_PID' };
-  if (process.platform === 'win32') return runTaskkill(pid, force);
+async function defaultTreeTerminator({ pid, force, taskkill }) {
+  if (!Number.isSafeInteger(pid) || pid < 1) return { acknowledged: false, error: 'INVALID_PID' };
+  if (process.platform === 'win32') return runTaskkill(taskkill, pid, force);
   try {
     process.kill(-pid, force ? 'SIGKILL' : 'SIGTERM');
-    return { confirmed: true };
+    return { acknowledged: true };
   } catch (error) {
-    return error?.code === 'ESRCH' ? { confirmed: true } : { confirmed: false, error: 'SIGNAL_FAILED' };
+    return error?.code === 'ESRCH' ? { acknowledged: true } : { acknowledged: false, error: 'SIGNAL_FAILED' };
   }
 }
 
-export function runFixedCommand({ executablePath, args, shell, stdin, env, timeoutMs, maxStdoutBytes, maxStderrBytes, signal, treeTerminator = defaultTreeTerminator }) {
+async function defaultTreeChecker({ pid }) {
+  if (process.platform === 'win32') return false;
+  try { process.kill(-pid, 0); return false; } catch (error) { return error?.code === 'ESRCH'; }
+}
+
+function waitBriefly() { return new Promise((resolve) => setTimeout(resolve, 10)); }
+export function runFixedCommand({ executablePath, args, shell, stdin, env, timeoutMs, maxStdoutBytes, maxStderrBytes, signal, taskkill, treeTerminator, treeChecker = defaultTreeChecker, spawnProcess = spawn }) {
   return new Promise((resolve) => {
     if (shell !== false || typeof executablePath !== 'string' || !(/^\//.test(executablePath) || /^[A-Za-z]:\\/.test(executablePath))
       || /[\u0000-\u001f\u007f]/.test(executablePath) || !Array.isArray(args) || !args.every((argument) => typeof argument === 'string')
       || !(stdin === null || typeof stdin === 'string') || !env || typeof env !== 'object' || Array.isArray(env)
       || !Number.isSafeInteger(timeoutMs) || timeoutMs < 1 || !Number.isSafeInteger(maxStdoutBytes) || maxStdoutBytes < 1
-      || !Number.isSafeInteger(maxStderrBytes) || maxStderrBytes < 1 || typeof treeTerminator !== 'function') {
+      || !Number.isSafeInteger(maxStderrBytes) || maxStderrBytes < 1 || (treeTerminator !== undefined && typeof treeTerminator !== 'function') || typeof treeChecker !== 'function' || typeof spawnProcess !== 'function') {
       resolve({ code: -1, stdout: '', stderr: 'invalid invocation', cleanupConfirmed: false, cleanupError: 'INVALID_INVOCATION' });
       return;
     }
     let child;
     try {
-      child = spawn(executablePath, args, { shell: false, env: { ...env }, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true, detached: process.platform !== 'win32' });
+      child = spawnProcess(executablePath, args, { shell: false, env: { ...env }, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true, detached: process.platform !== 'win32' });
     } catch {
       resolve({ code: -1, stdout: '', stderr: '', cleanupConfirmed: true });
       return;
@@ -304,8 +310,8 @@ export function runFixedCommand({ executablePath, args, shell, stdin, env, timeo
       child.unref();
       resolve({
         code,
-        stdout: stdout.toString('utf8'),
-        stderr: stderr.toString('utf8'),
+        stdout: decodeBounded(stdout, maxStdoutBytes),
+        stderr: decodeBounded(stderr, maxStderrBytes),
         ...(stopping ? { cleanupConfirmed, ...(cleanupConfirmed ? {} : { cleanupError: 'CLEANUP_UNCONFIRMED' }) } : {})
       });
     };
@@ -313,12 +319,17 @@ export function runFixedCommand({ executablePath, args, shell, stdin, env, timeo
       if (stopping && closeObserved && lastTerminationConfirmed) finish(-1, true);
     };
     const terminate = async (force) => {
-      let result;
-      try { result = await treeTerminator({ pid: child.pid, force }); }
-      catch { result = { confirmed: false }; }
-      lastTerminationConfirmed ||= result?.confirmed === true;
+      let action;
+      try { action = await (treeTerminator ?? ((request) => defaultTreeTerminator({ ...request, taskkill })))({ pid: child.pid, force }); }
+      catch { action = { acknowledged: false }; }
+      if (action?.acknowledged === true) {
+        for (let attempt = 0; attempt < 12 && !lastTerminationConfirmed; attempt += 1) {
+          try { lastTerminationConfirmed = await treeChecker({ pid: child.pid }) === true; } catch { lastTerminationConfirmed = false; }
+          if (!lastTerminationConfirmed) await waitBriefly();
+        }
+      }
       maybeFinishStopped();
-      return result;
+      return action;
     };
     const stop = () => {
       if (stopping || settled) return;
@@ -366,7 +377,7 @@ export async function resolveCursorExecutable({ candidates, run = runFixedComman
   for (const command of ['cursor-agent', 'agent']) {
     const matches = candidates.filter((candidate) => candidate?.command === command);
     if (matches.length > 1) throw capabilityError();
-    if (matches.length === 0 || !isSafeIdentity(matches[0].target)) continue;
+    if (matches.length === 0 || !isVerifiedExecutable(matches[0].target)) continue;
     const version = await versionCapability(run, 'cursor', matches[0].target, 'Cursor Agent', '0.0.0');
     if (version.available) return matches[0].target;
   }

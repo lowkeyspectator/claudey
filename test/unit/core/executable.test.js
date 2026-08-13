@@ -10,17 +10,19 @@ import { probeRequiredCapabilities } from '../../../src/providers/capabilities.j
 const SHIM_BYTES = '@ECHO off\r\n"%~dp0\\node.exe" "%~dp0\\node_modules\\@anthropic-ai\\claude-code\\cli.js" %*\r\n';
 
 function fsAdapter(overrides = {}) {
+  const tagged = (stats) => { if (stats.reparseTag === undefined) Object.defineProperty(stats, 'reparseTag', { value: 0 }); return stats; };
   return {
     realpath: async (target) => {
       try { return await fs.realpath(target); }
       catch (error) { if (error?.code === 'EPERM') return target; throw error; }
     },
-    lstat: (target) => fs.lstat(target),
-    stat: (target) => fs.stat(target),
+    lstat: async (target) => tagged(await fs.lstat(target)),
+    stat: async (target) => tagged(await fs.stat(target)),
     openNoFollow: async (target) => {
-      const before = await fs.lstat(target);
+      const before = tagged(await fs.lstat(target));
       if (before.isSymbolicLink()) throw Object.assign(new Error('link'), { code: 'ELOOP' });
-      return fs.open(target, 'r');
+      const handle = await fs.open(target, 'r');
+      return { ...handle, noFollow: true, read: handle.read.bind(handle), close: handle.close.bind(handle), stat: async () => tagged(await handle.stat()) };
     },
     ...overrides
   };
@@ -65,7 +67,7 @@ test('prefers a real native executable and binds every canonical ancestor plus t
   assert.ok(result.identity.components.some((component) => component.path.toLowerCase() === install.nativeDir.toLowerCase()));
   assert.ok(result.identity.components.length >= 3);
   assertDeepFrozen(result);
-  assert.equal(await revalidateExecutable(result, fsAdapter()), true);
+  assert.equal(await revalidateExecutable(result), true);
 });
 
 test('resolves a real native Cursor Agent command through the same complete identity contract', async (t) => {
@@ -77,7 +79,7 @@ test('resolves a real native Cursor Agent command through the same complete iden
   });
   assert.equal(result.kind, 'native');
   assert.equal(result.identity.command, 'cursor-agent');
-  assert.equal(await result.revalidate(), true);
+  assert.equal(await revalidateExecutable(result), true);
 });
 test('reads the real npm shim through a bounded no-follow handle and binds shim, node, entry, and all ancestors', async (t) => {
   const install = await makeWindowsInstall(t);
@@ -93,7 +95,7 @@ test('reads the real npm shim through a bounded no-follow handle and binds shim,
     assert.ok(result.identity.components.some((component) => component.path.toLowerCase() === required.toLowerCase()), required);
   }
   assertDeepFrozen(result);
-  assert.equal(await revalidateExecutable(result, fsAdapter()), true);
+  assert.equal(await revalidateExecutable(result), true);
 });
 
 test('rejects unsafe actual shim bytes, links, ADS/control/relative paths, ambiguous native aliases, and incomplete adapters', async (t) => {
@@ -151,6 +153,70 @@ test('rejects unsafe actual shim bytes, links, ADS/control/relative paths, ambig
   );
 });
 
+test('requires an exact zero Windows reparse tag for every component', async (t) => {
+  const install = await makeWindowsInstall(t);
+  const unsafeAdapters = [
+    fsAdapter({ lstat: async (target) => fs.lstat(target) }),
+    fsAdapter({ lstat: async (target) => { const stats = await fs.lstat(target); Object.defineProperty(stats, 'reparseTag', { value: '0' }); return stats; } }),
+    fsAdapter({ lstat: async (target) => { const stats = await fs.lstat(target); Object.defineProperty(stats, 'reparseTag', { value: 0xA0000003 }); return stats; } })
+  ];
+  for (const unsafe of unsafeAdapters) {
+    await assert.rejects(
+      resolveVerifiedExecutable({ command: 'claude', platform: 'win32', candidates: [{ path: install.nativePath }], adapter: unsafe }),
+      (error) => error.code === 'PREREQUISITE_MISSING'
+    );
+  }
+});
+
+test('requires the filesystem adapter to attest an atomic no-follow leaf handle', async (t) => {
+  const install = await makeWindowsInstall(t);
+  const base = fsAdapter();
+  const unattested = fsAdapter({
+    openNoFollow: async (target) => {
+      const handle = await base.openNoFollow(target);
+      return { ...handle, noFollow: undefined };
+    }
+  });
+  await assert.rejects(
+    resolveVerifiedExecutable({
+      command: 'claude',
+      platform: 'win32',
+      candidates: [{ path: install.nativePath }],
+      adapter: unattested
+    }),
+    (error) => error.code === 'PREREQUISITE_MISSING'
+  );
+});
+
+test('opens the no-follow leaf before reading its path identity metadata', async (t) => {
+  const install = await makeWindowsInstall(t);
+  const base = fsAdapter();
+  const operations = [];
+  const traced = {};
+  for (const name of ['realpath', 'lstat', 'stat', 'openNoFollow']) {
+    traced[name] = async (target, ...args) => {
+      if (target.toLowerCase() === install.nativePath.toLowerCase()) operations.push(name);
+      return base[name](target, ...args);
+    };
+  }
+  await resolveVerifiedExecutable({
+    command: 'claude', platform: 'win32', candidates: [{ path: install.nativePath }], adapter: traced
+  });
+  assert.equal(operations[0], 'openNoFollow');
+  assert.deepEqual(operations.slice(0, 4), ['openNoFollow', 'realpath', 'lstat', 'stat']);
+});
+
+test('revalidation uses the captured filesystem adapter even if the caller mutates its object', async (t) => {
+  const install = await makeWindowsInstall(t);
+  const mutableAdapter = fsAdapter();
+  const result = await resolveVerifiedExecutable({
+    command: 'claude', platform: 'win32', candidates: [{ path: install.nativePath }], adapter: mutableAdapter
+  });
+  assert.equal(Object.isFrozen(mutableAdapter), false);
+  mutableAdapter.realpath = async () => { throw new Error('caller mutation'); };
+  mutableAdapter.lstat = null;
+  assert.equal(await revalidateExecutable(result), true);
+});
 test('requires native and Node file types/extensions plus a contained regular JavaScript entry', async (t) => {
   const install = await makeWindowsInstall(t);
   const directoryExe = path.join(install.root, 'directory.exe');
@@ -177,7 +243,7 @@ test('revalidation refuses every native leaf, ancestor, shim-byte, Node, and ent
       command: 'claude', platform: 'win32', candidates: [{ path: useShim ? install.shimPath : install.nativePath }], adapter: fsAdapter()
     });
     await mutator(install);
-    assert.equal(await revalidateExecutable(result, fsAdapter()), false);
+    assert.equal(await revalidateExecutable(result), false);
     let spawned = false;
     const outcome = await probeRequiredCapabilities({
       cliProxy: result,

@@ -1,89 +1,137 @@
 import assert from 'node:assert/strict';
-import test from 'node:test';
+import fs from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+import process from 'node:process';
+import test, { after } from 'node:test';
 
+import { resolveVerifiedExecutable } from '../../../src/core/executable.js';
 import { assessPrerequisites } from '../../../src/core/prerequisites.js';
 
-const POSIX_TAR = { path: '/usr/bin/tar', canonicalPath: '/usr/bin/tar', isLink: false };
-const WINDOWS_POWERSHELL = {
-  path: 'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe',
-  canonicalPath: 'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe',
-  isLink: false,
-  response: { schemaVersion: 1, ok: true, result: { version: '5.1' } }
-};
+const root = await fs.mkdtemp(path.join(os.tmpdir(), 'claudex-prerequisites-'));
+after(() => fs.rm(root, { recursive: true, force: true }));
 
+function tagged(stats, tag = 0) { Object.defineProperty(stats, 'reparseTag', { value: tag, configurable: true }); return stats; }
+function adapter() {
+  return {
+    realpath: async (value) => { try { return await fs.realpath(value); } catch (error) { if (error?.code === 'EPERM') return value; throw error; } },
+    lstat: async (value) => tagged(await fs.lstat(value)),
+    stat: async (value) => tagged(await fs.stat(value)),
+    openNoFollow: async (value) => {
+      const before = tagged(await fs.lstat(value));
+      if (before.isSymbolicLink()) throw new Error('link');
+      const handle = await fs.open(value, 'r');
+      return { noFollow: true, read: handle.read.bind(handle), close: handle.close.bind(handle), stat: async () => tagged(await handle.stat()) };
+    }
+  };
+}
+
+async function windowsFixtures() {
+  const windowsRoot = path.join(root, 'AltWindows');
+  const systemDirectory = path.join(windowsRoot, 'SysNative');
+  const powershellPath = path.join(systemDirectory, 'WindowsPowerShell', 'v1.0', 'powershell.exe');
+  const taskkillPath = path.join(systemDirectory, 'taskkill.exe');
+  const gitPath = path.join(root, 'Git', 'git.exe');
+  for (const target of [powershellPath, taskkillPath, gitPath]) { await fs.mkdir(path.dirname(target), { recursive: true }); await fs.copyFile(process.execPath, target); }
+  const fsAdapter = adapter();
+  return {
+    systemDirectory,
+    powerShell: await resolveVerifiedExecutable({ command: 'powershell', platform: 'win32', candidates: [{ path: powershellPath }], adapter: fsAdapter }),
+    taskkill: await resolveVerifiedExecutable({ command: 'taskkill', platform: 'win32', candidates: [{ path: taskkillPath }], adapter: fsAdapter }),
+    git: await resolveVerifiedExecutable({ command: 'git', platform: 'win32', candidates: [{ path: gitPath }], adapter: fsAdapter })
+  };
+}
+
+const windows = await windowsFixtures();
 function input(overrides = {}) {
   return {
-    platform: 'linux',
-    nodeVersion: '22.20.0',
-    supportedNodeMajors: [22, 24, 26],
-    tar: POSIX_TAR,
-    git: { path: '/usr/bin/git', canonicalPath: '/usr/bin/git', isLink: false },
-    cursorWorktreeRequested: false,
+    platform: 'win32', nodeVersion: '22.20.0', supportedNodeMajors: [22, 24, 26],
+    powerShell: windows.powerShell, taskkill: windows.taskkill, git: windows.git,
+    systemAdapter: { systemDirectory: async () => windows.systemDirectory, probePowerShellVersion: async () => '5.1' },
     ...overrides
   };
 }
 
-test('accepts the Node 22.20.0 floor and supported newer even release lines', () => {
+test('accepts the Node floor and supported lines only with branded alternate-root Windows prerequisites', async () => {
   for (const nodeVersion of ['22.20.0', '24.0.0', '26.7.0']) {
-    const result = assessPrerequisites(input({ nodeVersion }));
+    const result = await assessPrerequisites(input({ nodeVersion }));
     assert.equal(result.ready, true, nodeVersion);
-    assert.deepEqual(result.capabilities.node, { available: true, code: 'AVAILABLE', version: nodeVersion });
+    assert.equal(result.capabilities.powerShell.version, '5.1');
+    assert.equal(result.capabilities.taskkill.available, true);
   }
 });
 
-test('refuses malformed, leading-junk, overflow, below-floor, odd, and unsupported Node releases', () => {
+test('refuses malformed, below-floor, odd, unsupported, and caller-expanded Node lines', async () => {
   for (const nodeVersion of ['22.19.9', '23.0.0', '28.0.0', 'v22.20.0', ' 22.20.0', '22.20.0x', '22.20.999999999999999999999']) {
-    const result = assessPrerequisites(input({ nodeVersion }));
-    assert.equal(result.ready, false, nodeVersion);
+    const result = await assessPrerequisites(input({ nodeVersion, supportedNodeMajors: [22, 24, 26, 28] }));
     assert.equal(result.capabilities.node.code, 'PREREQUISITE_MISSING', nodeVersion);
   }
 });
 
-test('requires the fixed absolute POSIX tar identity and Git only for Cursor worktree requests', () => {
-  const noGitWithoutWorktree = assessPrerequisites(input({ git: null }));
-  assert.equal(noGitWithoutWorktree.ready, true);
-  assert.equal(noGitWithoutWorktree.capabilities.git.code, 'NOT_REQUIRED');
-
-  const missingGitWithWorktree = assessPrerequisites(input({ cursorWorktreeRequested: true, git: null }));
-  assert.equal(missingGitWithWorktree.ready, false);
-  assert.equal(missingGitWithWorktree.capabilities.git.code, 'PREREQUISITE_MISSING');
-
-  for (const tar of [
-    null,
-    { ...POSIX_TAR, canonicalPath: '/usr/local/bin/tar' },
-    { ...POSIX_TAR, isLink: true },
-    { ...POSIX_TAR, path: 'tar' }
-  ]) {
-    const result = assessPrerequisites(input({ tar }));
-    assert.equal(result.ready, false);
-    assert.equal(result.capabilities.tar.code, 'PREREQUISITE_MISSING');
-  }
+test('does not accept nonexistent Git or fabricated PowerShell/taskkill records', async () => {
+  const forged = Object.freeze({ path: 'C:\\definitely-not-git.exe', canonicalPath: 'C:\\definitely-not-git.exe', isLink: false, response: { schemaVersion: 1, ok: true, result: { version: '99.0' } } });
+  const result = await assessPrerequisites(input({ cursorWorktreeRequested: true, git: forged, powerShell: forged, taskkill: forged }));
+  assert.equal(result.ready, false);
+  assert.equal(result.capabilities.git.code, 'PREREQUISITE_MISSING');
+  assert.equal(result.capabilities.powerShell.code, 'PREREQUISITE_MISSING');
+  assert.equal(result.capabilities.taskkill.code, 'PREREQUISITE_MISSING');
 });
 
-test('requires the fixed Windows PowerShell identity and an exact helper response protocol', () => {
-  const accepted = assessPrerequisites(input({ platform: 'win32', tar: undefined, powerShell: WINDOWS_POWERSHELL }));
-  assert.equal(accepted.ready, true);
-  assert.deepEqual(accepted.capabilities.powerShell, { available: true, code: 'AVAILABLE', version: '5.1' });
-
-  for (const powerShell of [
-    null,
-    { ...WINDOWS_POWERSHELL, isLink: true },
-    { ...WINDOWS_POWERSHELL, canonicalPath: 'C:\\Windows\\pwsh.exe' },
-    { ...WINDOWS_POWERSHELL, response: { schemaVersion: 2, ok: true, result: { version: '5.1' } } },
-    { ...WINDOWS_POWERSHELL, response: { schemaVersion: 1, ok: true, result: { version: '5.1' }, extra: true } },
-    { ...WINDOWS_POWERSHELL, response: { schemaVersion: 1, ok: true, result: { version: 5.1 } } }
-  ]) {
-    const result = assessPrerequisites(input({ platform: 'win32', tar: undefined, powerShell }));
-    assert.equal(result.ready, false);
-    assert.equal(result.capabilities.powerShell.code, 'PREREQUISITE_MISSING');
-  }
+test('derives PowerShell and taskkill only from the trusted alternate system directory', async () => {
+  const wrongRoot = await assessPrerequisites(input({ systemAdapter: { systemDirectory: async () => 'D:\\OtherWindows\\System32', probePowerShellVersion: async () => '5.1' } }));
+  assert.equal(wrongRoot.ready, false);
+  const old = await assessPrerequisites(input({ systemAdapter: { systemDirectory: async () => windows.systemDirectory, probePowerShellVersion: async () => '5.0' } }));
+  assert.equal(old.capabilities.powerShell.code, 'PREREQUISITE_MISSING');
 });
 
-test('does not let a caller expand the trusted Node lines and requires Windows PowerShell 5.1 plus a canonical Windows Git identity', () => {
-  const expanded = assessPrerequisites(input({ nodeVersion: '28.0.0', supportedNodeMajors: [22, 24, 26, 28] }));
-  assert.equal(expanded.capabilities.node.code, 'PREREQUISITE_MISSING');
-  const oldPowerShell = assessPrerequisites(input({ platform: 'win32', tar: undefined, powerShell: { ...WINDOWS_POWERSHELL, response: { schemaVersion: 1, ok: true, result: { version: '5.0' } } } }));
-  assert.equal(oldPowerShell.capabilities.powerShell.code, 'PREREQUISITE_MISSING');
-  const windowsGit = assessPrerequisites(input({ platform: 'win32', tar: undefined, powerShell: WINDOWS_POWERSHELL, cursorWorktreeRequested: true, git: { path: 'C:\\Program Files\\Git\\cmd\\git.exe', canonicalPath: 'C:\\Program Files\\Git\\cmd\\git.exe', isLink: false } }));
-  assert.equal(windowsGit.capabilities.git.code, 'AVAILABLE');
+test('requires Git only for the Cursor worktree capability', async () => {
+  assert.equal((await assessPrerequisites(input({ git: null }))).ready, true);
+  const required = await assessPrerequisites(input({ git: null, cursorWorktreeRequested: true }));
+  assert.equal(required.ready, false);
+  assert.equal(required.capabilities.git.code, 'PREREQUISITE_MISSING');
+});
+
+test('accepts only a branded fixed POSIX tar resolved through real filesystem handles', async (t) => {
+  const hostRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'claudex-posix-root-'));
+  t.after(() => fs.rm(hostRoot, { recursive: true, force: true }));
+  const hostTar = path.join(hostRoot, 'usr', 'bin', 'tar');
+  await fs.mkdir(path.dirname(hostTar), { recursive: true });
+  await fs.writeFile(hostTar, 'host-tar-fixture');
+  const hostPath = (value) => value === '/' ? hostRoot : path.join(hostRoot, ...value.slice(1).split('/'));
+  const virtualPath = (value) => {
+    const relative = path.relative(hostRoot, value);
+    return relative === '' ? '/' : `/${relative.split(path.sep).join('/')}`;
+  };
+  const posixStats = (stats) => new Proxy(stats, {
+    get(record, field) {
+      if (field === 'mode') return Number(record.mode) | 0o111;
+      const value = Reflect.get(record, field, record);
+      return typeof value === 'function' ? value.bind(record) : value;
+    }
+  });
+  const posixAdapter = {
+    realpath: async (value) => virtualPath(await fs.realpath(hostPath(value))),
+    lstat: async (value) => posixStats(await fs.lstat(hostPath(value))),
+    stat: async (value) => posixStats(await fs.stat(hostPath(value))),
+    openNoFollow: async (value) => {
+      const target = hostPath(value);
+      const before = await fs.lstat(target);
+      if (before.isSymbolicLink()) throw new Error('link');
+      const handle = await fs.open(target, 'r');
+      return { noFollow: true, read: handle.read.bind(handle), close: handle.close.bind(handle), stat: async () => posixStats(await handle.stat()) };
+    }
+  };
+  const tar = await resolveVerifiedExecutable({ command: 'tar', platform: 'linux', candidates: [{ path: '/usr/bin/tar' }], adapter: posixAdapter });
+  const result = await assessPrerequisites({ platform: 'linux', nodeVersion: '22.20.0', supportedNodeMajors: [22], tar });
+  assert.equal(result.ready, true);
+  assert.equal(result.capabilities.tar.available, true);
+});
+
+test('rejects an unbranded fixed POSIX tar identity instead of trusting path metadata', async () => {
+  const result = await assessPrerequisites({
+    platform: 'linux', nodeVersion: '22.20.0', supportedNodeMajors: [22],
+    tar: { path: '/usr/bin/tar', canonicalPath: '/usr/bin/tar', isLink: false }
+  });
+  assert.equal(result.ready, false);
+  assert.equal(result.capabilities.tar.code, 'PREREQUISITE_MISSING');
 });

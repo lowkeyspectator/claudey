@@ -5,11 +5,17 @@ import { TextDecoder } from 'node:util';
 import { ClaudexError } from './errors.js';
 
 const MAX_SHIM_BYTES = 4_096;
-const KNOWN_NPM_ENTRIES = Object.freeze({ claude: ['@anthropic-ai', 'claude-code', 'cli.js'] });
-const KNOWN_NATIVE_COMMANDS = new Set(['claude', 'cursor-agent', 'agent', 'CLIProxyAPI', 'cliproxyapi', 'node', 'git', 'tar', 'powershell']);
+const KNOWN_NPM_ENTRIES = Object.freeze({
+  claude: ['@anthropic-ai', 'claude-code', 'cli.js'],
+  cliproxyapi: ['cliproxyapi', 'cli.js'],
+  'cursor-agent': ['@cursor', 'agent', 'cli.js'],
+  agent: ['@cursor', 'agent', 'cli.js']
+});
+const KNOWN_NATIVE_COMMANDS = new Set(['claude', 'cursor-agent', 'agent', 'CLIProxyAPI', 'cliproxyapi', 'node', 'git', 'tar', 'powershell', 'taskkill']);
 const REQUIRED_ADAPTER_METHODS = Object.freeze(['realpath', 'lstat', 'stat', 'openNoFollow']);
 const STABLE_FIELDS = Object.freeze(['dev', 'ino', 'birthtimeMs']);
 const EXACT_LEAF_FIELDS = Object.freeze(['mode', 'size', 'mtimeMs', 'ctimeMs']);
+const PRIVATE_EXECUTABLES = new WeakMap();
 
 function refusal(message, cause) {
   throw new ClaudexError('PREREQUISITE_MISSING', message, { cause });
@@ -39,15 +45,21 @@ function assertSafeAbsolutePath(value, platform) {
   }
   if (platform === 'win32') {
     if (!/^[A-Za-z]:\\/.test(value) || value.slice(2).includes(':')) refusal('Executable path contains an alternate stream or ambiguous prefix');
+    if (/^[A-Za-z]:\\$/.test(value)) return;
     if (value.split('\\').some((segment, index) => index > 0 && (segment === '' || segment === '.' || segment === '..' || /[ .]$/.test(segment)))) {
       refusal('Executable path contains an ambiguous Windows segment');
     }
   } else if (value.split('/').some((segment, index) => index > 0 && (segment === '' || segment === '.' || segment === '..'))) {
+    if (value === '/') return;
     refusal('Executable path contains an ambiguous POSIX segment');
   }
   if (pathApi.normalize(value) !== value) refusal('Executable path is not normalized');
 }
 
+function captureAdapter(adapter) {
+  assertAdapter(adapter);
+  return Object.freeze(Object.fromEntries(REQUIRED_ADAPTER_METHODS.map((name) => [name, adapter[name].bind(adapter)])));
+}
 function assertAdapter(adapter) {
   if (!adapter || typeof adapter !== 'object' || REQUIRED_ADAPTER_METHODS.some((name) => typeof adapter[name] !== 'function')) {
     refusal('Executable filesystem adapter is incomplete');
@@ -59,11 +71,12 @@ function numericIdentity(value, field) {
   return String(value);
 }
 
-function assertStats(stats) {
+function assertStats(stats, platform) {
   if (!stats || typeof stats !== 'object' || typeof stats.isFile !== 'function' || typeof stats.isDirectory !== 'function' || typeof stats.isSymbolicLink !== 'function') {
     refusal('Executable filesystem metadata is invalid');
   }
   for (const field of [...STABLE_FIELDS, ...EXACT_LEAF_FIELDS]) numericIdentity(stats[field], field);
+  if (platform === 'win32' && (!Number.isSafeInteger(stats.reparseTag) || stats.reparseTag !== 0)) refusal('Windows executable reparse tag is missing or unsafe');
   if (stats.isSymbolicLink() || stats.reparse === true || stats.isReparsePoint === true) refusal('Executable path traverses a link or reparse point');
   const file = stats.isFile();
   const directory = stats.isDirectory();
@@ -101,22 +114,36 @@ function assertLeafShape(stats, expected, platform, target) {
   else if (expected === 'entry' && extension !== '.js') refusal('Executable npm entry must be a JavaScript file');
 }
 
-async function inspectLeafHandle(adapter, target, expectedStats, readBytes) {
+async function inspectLeafHandle(adapter, target, leafType, readBytes, platform) {
   let handle;
   try {
     handle = await adapter.openNoFollow(target);
-    if (!handle || typeof handle.stat !== 'function' || typeof handle.close !== 'function' || (readBytes && typeof handle.read !== 'function')) {
+    if (!handle || handle.noFollow !== true || typeof handle.stat !== 'function' || typeof handle.close !== 'function' || (readBytes && typeof handle.read !== 'function')) {
       refusal('Executable no-follow handle is invalid');
     }
     const handleStats = await handle.stat();
-    assertStats(handleStats);
-    if (!recordsEqual(expectedStats, handleStats, true)) refusal('Executable leaf changed while it was inspected');
-    if (!readBytes) return null;
-    const buffer = Buffer.alloc(MAX_SHIM_BYTES + 1);
-    const read = await handle.read(buffer, 0, buffer.length, 0);
-    if (!read || !Number.isSafeInteger(read.bytesRead) || read.bytesRead < 0 || read.bytesRead > buffer.length) refusal('Executable shim read result is invalid');
-    if (read.bytesRead > MAX_SHIM_BYTES) refusal('Executable npm shim exceeds its size limit');
-    return buffer.subarray(0, read.bytesRead);
+    const handleType = assertStats(handleStats, platform);
+    assertLeafShape(handleStats, leafType, platform, target);
+    const [canonicalAfterOpen, lstatAfterOpen, statAfterOpen] = await Promise.all([
+      adapter.realpath(target), adapter.lstat(target), adapter.stat(target)
+    ]);
+    assertSafeAbsolutePath(canonicalAfterOpen, platform);
+    if (!samePath(target, canonicalAfterOpen, platform)) refusal('Executable leaf canonical identity changed after open');
+    const lstatType = assertStats(lstatAfterOpen, platform);
+    const statType = assertStats(statAfterOpen, platform);
+    if (handleType !== lstatType || handleType !== statType) refusal('Executable leaf path type changed after no-follow open');
+    if (!recordsEqual(handleStats, lstatAfterOpen, true) || !recordsEqual(handleStats, statAfterOpen, true)) {
+      refusal('Executable leaf path identity changed after no-follow open');
+    }
+    let bytes = null;
+    if (readBytes) {
+      const buffer = Buffer.alloc(MAX_SHIM_BYTES + 1);
+      const read = await handle.read(buffer, 0, buffer.length, 0);
+      if (!read || !Number.isSafeInteger(read.bytesRead) || read.bytesRead < 0 || read.bytesRead > buffer.length) refusal('Executable shim read result is invalid');
+      if (read.bytesRead > MAX_SHIM_BYTES) refusal('Executable npm shim exceeds its size limit');
+      bytes = buffer.subarray(0, read.bytesRead);
+    }
+    return { canonical: canonicalAfterOpen, stats: handleStats, bytes };
   } catch (error) {
     if (error instanceof ClaudexError) throw error;
     refusal('Executable no-follow inspection failed', error);
@@ -129,30 +156,33 @@ async function inspectLeafHandle(adapter, target, expectedStats, readBytes) {
 
 async function inspectPath(target, { platform, adapter, leafType, readBytes = false }) {
   assertSafeAbsolutePath(target, platform);
-  let canonical;
-  try { canonical = await adapter.realpath(target); } catch (error) { refusal('Executable path cannot be canonicalized', error); }
-  assertSafeAbsolutePath(canonical, platform);
-  if (!samePath(target, canonical, platform)) refusal('Executable path does not equal its canonical identity');
-  const paths = componentPaths(canonical, platform);
+  const paths = componentPaths(target, platform);
   const components = [];
   let bytes = null;
+  let canonical = target;
   for (let index = 0; index < paths.length; index += 1) {
     const current = paths[index];
     const leaf = index === paths.length - 1;
+    if (leaf) {
+      const inspected = await inspectLeafHandle(adapter, current, leafType, readBytes, platform);
+      canonical = inspected.canonical;
+      bytes = inspected.bytes;
+      components.push({ path: canonical, type: 'file', ...stableRecord(inspected.stats, true) });
+      continue;
+    }
     let canonicalCurrent;
     let lstat;
     let stat;
     try {
       [canonicalCurrent, lstat, stat] = await Promise.all([adapter.realpath(current), adapter.lstat(current), adapter.stat(current)]);
     } catch (error) { refusal('Executable path component cannot be inspected', error); }
+    assertSafeAbsolutePath(canonicalCurrent, platform);
     if (!samePath(current, canonicalCurrent, platform)) refusal('Executable path component changed canonical identity');
-    const lstatType = assertStats(lstat);
-    const statType = assertStats(stat);
-    if (lstatType !== statType || !recordsEqual(lstat, stat, leaf)) refusal('Executable path component identity is inconsistent');
-    if (leaf) assertLeafShape(lstat, leafType, platform, current);
-    else if (!lstat.isDirectory()) refusal('Executable ancestor is not a directory');
-    components.push({ path: canonicalCurrent, type: lstatType, ...stableRecord(lstat, leaf) });
-    if (leaf) bytes = await inspectLeafHandle(adapter, current, lstat, readBytes);
+    const lstatType = assertStats(lstat, platform);
+    const statType = assertStats(stat, platform);
+    if (lstatType !== statType || !recordsEqual(lstat, stat, false)) refusal('Executable path component identity is inconsistent');
+    if (!lstat.isDirectory()) refusal('Executable ancestor is not a directory');
+    components.push({ path: canonicalCurrent, type: lstatType, ...stableRecord(lstat, false) });
   }
   return { canonical, components, bytes };
 }
@@ -178,7 +208,7 @@ function identityMatches(actual, expected) {
 }
 
 export async function resolveVerifiedExecutable({ command, platform, candidates, expectedIdentity, adapter } = {}) {
-  assertAdapter(adapter);
+  const trustedAdapter = captureAdapter(adapter);
   if (typeof command !== 'string' || !KNOWN_NATIVE_COMMANDS.has(command) || !Array.isArray(candidates) || candidates.length === 0) {
     refusal('Executable candidate is required');
   }
@@ -190,7 +220,7 @@ export async function resolveVerifiedExecutable({ command, platform, candidates,
 
   let result;
   if (nativePaths.length === 1) {
-    const native = await inspectPath(nativePaths[0], { platform, adapter, leafType: 'native' });
+    const native = await inspectPath(nativePaths[0], { platform, adapter: trustedAdapter, leafType: 'native' });
     const identity = {
       schemaVersion: 1, command, platform, kind: 'native', candidatePaths: [...paths], components: native.components
     };
@@ -199,12 +229,12 @@ export async function resolveVerifiedExecutable({ command, platform, candidates,
     if (platform !== 'win32' || paths.length !== 1 || pathApi.extname(paths[0]).toLowerCase() !== '.cmd') refusal('Executable shim is not supported');
     const entrySegments = KNOWN_NPM_ENTRIES[command];
     if (!entrySegments) refusal('Executable npm shim command is unknown');
-    const shim = await inspectPath(paths[0], { platform, adapter, leafType: 'shim', readBytes: true });
+    const shim = await inspectPath(paths[0], { platform, adapter: trustedAdapter, leafType: 'shim', readBytes: true });
     const shimDirectory = pathApi.dirname(shim.canonical);
     const nodePath = pathApi.join(shimDirectory, 'node.exe');
     const entryPath = pathApi.join(shimDirectory, 'node_modules', ...entrySegments);
-    const node = await inspectPath(nodePath, { platform, adapter, leafType: 'node' });
-    const entry = await inspectPath(entryPath, { platform, adapter, leafType: 'entry' });
+    const node = await inspectPath(nodePath, { platform, adapter: trustedAdapter, leafType: 'node' });
+    const entry = await inspectPath(entryPath, { platform, adapter: trustedAdapter, leafType: 'entry' });
     const expectedScript = `@ECHO off\r\n"%~dp0\\node.exe" "%~dp0\\node_modules\\${entrySegments.join('\\')}" %*\r\n`;
     let script;
     try { script = new TextDecoder('utf-8', { fatal: true }).decode(shim.bytes); } catch (error) { refusal('Executable npm shim is not valid UTF-8', error); }
@@ -222,24 +252,43 @@ export async function resolveVerifiedExecutable({ command, platform, candidates,
     };
     result = { kind: 'node-entry', executablePath: node.canonical, argsPrefix: [entry.canonical], identity };
   }
-  result.revalidate = () => revalidateExecutable(result, adapter);
   const frozen = deeplyFreeze(result);
+  PRIVATE_EXECUTABLES.set(frozen, deeplyFreeze({
+    adapter: trustedAdapter,
+    command: frozen.identity.command,
+    platform: frozen.identity.platform,
+    candidatePaths: [...frozen.identity.candidatePaths],
+    identity: frozen.identity,
+    executablePath: frozen.executablePath,
+    argsPrefix: [...frozen.argsPrefix]
+  }));
   if (expectedIdentity !== undefined && !identityMatches(frozen.identity, expectedIdentity)) {
     throw new ClaudexError('PROCESS_IDENTITY_MISMATCH', 'Executable identity changed');
   }
   return frozen;
 }
 
-export async function revalidateExecutable(resolved, adapter) {
-  if (!resolved || typeof resolved !== 'object' || !resolved.identity || !Object.isFrozen(resolved.identity)) return false;
+export function isVerifiedExecutable(resolved) {
+  return Boolean(resolved && typeof resolved === 'object' && PRIVATE_EXECUTABLES.has(resolved));
+}
+
+export function getVerifiedInvocation(resolved) {
+  const facts = PRIVATE_EXECUTABLES.get(resolved);
+  if (!facts) return null;
+  return { executablePath: facts.executablePath, argsPrefix: [...facts.argsPrefix] };
+}
+
+export async function revalidateExecutable(resolved) {
+  const facts = PRIVATE_EXECUTABLES.get(resolved);
+  if (!facts) return false;
   try {
     const current = await resolveVerifiedExecutable({
-      command: resolved.identity.command,
-      platform: resolved.identity.platform,
-      candidates: resolved.identity.candidatePaths.map((target) => ({ path: target })),
-      expectedIdentity: resolved.identity,
-      adapter
+      command: facts.command,
+      platform: facts.platform,
+      candidates: facts.candidatePaths.map((target) => ({ path: target })),
+      expectedIdentity: facts.identity,
+      adapter: facts.adapter
     });
-    return current.executablePath === resolved.executablePath && JSON.stringify(current.argsPrefix) === JSON.stringify(resolved.argsPrefix);
+    return current.executablePath === facts.executablePath && JSON.stringify(current.argsPrefix) === JSON.stringify(facts.argsPrefix);
   } catch { return false; }
 }

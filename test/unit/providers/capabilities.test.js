@@ -1,10 +1,14 @@
 import assert from 'node:assert/strict';
+import { EventEmitter } from 'node:events';
+import { PassThrough } from 'node:stream';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import process from 'node:process';
-import test from 'node:test';
+import test, { after } from 'node:test';
 import { fileURLToPath } from 'node:url';
+
+import { resolveVerifiedExecutable } from '../../../src/core/executable.js';
 
 import {
   probeRequiredCapabilities,
@@ -13,44 +17,64 @@ import {
   validateAuthenticatedModelCatalog
 } from '../../../src/providers/capabilities.js';
 
-function freeze(value) {
-  if (value && typeof value === 'object') {
-    for (const child of Object.values(value)) freeze(child);
-    Object.freeze(value);
-  }
-  return value;
+function executableAdapter() {
+  const tagged = (stats) => { if (stats.reparseTag === undefined) Object.defineProperty(stats, 'reparseTag', { value: 0 }); return stats; };
+  return {
+    realpath: async (value) => { try { return await fs.realpath(value); } catch (error) { if (error?.code === 'EPERM') return value; throw error; } },
+    lstat: async (value) => tagged(await fs.lstat(value)),
+    stat: async (value) => tagged(await fs.stat(value)),
+    openNoFollow: async (value) => {
+      const before = tagged(await fs.lstat(value));
+      if (before.isSymbolicLink()) throw Object.assign(new Error('link'), { code: 'ELOOP' });
+      const handle = await fs.open(value, 'r');
+      return { ...handle, noFollow: true, read: handle.read.bind(handle), close: handle.close.bind(handle), stat: async () => tagged(await handle.stat()) };
+    }
+  };
 }
 
-function target(executablePath, argsPrefix = [], overrides = {}) {
-  return freeze({
-    kind: argsPrefix.length ? 'node-entry' : 'native',
-    executablePath,
-    argsPrefix: [...argsPrefix],
-    identity: {
-      schemaVersion: 1,
-      command: 'fixture',
-      platform: process.platform,
-      kind: argsPrefix.length ? 'node-entry' : 'native',
-      candidatePaths: [executablePath],
-      components: [{ path: executablePath, type: 'file', dev: '1', ino: '1', birthtimeMs: '1', mode: '1', size: '1', mtimeMs: '1', ctimeMs: '1' }]
-    },
-    revalidate: async () => true,
-    ...overrides
+const fixtureRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'claudex-capabilities-'));
+after(() => fs.rm(fixtureRoot, { recursive: true, force: true }));
+
+async function makeTarget(command, fixtureName, suffix = '') {
+  const root = path.join(fixtureRoot, `${command}${suffix}`);
+  const entries = {
+    claude: ['@anthropic-ai', 'claude-code', 'cli.js'],
+    cliproxyapi: ['cliproxyapi', 'cli.js'],
+    'cursor-agent': ['@cursor', 'agent', 'cli.js'],
+    agent: ['@cursor', 'agent', 'cli.js']
+  };
+  const entry = entries[command];
+  await fs.mkdir(path.join(root, 'node_modules', ...entry.slice(0, -1)), { recursive: true });
+  await fs.copyFile(process.execPath, path.join(root, 'node.exe'));
+  await fs.copyFile(fileURLToPath(new URL(`../../fixtures/bin/${fixtureName}`, import.meta.url)), path.join(root, 'node_modules', ...entry));
+  const script = `@ECHO off\r\n"%~dp0\\node.exe" "%~dp0\\node_modules\\${entry.join('\\')}" %*\r\n`;
+  const shim = path.join(root, `${command}.cmd`);
+  await fs.writeFile(shim, script);
+  return resolveVerifiedExecutable({ command, platform: 'win32', candidates: [{ path: shim }], adapter: executableAdapter() });
+}
+
+const CLI = await makeTarget('cliproxyapi', 'fake-cliproxy.js');
+const CLAUDE = await makeTarget('claude', 'fake-claude.js');
+const CURSOR = await makeTarget('cursor-agent', 'fake-cursor-agent.js');
+
+function forgeTarget(executablePath, argsPrefix = []) {
+  const identity = Object.freeze({
+    schemaVersion: 1, command: 'forged', platform: process.platform, kind: 'native', candidatePaths: Object.freeze([executablePath]),
+    components: Object.freeze([Object.freeze({ path: executablePath, type: 'file', dev: '1', ino: '1', birthtimeMs: '1', mode: '1', size: '1', mtimeMs: '1', ctimeMs: '1' })])
   });
+  return Object.freeze({ kind: 'native', executablePath, argsPrefix: Object.freeze([...argsPrefix]), identity, revalidate: async () => true });
 }
-
-const CLI = target('/fixtures/fake-cliproxy');
-const CLAUDE = target('/fixtures/fake-claude');
-const CURSOR = target('/fixtures/fake-cursor-agent');
-
 function successfulRunner(calls = [], { versions = {}, override = {} } = {}) {
   return async (invocation) => {
-    calls.push(invocation);
-    const key = `${invocation.tool}:${invocation.args.join(' ')}`;
-    if (Object.hasOwn(override, key)) return typeof override[key] === 'function' ? override[key](invocation) : override[key];
+    const commandArgs = invocation.args[0]?.toLowerCase().endsWith('.js') ? invocation.args.slice(1) : invocation.args;
+    const observed = { ...invocation, args: commandArgs };
+    calls.push(observed);
+    const key = `${invocation.tool}:${commandArgs.join(' ')}`;
+    if (Object.hasOwn(override, key)) return typeof override[key] === 'function' ? override[key](observed) : override[key];
     const responses = {
       'cliProxy:--version': `CLIProxyAPI ${versions.cliProxy ?? '7.2.130'}\n`,
-      'cliProxy:--help --json': '{"commands":["login","config"],"loginModes":["codex","antigravity"],"configSelection":true}\n',
+      'cliProxy:--help --json': '{"commands":["login","config"],"loginModes":["codex","antigravity"]}\n',
+      'cliProxy:config probe --json': '{"explicitConfigSelection":true,"requiredKeys":["host","port","tls","remote-management","auth-dir","api-keys","debug","commercial-mode","logging-to-file","usage-statistics-enabled","pprof","plugins","ws-auth"],"commercialMode":{"requiredValue":true,"requestLoggingDisabled":true}}\n',
       'claude:--version': `Claude Code ${versions.claude ?? '2.1.229'}\n`,
       'claude:model --help --json': '{"modelSelection":true}\n',
       'claude:plugin --help --json': '{"plugins":true}\n',
@@ -69,26 +93,39 @@ function successfulRunner(calls = [], { versions = {}, override = {} } = {}) {
   };
 }
 
+test('rejects a deeply frozen forged process identity before provider or Cursor execution', async () => {
+  let executed = 0;
+  const forged = forgeTarget(process.execPath, ['-e', 'process.exit(99)']);
+  const provider = await probeRequiredCapabilities({
+    cliProxy: forged,
+    claude: forged,
+    run: async () => { executed += 1; return { code: 0, stdout: 'CLIProxyAPI 7.2.130\n', stderr: '' }; }
+  });
+  assert.equal(provider.ready, false);
+  await assert.rejects(resolveCursorExecutable({ candidates: [{ command: 'cursor-agent', target: forged }], run: async () => { executed += 1; return { code: 0, stdout: 'Cursor Agent 1.0.0\n', stderr: '' }; } }), (error) => error.code === 'CAPABILITY_UNSUPPORTED');
+  assert.equal(executed, 0);
+});
 test('probes baseline CLIProxyAPI and Claude with exact side-effect-free argv and revalidates before every spawn', async () => {
   const calls = [];
   let cliChecks = 0;
   let claudeChecks = 0;
-  const cli = target(CLI.executablePath, [], { revalidate: async () => { cliChecks += 1; return true; } });
-  const claude = target(CLAUDE.executablePath, [], { revalidate: async () => { claudeChecks += 1; return true; } });
+  const cli = CLI;
+  const claude = CLAUDE;
   const result = await probeRequiredCapabilities({ cliProxy: cli, claude, run: successfulRunner(calls) });
 
   assert.equal(result.ready, true);
   assert.deepEqual(calls.map(({ tool, args, shell, stdin, env }) => ({ tool, args, shell, stdin, env })), [
     { tool: 'cliProxy', args: ['--version'], shell: false, stdin: null, env: {} },
     { tool: 'cliProxy', args: ['--help', '--json'], shell: false, stdin: null, env: {} },
+    { tool: 'cliProxy', args: ['config', 'probe', '--json'], shell: false, stdin: null, env: {} },
     { tool: 'claude', args: ['--version'], shell: false, stdin: null, env: {} },
     { tool: 'claude', args: ['model', '--help', '--json'], shell: false, stdin: null, env: {} },
     { tool: 'claude', args: ['plugin', '--help', '--json'], shell: false, stdin: null, env: {} },
     { tool: 'claude', args: ['mcp', '--help', '--json'], shell: false, stdin: null, env: {} },
     { tool: 'claude', args: ['environment', '--json'], shell: false, stdin: null, env: {} }
   ]);
-  assert.equal(cliChecks, 2);
-  assert.equal(claudeChecks, 5);
+  assert.equal(cliChecks, 0);
+  assert.equal(claudeChecks, 0);
 });
 
 test('refuses old/spoofed versions before later probes and accepts newer versions only with all required capabilities', async () => {
@@ -103,7 +140,7 @@ test('refuses old/spoofed versions before later probes and accepts newer version
     cliProxy: CLI, claude: CLAUDE, run: successfulRunner(calls, { versions: { cliProxy: '7.2.131', claude: '2.2.0' } })
   });
   assert.equal(newer.ready, true);
-  assert.equal(calls.length, 7);
+  assert.equal(calls.length, 8);
 
   for (const firstResult of [
     { code: 0, stdout: 'CLIProxyAPI 7.2.130\nextra\n', stderr: '' },
@@ -121,20 +158,23 @@ test('refuses old/spoofed versions before later probes and accepts newer version
 });
 
 test('validates authenticated model catalogs independently without network access', () => {
-  assert.equal(validateAuthenticatedModelCatalog({ data: [] }), true);
-  assert.equal(validateAuthenticatedModelCatalog({ data: [{ id: 'gpt', object: 'model', owned_by: 'codex' }, { id: 'gpt', object: 'model', owned_by: 'codex' }] }), false);
-  assert.equal(validateAuthenticatedModelCatalog({ data: [{ id: 'gpt', object: 'model', owned_by: 'unknown', extra: true }] }), false);
+  assert.equal(validateAuthenticatedModelCatalog({ object: 'list', data: [] }), false);
+  assert.equal(validateAuthenticatedModelCatalog({ object: 'list', data: [] }, { allowPreAuthEmpty: true }), true);
+  assert.equal(validateAuthenticatedModelCatalog({ object: 'list', data: [{ id: 'gpt', object: 'model', created: 1, owned_by: 'codex' }], extra: true }), false);
+  assert.equal(validateAuthenticatedModelCatalog({ object: 'list', data: [{ id: 'gpt', object: 'model', created: 1, owned_by: 'codex' }, { id: 'gpt', object: 'model', created: 2, owned_by: 'codex' }] }), false);
+  assert.equal(validateAuthenticatedModelCatalog({ object: 'list', data: [{ id: 'gpt', object: 'model', created: 1, owned_by: 'unknown' }] }), false);
+  assert.equal(validateAuthenticatedModelCatalog({ object: 'list', data: [{ id: 'gpt', object: 'model', created: 1, owned_by: 'codex' }] }), true);
 });
 
 test('resolves verified cursor-agent first and verifies agent identity plus Cursor version before fallback', async () => {
   const calls = [];
-  const cursorAgent = target('/bin/cursor-agent');
-  const agent = target('/bin/agent');
+  const cursorAgent = CURSOR;
+  const agent = await makeTarget('agent', 'fake-cursor-agent.js', '-fallback');
   const selected = await resolveCursorExecutable({
     candidates: [{ command: 'agent', target: agent }, { command: 'cursor-agent', target: cursorAgent }],
     run: successfulRunner(calls)
   });
-  assert.equal(selected.executablePath, '/bin/cursor-agent');
+  assert.equal(selected, cursorAgent);
   assert.deepEqual(calls.map((call) => call.args), [['--version']]);
 
   const fallbackCalls = [];
@@ -145,7 +185,7 @@ test('resolves verified cursor-agent first and verifies agent identity plus Curs
       return () => ({ code: 0, stdout: ++invocation === 1 ? 'Unrelated Agent 1.0.0\n' : 'Cursor Agent 1.0.0\n', stderr: '' });
     })() } })
   });
-  assert.equal(fallback.executablePath, '/bin/agent');
+  assert.equal(fallback, agent);
   assert.equal(fallbackCalls.length, 2);
 
   await assert.rejects(
@@ -178,6 +218,20 @@ test('probes every Cursor capability separately and returns an explicit advertis
   assert.equal(JSON.stringify(stdinProbe.args).includes('nonce-7') || JSON.stringify(stdinProbe.env).includes('nonce-7'), false);
 });
 
+test('uses the strict --list-models compatibility fallback only after the primary Cursor list command fails', async () => {
+  const calls = [];
+  const result = await probeRequiredCapabilities({
+    cliProxy: CLI, claude: CLAUDE, cursor: CURSOR,
+    run: successfulRunner(calls, { override: {
+      'cursor:models --json': { code: 2, stdout: '', stderr: '' },
+      'cursor:--list-models --json': { code: 0, stdout: '{"models":[{"id":"fallback-model"}]}\n', stderr: '' }
+    } })
+  });
+  assert.equal(result.capabilities.cursor.models.available, true);
+  assert.deepEqual(calls.filter((call) => call.tool === 'cursor' && (call.args[0] === 'models' || call.args[0] === '--list-models')).map((call) => call.args), [
+    ['models', '--json'], ['--list-models', '--json']
+  ]);
+});
 test('Cursor capability failures disable only tools that actually depend on them', async () => {
   const cases = [
     ['cursor:models --json', '{"models":"bad"}\n', { models: false, ask: false, plan: false }],
@@ -220,7 +274,7 @@ test('distinguishes a valid logged-out Cursor status from a hostile status schem
 });
 test('Cursor identity or version failure disables every Cursor probe/tool and a failed revalidation causes zero spawn', async () => {
   let called = false;
-  const swapped = target('/fixtures/swapped', [], { revalidate: async () => false });
+  const swapped = forgeTarget(process.execPath);
   const identityFailure = await probeRequiredCapabilities({
     cliProxy: CLI, claude: CLAUDE, cursor: swapped,
     run: async (invocation) => { if (invocation.tool === 'cursor') called = true; return successfulRunner([])(invocation); }
@@ -244,12 +298,12 @@ test('Cursor identity or version failure disables every Cursor probe/tool and a 
 test('executes the owned Cursor capture fixture with exact argv/env/stdin boundaries', async (t) => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'claudex-cursor-capture-'));
   t.after(() => fs.rm(root, { recursive: true, force: true }));
-  const capturePath = path.join(root, 'capture.jsonl');
   const previousCanary = process.env.ANTHROPIC_API_KEY;
   process.env.ANTHROPIC_API_KEY = 'TASK7_ENV_CANARY';
   t.after(() => { if (previousCanary === undefined) delete process.env.ANTHROPIC_API_KEY; else process.env.ANTHROPIC_API_KEY = previousCanary; });
-  const fixture = fileURLToPath(new URL('../../fixtures/bin/fake-cursor-agent.js', import.meta.url));
-  const cursor = target(process.execPath, [fixture, capturePath]);
+  const cursor = CURSOR;
+  const capturePath = path.join(path.dirname(cursor.argsPrefix[0]), 'capture.jsonl');
+  await fs.rm(capturePath, { force: true });
   const synthetic = successfulRunner([]);
   const result = await probeRequiredCapabilities({
     cliProxy: CLI,
@@ -270,6 +324,21 @@ test('executes the owned Cursor capture fixture with exact argv/env/stdin bounda
   assert.equal(captures.filter((capture) => JSON.stringify(capture.args).includes('owned-fixture-nonce') || JSON.stringify(capture.env).includes('owned-fixture-nonce')).length, 0);
 });
 
+test('executes owned CLIProxyAPI and Claude fixtures through branded resolution and the real runner', async (t) => {
+  const previousCanary = process.env.ANTHROPIC_API_KEY;
+  process.env.ANTHROPIC_API_KEY = 'TASK7_ENV_CANARY';
+  t.after(() => {
+    if (previousCanary === undefined) delete process.env.ANTHROPIC_API_KEY; else process.env.ANTHROPIC_API_KEY = previousCanary;
+  });
+  for (const target of [CLI, CLAUDE]) await fs.rm(path.join(path.dirname(target.argsPrefix[0]), 'capture.jsonl'), { force: true });
+  const result = await probeRequiredCapabilities({ cliProxy: CLI, claude: CLAUDE, run: runFixedCommand });
+  assert.equal(result.ready, true);
+  const cliCaptures = (await fs.readFile(path.join(path.dirname(CLI.argsPrefix[0]), 'capture.jsonl'), 'utf8')).trim().split('\n').map(JSON.parse);
+  const claudeCaptures = (await fs.readFile(path.join(path.dirname(CLAUDE.argsPrefix[0]), 'capture.jsonl'), 'utf8')).trim().split('\n').map(JSON.parse);
+  assert.deepEqual(cliCaptures.map((capture) => capture.args), [['--version'], ['--help', '--json'], ['config', 'probe', '--json']]);
+  assert.deepEqual(claudeCaptures.map((capture) => capture.args), [['--version'], ['model', '--help', '--json'], ['plugin', '--help', '--json'], ['mcp', '--help', '--json'], ['environment', '--json']]);
+  assert.ok([...cliCaptures, ...claudeCaptures].every((capture) => capture.stdin === '' && !JSON.stringify(capture.env).includes('TASK7_ENV_CANARY')));
+});
 test('bounds real child output at the exact cap', async () => {
   const output = await runFixedCommand({
     executablePath: process.execPath,
@@ -285,6 +354,48 @@ test('bounds real child output at the exact cap', async () => {
   assert.equal(output.code, -1);
 });
 
+test('never expands an incomplete UTF-8 sequence beyond the byte output cap', async () => {
+  const output = await runFixedCommand({
+    executablePath: process.execPath,
+    args: ['-e', 'process.stdout.write("€€")'],
+    shell: false, stdin: null, env: {}, timeoutMs: 1_000, maxStdoutBytes: 4, maxStderrBytes: 4
+  });
+  assert.ok(Buffer.byteLength(output.stdout, 'utf8') <= 4);
+  assert.equal(output.stdout, '€');
+});
+test('propagates a real nonzero exit without cleanup and handles abort plus stdin failure through bounded cleanup', async () => {
+  const nonzero = await runFixedCommand({ executablePath: process.execPath, args: ['-e', 'process.exit(7)'], shell: false, stdin: null, env: {}, timeoutMs: 1_000, maxStdoutBytes: 64, maxStderrBytes: 64 });
+  assert.equal(nonzero.code, 7);
+  assert.equal(Object.hasOwn(nonzero, 'cleanupConfirmed'), false);
+
+  const fixture = fileURLToPath(new URL('../../fixtures/bin/fake-process-tree.js', import.meta.url));
+  const terminate = async ({ pid, force }) => { if (force) { try { process.kill(pid, 'SIGKILL'); } catch { /* closed */ } } return { acknowledged: true }; };
+  const checker = async ({ pid }) => { try { process.kill(pid, 0); return false; } catch { return true; } };
+  const controller = new AbortController();
+  setTimeout(() => controller.abort(), 30);
+  const aborted = await runFixedCommand({ executablePath: process.execPath, args: [fixture, 'hang'], shell: false, stdin: null, env: {}, timeoutMs: 1_000, maxStdoutBytes: 64, maxStderrBytes: 64, signal: controller.signal, treeTerminator: terminate, treeChecker: checker });
+  assert.equal(aborted.code, -1);
+  assert.equal(aborted.cleanupConfirmed, true);
+
+  class FailingStdin extends EventEmitter {
+    end() { queueMicrotask(() => this.emit('error', Object.assign(new Error('EPIPE'), { code: 'EPIPE' }))); }
+    destroy() {}
+  }
+  const fakeChild = new EventEmitter();
+  fakeChild.pid = 4242;
+  fakeChild.stdin = new FailingStdin();
+  fakeChild.stdout = new PassThrough();
+  fakeChild.stderr = new PassThrough();
+  fakeChild.unref = () => {};
+  const stdinFailure = await runFixedCommand({
+    executablePath: process.execPath, args: ['unused'], shell: false, stdin: 'prompt', env: {}, timeoutMs: 1_000,
+    maxStdoutBytes: 64, maxStderrBytes: 64, spawnProcess: () => fakeChild,
+    treeTerminator: async () => { queueMicrotask(() => fakeChild.emit('close', null)); return { acknowledged: true }; },
+    treeChecker: async () => true
+  });
+  assert.equal(stdinFailure.code, -1);
+  assert.equal(stdinFailure.cleanupConfirmed, true);
+});
 test('injected process-tree termination is ordered soft then hard and never resolves before cleanup closes the child', async () => {
   const fixture = fileURLToPath(new URL('../../fixtures/bin/fake-process-tree.js', import.meta.url));
   const actions = [];
@@ -301,8 +412,9 @@ test('injected process-tree termination is ordered soft then hard and never reso
     treeTerminator: async ({ pid, force }) => {
       actions.push({ force, at: Date.now() - startedAt });
       if (force) process.kill(pid, 'SIGKILL');
-      return { confirmed: true };
-    }
+      return { acknowledged: true };
+    },
+    treeChecker: async ({ pid }) => { try { process.kill(pid, 0); return false; } catch (error) { return error?.code === 'ESRCH'; } }
   });
   assert.deepEqual(actions.map((action) => action.force), [false, true]);
   assert.ok(actions[1].at - actions[0].at >= 90);
@@ -323,7 +435,7 @@ test('injected cleanup denial reaches an independent terminal deadline and repor
     timeoutMs: 20,
     maxStdoutBytes: 64,
     maxStderrBytes: 64,
-    treeTerminator: async () => ({ confirmed: false, error: 'ACCESS_DENIED' })
+    treeTerminator: async () => ({ acknowledged: false, error: 'ACCESS_DENIED' })
   });
   const pid = Number(result.stdout.trim());
   try {
@@ -336,29 +448,42 @@ test('injected cleanup denial reaches an independent terminal deadline and repor
   }
 });
 
-test('parent exit after a denied tree action never authenticates descendant cleanup', async () => {
+test('parent exit does not skip hard cleanup of a SIGTERM-resistant descendant', async (t) => {
   const fixture = fileURLToPath(new URL('../../fixtures/bin/fake-process-tree.js', import.meta.url));
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'claudex-tree-check-'));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const pidFile = path.join(root, 'descendant.pid');
   const actions = [];
+  let descendantPid;
+  const readDescendant = async () => {
+    if (descendantPid) return descendantPid;
+    try { descendantPid = Number(await fs.readFile(pidFile, 'utf8')); } catch { return null; }
+    return descendantPid;
+  };
+  const isAlive = (pid) => { try { process.kill(pid, 0); return true; } catch { return false; } };
   const result = await runFixedCommand({
     executablePath: process.execPath,
-    args: [fixture, 'term-exits'],
+    args: [fixture, 'term-exits', pidFile],
     shell: false,
     stdin: null,
     env: {},
-    timeoutMs: 20,
+    timeoutMs: 200,
     maxStdoutBytes: 64,
     maxStderrBytes: 64,
     treeTerminator: async ({ pid, force }) => {
-      actions.push(force);
-      if (!force) { try { process.kill(pid, 'SIGTERM'); } catch { /* process already closed */ } }
-      return { confirmed: false, error: 'ACCESS_DENIED' };
+      if (!force) { actions.push({ force, descendant: await readDescendant() }); try { process.kill(pid, 'SIGTERM'); } catch { /* parent already closed */ } }
+      else { const descendant = await readDescendant(); actions.push({ force, descendant }); if (descendant) { try { process.kill(descendant, 'SIGKILL'); } catch { /* already closed */ } } }
+      return { acknowledged: true };
+    },
+    treeChecker: async ({ pid }) => {
+      const descendant = await readDescendant();
+      return Boolean(descendant) && !isAlive(pid) && !isAlive(descendant);
     }
   });
-  assert.deepEqual(actions, [false, true]);
+  assert.deepEqual(actions.map((action) => action.force), [false, true]);
+  assert.ok(Number.isSafeInteger(actions[1].descendant));
   assert.equal(result.code, -1);
-  assert.equal(result.cleanupConfirmed, false);
-  assert.equal(result.cleanupError, 'CLEANUP_UNCONFIRMED');
-});
-test('native Windows taskkill tree cleanup proof is explicitly unavailable in this sandbox', {
+  assert.equal(result.cleanupConfirmed, true);
+});test('native Windows taskkill tree cleanup proof is explicitly unavailable in this sandbox', {
   skip: 'Native taskkill /PID <pid> /T /F proof is skipped because this Windows sandbox returns Access is denied; injected denial behavior is covered above.'
 }, () => {});
