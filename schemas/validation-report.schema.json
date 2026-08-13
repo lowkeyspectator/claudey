@@ -1,0 +1,205 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/ramsaijanapana/claude_code_cliProxy/schemas/validation-report.schema.json",
+  "title": "Claudex release validation report",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion", "release", "target", "observedAt", "maxAgeHours", "tools", "upstream",
+    "capabilities", "operations", "auth", "inference", "cursor", "checkout", "security"
+  ],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "release": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["tag", "version", "sourceRevision", "projectManifestSha256", "managerPayload", "shim"],
+      "properties": {
+        "tag": { "type": "string", "pattern": "^v(?:0|[1-9][0-9]*)\\.(?:0|[1-9][0-9]*)\\.(?:0|[1-9][0-9]*)$" },
+        "version": { "$ref": "#/$defs/version" },
+        "sourceRevision": { "$ref": "#/$defs/revision" },
+        "projectManifestSha256": { "$ref": "#/$defs/sha256" },
+        "managerPayload": { "$ref": "#/$defs/artifact" },
+        "shim": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/artifact" }] }
+      }
+    },
+    "target": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "osName", "osVersion", "platform", "runtimeArch", "nativeArch", "wslVersion"],
+      "properties": {
+        "id": {
+          "enum": [
+            "windows-10-1809-x64", "windows-11-arm64", "macos-13-x64", "macos-13-arm64", "wsl",
+            "current-windows-x64", "current-windows-arm64", "current-darwin-x64", "current-darwin-arm64",
+            "current-linux-x64", "current-linux-arm64"
+          ]
+        },
+        "osName": { "enum": ["Windows 10", "Windows 11", "Windows", "macOS", "Linux", "WSL"] },
+        "osVersion": { "$ref": "#/$defs/safeText" },
+        "platform": { "enum": ["win32", "darwin", "linux"] },
+        "runtimeArch": { "enum": ["x64", "arm64"] },
+        "nativeArch": { "enum": ["x64", "arm64"] },
+        "wslVersion": { "oneOf": [{ "type": "null" }, { "enum": [1, 2] }] }
+      }
+    },
+    "observedAt": { "type": "string", "format": "date-time" },
+    "maxAgeHours": { "const": 168 },
+    "tools": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["node", "claude", "cursor"],
+      "properties": {
+        "node": { "$ref": "#/$defs/semverIdentity" },
+        "claude": { "$ref": "#/$defs/semverIdentity" },
+        "cursor": { "$ref": "#/$defs/identity" }
+      }
+    },
+    "upstream": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["cliProxyApi"],
+      "properties": { "cliProxyApi": { "$ref": "#/$defs/semverIdentity" } }
+    },
+    "capabilities": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["codexDeviceCode", "codexNoBrowser", "antigravityNoBrowser"],
+      "properties": {
+        "codexDeviceCode": { "$ref": "#/$defs/capability" },
+        "codexNoBrowser": { "$ref": "#/$defs/capability" },
+        "antigravityNoBrowser": { "$ref": "#/$defs/capability" }
+      }
+    },
+    "operations": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["cleanBootstrap", "repeatBootstrap", "update", "rollback", "dryRunUninstall", "uninstall", "repeatUninstall"],
+      "properties": {
+        "cleanBootstrap": { "$ref": "#/$defs/outcome" },
+        "repeatBootstrap": { "$ref": "#/$defs/outcome" },
+        "update": { "$ref": "#/$defs/outcome" },
+        "rollback": { "$ref": "#/$defs/outcome" },
+        "dryRunUninstall": { "$ref": "#/$defs/outcome" },
+        "uninstall": { "$ref": "#/$defs/outcome" },
+        "repeatUninstall": { "$ref": "#/$defs/outcome" }
+      }
+    },
+    "auth": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["codexBrowser", "codexDeviceCode", "codexNoBrowser", "antigravityBrowser", "antigravityNoBrowser"],
+      "properties": {
+        "codexBrowser": { "$ref": "#/$defs/outcome" },
+        "codexDeviceCode": { "$ref": "#/$defs/outcome" },
+        "codexNoBrowser": { "$ref": "#/$defs/outcome" },
+        "antigravityBrowser": { "$ref": "#/$defs/outcome" },
+        "antigravityNoBrowser": { "$ref": "#/$defs/outcome" }
+      }
+    },
+    "inference": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["claudex", "claudeAgy"],
+      "properties": {
+        "claudex": { "$ref": "#/$defs/outcome" },
+        "claudeAgy": { "$ref": "#/$defs/outcome" }
+      }
+    },
+    "cursor": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["login", "models", "ask", "plan", "approvedWorktree"],
+      "properties": {
+        "login": { "$ref": "#/$defs/outcome" },
+        "models": { "$ref": "#/$defs/outcome" },
+        "ask": { "$ref": "#/$defs/outcome" },
+        "plan": { "$ref": "#/$defs/outcome" },
+        "approvedWorktree": { "$ref": "#/$defs/outcome" }
+      }
+    },
+    "checkout": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["before", "after"],
+      "properties": {
+        "before": { "$ref": "#/$defs/checkoutState" },
+        "after": { "$ref": "#/$defs/checkoutState" }
+      }
+    },
+    "security": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["loopbackOnly", "bearerAuthentication", "permissions", "cleanup", "canaryScan"],
+      "properties": {
+        "loopbackOnly": { "$ref": "#/$defs/outcome" },
+        "bearerAuthentication": { "$ref": "#/$defs/outcome" },
+        "permissions": { "$ref": "#/$defs/outcome" },
+        "cleanup": { "$ref": "#/$defs/outcome" },
+        "canaryScan": { "$ref": "#/$defs/outcome" }
+      }
+    }
+  },
+  "$defs": {
+    "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "revision": { "type": "string", "pattern": "^(?:[0-9a-f]{40}|[0-9a-f]{64})$" },
+    "version": { "type": "string", "pattern": "^(?:0|[1-9][0-9]*)\\.(?:0|[1-9][0-9]*)\\.(?:0|[1-9][0-9]*)$" },
+    "safeText": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[^\\u0000\\r\\n]+$" },
+    "artifact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "sha256", "size"],
+      "properties": {
+        "name": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,255}$" },
+        "sha256": { "$ref": "#/$defs/sha256" },
+        "size": { "type": "integer", "minimum": 1, "maximum": 536870912 }
+      }
+    },
+    "identity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["version", "sha256"],
+      "properties": {
+        "version": { "$ref": "#/$defs/safeText" },
+        "sha256": { "$ref": "#/$defs/sha256" }
+      }
+    },
+    "semverIdentity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["version", "sha256"],
+      "properties": {
+        "version": { "$ref": "#/$defs/version" },
+        "sha256": { "$ref": "#/$defs/sha256" }
+      }
+    },
+    "capability": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["supported", "probeSha256"],
+      "properties": {
+        "supported": { "type": "boolean" },
+        "probeSha256": { "$ref": "#/$defs/sha256" }
+      }
+    },
+    "outcome": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["outcome", "evidenceSha256"],
+      "properties": {
+        "outcome": { "enum": ["passed", "failed", "unavailable", "not-run", "not-applicable"] },
+        "evidenceSha256": { "$ref": "#/$defs/sha256" }
+      }
+    },
+    "checkoutState": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sourceSha256", "indexSha256", "headRevision"],
+      "properties": {
+        "sourceSha256": { "$ref": "#/$defs/sha256" },
+        "indexSha256": { "$ref": "#/$defs/sha256" },
+        "headRevision": { "$ref": "#/$defs/revision" }
+      }
+    }
+  }
+}
