@@ -49,7 +49,8 @@ function isSafeIdentity(target) {
 }
 
 async function invoke(run, tool, target, args, { stdin = null, env = {} } = {}) {
-  if (!isSafeIdentity(target) || !args.every((arg) => typeof arg === 'string') || typeof stdin !== 'string' && stdin !== null) return null;
+  if (!isSafeIdentity(target) || typeof target.revalidate !== 'function' || !args.every((arg) => typeof arg === 'string') || typeof stdin !== 'string' && stdin !== null) return null;
+  try { if (await target.revalidate() !== true) return null; } catch { return null; }
   const invocation = {
     tool,
     executablePath: target.executablePath,
@@ -90,59 +91,88 @@ function allAvailable(capabilities) {
   return Object.values(capabilities).every((capability) => capability.available);
 }
 
+export function validateAuthenticatedModelCatalog(response) {
+  if (!response || typeof response !== 'object' || Array.isArray(response) || Object.keys(response).length !== 1 || !Array.isArray(response.data)) return false;
+  const seen = new Set();
+  return response.data.every((model) => {
+    if (!hasExactKeys(model, ['id', 'object', 'owned_by']) || typeof model.id !== 'string' || model.object !== 'model' || !['codex', 'antigravity'].includes(model.owned_by) || seen.has(model.id)) return false;
+    seen.add(model.id);
+    return true;
+  });
+}
+
+function disabled(keys) {
+  return Object.fromEntries(keys.map((key) => [key, unsupported()]));
+}
+
 export async function probeRequiredCapabilities({ cliProxy, claude, cursor, configPath, run = runFixedCommand } = {}) {
-  const cliCapabilities = {
-    version: await versionCapability(run, 'cliProxy', cliProxy, 'CLIProxyAPI', BASELINES.cliProxy),
-    loginCodex: await jsonCapability(run, 'cliProxy', cliProxy, ['login', 'codex', '--json'], (value) => hasExactKeys(value, ['modes']) && Array.isArray(value.modes) && value.modes.length === 1 && value.modes[0] === 'codex'),
-    loginAntigravity: await jsonCapability(run, 'cliProxy', cliProxy, ['login', 'antigravity', '--json'], (value) => hasExactKeys(value, ['modes']) && Array.isArray(value.modes) && value.modes.length === 1 && value.modes[0] === 'antigravity'),
-    config: await jsonCapability(run, 'cliProxy', cliProxy, ['config', 'check', '--config', configPath, '--json'], (value) => hasExactKeys(value, ['configPath', 'requiredKeys']) && value.configPath === configPath && Array.isArray(value.requiredKeys) && value.requiredKeys.length === 3 && ['host', 'port', 'api-keys'].every((key) => value.requiredKeys.includes(key))),
-    models: await jsonCapability(run, 'cliProxy', cliProxy, ['models', '--json'], (value) => hasExactKeys(value, ['models']) && Array.isArray(value.models) && value.models.length >= 2 && value.models.every((model) => hasExactKeys(model, ['id', 'provider']) && typeof model.id === 'string' && ['codex', 'antigravity'].includes(model.provider)) && new Set(value.models.map((model) => model.provider)).size === 2)
-  };
+  const cliVersion = await versionCapability(run, 'cliProxy', cliProxy, 'CLIProxyAPI', BASELINES.cliProxy);
+  if (!cliVersion.available) return { ready: false, capabilities: { cliProxy: { version: cliVersion, ...disabled(['loginCodex', 'loginAntigravity', 'config', 'help']) }, claude: disabled(['version', 'model', 'plugin', 'mcp', 'environment']), cursor: cursor ? disabled(['version', 'status', 'models', 'print']) : { integration: { available: true, code: 'NOT_REQUIRED' } } } };
+  const cliHelp = await jsonCapability(run, 'cliProxy', cliProxy, ['--help', '--json'], (value) => hasExactKeys(value, ['commands', 'loginModes', 'configSelection']) && Array.isArray(value.commands) && value.commands.includes('login') && value.commands.includes('config') && Array.isArray(value.loginModes) && value.loginModes.includes('codex') && value.loginModes.includes('antigravity') && value.configSelection === true);
+  const cliCapabilities = { version: cliVersion, loginCodex: cliHelp, loginAntigravity: cliHelp, config: cliHelp, help: cliHelp };
+  if (!allAvailable(cliCapabilities)) return { ready: false, capabilities: { cliProxy: cliCapabilities, claude: disabled(['version', 'model', 'plugin', 'mcp', 'environment']), cursor: cursor ? disabled(['version', 'status', 'models', 'print']) : { integration: { available: true, code: 'NOT_REQUIRED' } } } };
+  const claudeVersion = await versionCapability(run, 'claude', claude, 'Claude Code', BASELINES.claude);
+  if (!claudeVersion.available) return { ready: false, capabilities: { cliProxy: cliCapabilities, claude: { version: claudeVersion, ...disabled(['model', 'plugin', 'mcp', 'environment']) }, cursor: cursor ? disabled(['version', 'status', 'models', 'print']) : { integration: { available: true, code: 'NOT_REQUIRED' } } } };
   const claudeCapabilities = {
-    version: await versionCapability(run, 'claude', claude, 'Claude Code', BASELINES.claude),
+    version: claudeVersion,
     model: await jsonCapability(run, 'claude', claude, ['model', '--help', '--json'], (value) => hasExactKeys(value, ['modelSelection']) && value.modelSelection === true),
     plugin: await jsonCapability(run, 'claude', claude, ['plugin', '--help', '--json'], (value) => hasExactKeys(value, ['plugins']) && value.plugins === true),
     mcp: await jsonCapability(run, 'claude', claude, ['mcp', '--help', '--json'], (value) => hasExactKeys(value, ['mcp']) && value.mcp === true),
     environment: await jsonCapability(run, 'claude', claude, ['environment', '--json'], (value) => hasExactKeys(value, ['gatewayVariables']) && Array.isArray(value.gatewayVariables) && value.gatewayVariables.length === 2 && value.gatewayVariables.includes('ANTHROPIC_BASE_URL') && value.gatewayVariables.includes('ANTHROPIC_AUTH_TOKEN'))
   };
+  if (!allAvailable(claudeCapabilities)) return { ready: false, capabilities: { cliProxy: cliCapabilities, claude: claudeCapabilities, cursor: cursor ? disabled(['version', 'status', 'models', 'print']) : { integration: { available: true, code: 'NOT_REQUIRED' } } } };
   const cursorCapabilities = cursor ? {
     version: await versionCapability(run, 'cursor', cursor, 'Cursor Agent', '0.0.0'),
     status: await jsonCapability(run, 'cursor', cursor, ['status', '--json'], (value) => hasExactKeys(value, ['authenticated']) && typeof value.authenticated === 'boolean'),
     models: await jsonCapability(run, 'cursor', cursor, ['models', '--json'], (value) => hasExactKeys(value, ['models']) && Array.isArray(value.models) && value.models.every((model) => hasExactKeys(model, ['id']) && typeof model.id === 'string')),
-    print: await jsonCapability(run, 'cursor', cursor, ['print', '--json', '--mode', 'ask', '--sandbox', 'read-only'], (value) => hasExactKeys(value, ['type']) && value.type === 'result', { stdin: CURSOR_PROMPT })
+    print: await jsonCapability(run, 'cursor', cursor, ['print', '--json', '--mode', 'ask', '--sandbox', 'read-only'], (value) => hasExactKeys(value, ['type', 'echo']) && value.type === 'result' && value.echo === CURSOR_PROMPT, { stdin: CURSOR_PROMPT })
   } : { integration: { available: true, code: 'NOT_REQUIRED' } };
-  return {
-    ready: allAvailable(cliCapabilities) && allAvailable(claudeCapabilities),
-    capabilities: { cliProxy: cliCapabilities, claude: claudeCapabilities, cursor: cursorCapabilities }
-  };
+  return { ready: true, capabilities: { cliProxy: cliCapabilities, claude: claudeCapabilities, cursor: cursorCapabilities } };
 }
-
 export function runFixedCommand({ executablePath, args, shell, stdin, env, timeoutMs, maxStdoutBytes, maxStderrBytes, signal }) {
   return new Promise((resolve) => {
-    if (shell !== false || !isSafeIdentity({ executablePath, argsPrefix: [], identity: executablePath }) || !Array.isArray(args) || !args.every((arg) => typeof arg === 'string')) {
+    if (shell !== false || !isSafeIdentity({ executablePath, argsPrefix: [], identity: executablePath }) || !Array.isArray(args) || !args.every((arg) => typeof arg === 'string') || !Number.isSafeInteger(timeoutMs) || timeoutMs < 1) {
       resolve({ code: -1, stdout: '', stderr: 'invalid invocation' });
       return;
     }
-    const child = spawn(executablePath, args, { shell: false, env: { ...env }, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
+    const child = spawn(executablePath, args, { shell: false, env: { ...env }, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true, detached: process.platform !== 'win32' });
     let stdout = Buffer.alloc(0);
     let stderr = Buffer.alloc(0);
     let settled = false;
-    let timer;
+    let hardTimer;
+    let terminalTimer;
     const finish = (code) => {
       if (settled) return;
       settled = true;
-      clearTimeout(timer);
-      signal?.removeEventListener('abort', terminate);
+      clearTimeout(hardTimer);
+      clearTimeout(terminalTimer);
+      signal?.removeEventListener('abort', stop);
       resolve({ code, stdout: stdout.toString('utf8'), stderr: stderr.toString('utf8') });
     };
-    const terminate = () => child.kill();
-    const append = (current, chunk, limit) => Buffer.concat([current, chunk]).subarray(0, limit + 1);
-    child.stdout.on('data', (chunk) => { stdout = append(stdout, chunk, maxStdoutBytes); if (stdout.length > maxStdoutBytes) terminate(); });
-    child.stderr.on('data', (chunk) => { stderr = append(stderr, chunk, maxStderrBytes); if (stderr.length > maxStderrBytes) terminate(); });
+    const killTree = (signalName) => {
+      try {
+        if (process.platform !== 'win32' && child.pid) process.kill(-child.pid, signalName);
+        else child.kill(signalName);
+      } catch { /* child already exited */ }
+    };
+    const stop = () => {
+      killTree('SIGTERM');
+      clearTimeout(hardTimer);
+      hardTimer = setTimeout(() => killTree('SIGKILL'), 100);
+      clearTimeout(terminalTimer);
+      terminalTimer = setTimeout(() => finish(-1), 250);
+    };
+    const append = (current, chunk, limit) => {
+      const combined = Buffer.concat([current, chunk]);
+      return { bytes: combined.subarray(0, limit), overflow: combined.length > limit };
+    };
+    child.stdout.on('data', (chunk) => { const next = append(stdout, chunk, maxStdoutBytes); stdout = next.bytes; if (next.overflow) stop(); });
+    child.stderr.on('data', (chunk) => { const next = append(stderr, chunk, maxStderrBytes); stderr = next.bytes; if (next.overflow) stop(); });
+    child.stdin.once('error', stop);
     child.once('error', () => finish(-1));
     child.once('close', (code) => finish(code ?? -1));
-    timer = setTimeout(terminate, timeoutMs);
-    if (signal?.aborted) terminate(); else signal?.addEventListener('abort', terminate, { once: true });
-    if (stdin === null) child.stdin.end(); else child.stdin.end(stdin);
+    terminalTimer = setTimeout(stop, timeoutMs);
+    if (signal?.aborted) stop(); else signal?.addEventListener('abort', stop, { once: true });
+    try { if (stdin === null) child.stdin.end(); else child.stdin.end(stdin); } catch { stop(); }
   });
 }

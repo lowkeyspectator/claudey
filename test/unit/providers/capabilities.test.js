@@ -1,11 +1,11 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { probeRequiredCapabilities } from '../../../src/providers/capabilities.js';
+import { probeRequiredCapabilities, runFixedCommand, validateAuthenticatedModelCatalog } from '../../../src/providers/capabilities.js';
 
-const CLI = { executablePath: '/fixtures/fake-cliproxy', argsPrefix: [], identity: '/fixtures/fake-cliproxy' };
-const CLAUDE = { executablePath: '/fixtures/fake-claude', argsPrefix: [], identity: '/fixtures/fake-claude' };
-const CURSOR = { executablePath: '/fixtures/fake-cursor-agent', argsPrefix: [], identity: '/fixtures/fake-cursor-agent' };
+const CLI = { executablePath: '/fixtures/fake-cliproxy', argsPrefix: [], identity: '/fixtures/fake-cliproxy', revalidate: async () => true };
+const CLAUDE = { executablePath: '/fixtures/fake-claude', argsPrefix: [], identity: '/fixtures/fake-claude', revalidate: async () => true };
+const CURSOR = { executablePath: '/fixtures/fake-cursor-agent', argsPrefix: [], identity: '/fixtures/fake-cursor-agent', revalidate: async () => true };
 
 function successfulRunner(calls, versions = {}) {
   return async (invocation) => {
@@ -17,7 +17,7 @@ function successfulRunner(calls, versions = {}) {
         'login codex --json': '{"modes":["codex"]}\n',
         'login antigravity --json': '{"modes":["antigravity"]}\n',
         'config check --config /private/manager/config.yaml --json': '{"configPath":"/private/manager/config.yaml","requiredKeys":["host","port","api-keys"]}\n',
-        'models --json': '{"models":[{"id":"gpt","provider":"codex"},{"id":"gemini","provider":"antigravity"}]}\n'
+        '--help --json': '{"commands":["login","config"],"loginModes":["codex","antigravity"],"configSelection":true}\n'
       },
       claude: {
         '--version': `Claude Code ${versions.claude ?? '2.1.229'}\n`,
@@ -30,7 +30,7 @@ function successfulRunner(calls, versions = {}) {
         '--version': 'Cursor Agent 1.0.0\n',
         'status --json': '{"authenticated":true}\n',
         'models --json': '{"models":[{"id":"cursor-model"}]}\n',
-        'print --json --mode ask --sandbox read-only': '{"type":"result"}\n'
+        'print --json --mode ask --sandbox read-only': '{"type":"result","echo":"Reply with exactly OK."}\n'
       }
     };
     return { code: 0, stdout: responses[invocation.tool][key], stderr: '' };
@@ -42,20 +42,18 @@ test('probes required baseline CLIProxyAPI and Claude capabilities with fixed ex
   const result = await probeRequiredCapabilities({ cliProxy: CLI, claude: CLAUDE, configPath: '/private/manager/config.yaml', run: successfulRunner(calls) });
 
   assert.equal(result.ready, true);
-  assert.equal(result.capabilities.cliProxy.models.code, 'AVAILABLE');
+  assert.equal(result.capabilities.cliProxy.help.code, 'AVAILABLE');
   assert.equal(result.capabilities.claude.environment.code, 'AVAILABLE');
-  assert.deepEqual(calls.map(({ tool, executablePath, args, shell, stdin, env, timeoutMs, maxStdoutBytes, maxStderrBytes }) => ({ tool, executablePath, args, shell, stdin, env, timeoutMs, maxStdoutBytes, maxStderrBytes })), [
-    { tool: 'cliProxy', executablePath: CLI.executablePath, args: ['--version'], shell: false, stdin: null, env: {}, timeoutMs: 3_000, maxStdoutBytes: 16_384, maxStderrBytes: 16_384 },
-    { tool: 'cliProxy', executablePath: CLI.executablePath, args: ['login', 'codex', '--json'], shell: false, stdin: null, env: {}, timeoutMs: 3_000, maxStdoutBytes: 16_384, maxStderrBytes: 16_384 },
-    { tool: 'cliProxy', executablePath: CLI.executablePath, args: ['login', 'antigravity', '--json'], shell: false, stdin: null, env: {}, timeoutMs: 3_000, maxStdoutBytes: 16_384, maxStderrBytes: 16_384 },
-    { tool: 'cliProxy', executablePath: CLI.executablePath, args: ['config', 'check', '--config', '/private/manager/config.yaml', '--json'], shell: false, stdin: null, env: {}, timeoutMs: 3_000, maxStdoutBytes: 16_384, maxStderrBytes: 16_384 },
-    { tool: 'cliProxy', executablePath: CLI.executablePath, args: ['models', '--json'], shell: false, stdin: null, env: {}, timeoutMs: 3_000, maxStdoutBytes: 16_384, maxStderrBytes: 16_384 },
-    { tool: 'claude', executablePath: CLAUDE.executablePath, args: ['--version'], shell: false, stdin: null, env: {}, timeoutMs: 3_000, maxStdoutBytes: 16_384, maxStderrBytes: 16_384 },
-    { tool: 'claude', executablePath: CLAUDE.executablePath, args: ['model', '--help', '--json'], shell: false, stdin: null, env: {}, timeoutMs: 3_000, maxStdoutBytes: 16_384, maxStderrBytes: 16_384 },
-    { tool: 'claude', executablePath: CLAUDE.executablePath, args: ['plugin', '--help', '--json'], shell: false, stdin: null, env: {}, timeoutMs: 3_000, maxStdoutBytes: 16_384, maxStderrBytes: 16_384 },
-    { tool: 'claude', executablePath: CLAUDE.executablePath, args: ['mcp', '--help', '--json'], shell: false, stdin: null, env: {}, timeoutMs: 3_000, maxStdoutBytes: 16_384, maxStderrBytes: 16_384 },
-    { tool: 'claude', executablePath: CLAUDE.executablePath, args: ['environment', '--json'], shell: false, stdin: null, env: {}, timeoutMs: 3_000, maxStdoutBytes: 16_384, maxStderrBytes: 16_384 }
+  assert.deepEqual(calls.map(({ args, shell, stdin, env }) => ({ args, shell, stdin, env })), [
+    { args: ['--version'], shell: false, stdin: null, env: {} },
+    { args: ['--help', '--json'], shell: false, stdin: null, env: {} },
+    { args: ['--version'], shell: false, stdin: null, env: {} },
+    { args: ['model', '--help', '--json'], shell: false, stdin: null, env: {} },
+    { args: ['plugin', '--help', '--json'], shell: false, stdin: null, env: {} },
+    { args: ['mcp', '--help', '--json'], shell: false, stdin: null, env: {} },
+    { args: ['environment', '--json'], shell: false, stdin: null, env: {} }
   ]);
+  assert.equal(calls.some(({ args }) => args[0] === 'login' && !args.includes('--help')), false);
 });
 
 test('refuses older versions and accepts newer versions only after every required capability succeeds', async () => {
@@ -67,7 +65,7 @@ test('refuses older versions and accepts newer versions only after every require
   const calls = [];
   const newer = await probeRequiredCapabilities({ cliProxy: CLI, claude: CLAUDE, configPath: '/private/manager/config.yaml', run: successfulRunner(calls, { cliProxy: '7.2.131', claude: '2.2.0' }) });
   assert.equal(newer.ready, true);
-  assert.equal(calls.length, 10);
+  assert.equal(calls.length, 7);
 });
 
 test('fails closed for spoofed, multiline, oversized, timeout, stderr, nonzero, and confused model output', async () => {
@@ -112,4 +110,33 @@ test('keeps Cursor optional and disables only the malformed capability while usi
   assert.equal(malformed.ready, true);
   assert.equal(malformed.capabilities.cursor.models.code, 'CAPABILITY_UNSUPPORTED');
   assert.equal(malformed.capabilities.cursor.status.code, 'AVAILABLE');
+});
+
+test('does not run side-effecting commands and short-circuits every later probe after an unsupported version', async () => {
+  const calls = [];
+  const result = await probeRequiredCapabilities({
+    cliProxy: CLI,
+    claude: CLAUDE,
+    configPath: '/private/manager/config.yaml',
+    run: async (invocation) => {
+      calls.push(invocation.args);
+      return { code: 0, stdout: 'CLIProxyAPI 7.2.129\n', stderr: '' };
+    }
+  });
+  assert.equal(result.ready, false);
+  assert.deepEqual(calls, [['--version']]);
+});
+
+test('bounds real child output at the exact cap and validates authenticated catalogs without probing a network', async () => {
+  const output = await runFixedCommand({ executablePath: process.execPath, args: ['-e', 'process.stdout.write("x".repeat(64))'], shell: false, stdin: null, env: {}, timeoutMs: 1_000, maxStdoutBytes: 16, maxStderrBytes: 16 });
+  assert.ok(Buffer.byteLength(output.stdout) <= 16);
+  assert.equal(validateAuthenticatedModelCatalog({ data: [] }), true);
+  assert.equal(validateAuthenticatedModelCatalog({ data: [{ id: 'gpt', object: 'model', owned_by: 'codex' }, { id: 'gpt', object: 'model', owned_by: 'codex' }] }), false);
+  assert.equal(validateAuthenticatedModelCatalog({ data: [{ id: 'gpt', object: 'model', owned_by: 'unknown', extra: true }] }), false);
+});
+test('does not spawn when identity revalidation fails', async () => {
+  let called = false;
+  const result = await probeRequiredCapabilities({ cliProxy: { ...CLI, revalidate: async () => false }, claude: CLAUDE, run: async () => { called = true; return { code: 0, stdout: '', stderr: '' }; } });
+  assert.equal(result.ready, false);
+  assert.equal(called, false);
 });

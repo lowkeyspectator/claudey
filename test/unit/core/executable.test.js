@@ -11,6 +11,11 @@ function native(path = CLAUDE_EXE) {
   return { path, canonicalPath: path, type: 'native', isLink: false };
 }
 
+
+function checked(input) {
+  return resolveVerifiedExecutable({ ...input, adapter: { inspect: (path) => input.candidates.find((candidate) => candidate.path === path) } });
+}
+
 function npmShim(overrides = {}) {
   return {
     path: 'C:\\Users\\person\\AppData\\Roaming\\npm\\claude.cmd',
@@ -25,12 +30,12 @@ function npmShim(overrides = {}) {
 }
 
 test('prefers one verified native Windows executable and returns its canonical absolute identity', () => {
-  const result = resolveVerifiedExecutable({ command: 'claude', platform: 'win32', candidates: [npmShim(), native()] });
+  const result = checked({ command: 'claude', platform: 'win32', candidates: [npmShim(), native()] });
   assert.deepEqual(result, { kind: 'native', executablePath: CLAUDE_EXE, argsPrefix: [], identity: CLAUDE_EXE });
 });
 
 test('structurally resolves only the known Claude npm shim into a verified Node entry point', () => {
-  const result = resolveVerifiedExecutable({ command: 'claude', platform: 'win32', candidates: [npmShim()] });
+  const result = checked({ command: 'claude', platform: 'win32', candidates: [npmShim()] });
   assert.deepEqual(result, {
     kind: 'node-entry', executablePath: NODE_EXE, argsPrefix: [CLAUDE_ENTRY], identity: `${NODE_EXE}\u0000${CLAUDE_ENTRY}`
   });
@@ -47,13 +52,13 @@ test('rejects hostile paths, reparse points, relative identities, ambiguous alia
 
   for (const candidates of unsafeCandidates) {
     assert.throws(
-      () => resolveVerifiedExecutable({ command: 'claude', platform: 'win32', candidates: Array.isArray(candidates) ? candidates : [candidates] }),
+      () => checked({ command: 'claude', platform: 'win32', candidates: Array.isArray(candidates) ? candidates : [candidates] }),
       (error) => error.code === 'PREREQUISITE_MISSING'
     );
   }
 
   assert.throws(
-    () => resolveVerifiedExecutable({ command: 'claude', platform: 'win32', candidates: [native()], expectedIdentity: 'C:\\Other\\claude.exe' }),
+    () => checked({ command: 'claude', platform: 'win32', candidates: [native()], expectedIdentity: 'C:\\Other\\claude.exe' }),
     (error) => error.code === 'PROCESS_IDENTITY_MISMATCH'
   );
 });
@@ -68,8 +73,12 @@ test('rejects unknown command shims and npm shims with quoted extras, foreign en
     npmShim({ node: { path: 'node.exe', canonicalPath: 'node.exe', type: 'native', isLink: false } })
   ]) {
     assert.throws(
-      () => resolveVerifiedExecutable({ command: 'claude', platform: 'win32', candidates: [candidate] }),
+      () => checked({ command: 'claude', platform: 'win32', candidates: [candidate] }),
       (error) => error.code === 'PREREQUISITE_MISSING'
     );
   }
+});
+
+test('requires filesystem inspection rather than trusting a caller supplied native identity', () => {
+  assert.throws(() => resolveVerifiedExecutable({ command: 'claude', platform: 'win32', candidates: [native()] }), (error) => error.code === 'PREREQUISITE_MISSING');
 });

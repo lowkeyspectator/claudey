@@ -78,3 +78,12 @@ test('requires the fixed Windows PowerShell identity and an exact helper respons
     assert.equal(result.capabilities.powerShell.code, 'PREREQUISITE_MISSING');
   }
 });
+
+test('does not let a caller expand the trusted Node lines and requires Windows PowerShell 5.1 plus a canonical Windows Git identity', () => {
+  const expanded = assessPrerequisites(input({ nodeVersion: '28.0.0', supportedNodeMajors: [22, 24, 26, 28] }));
+  assert.equal(expanded.capabilities.node.code, 'PREREQUISITE_MISSING');
+  const oldPowerShell = assessPrerequisites(input({ platform: 'win32', tar: undefined, powerShell: { ...WINDOWS_POWERSHELL, response: { schemaVersion: 1, ok: true, result: { version: '5.0' } } } }));
+  assert.equal(oldPowerShell.capabilities.powerShell.code, 'PREREQUISITE_MISSING');
+  const windowsGit = assessPrerequisites(input({ platform: 'win32', tar: undefined, powerShell: WINDOWS_POWERSHELL, cursorWorktreeRequested: true, git: { path: 'C:\\Program Files\\Git\\cmd\\git.exe', canonicalPath: 'C:\\Program Files\\Git\\cmd\\git.exe', isLink: false } }));
+  assert.equal(windowsGit.capabilities.git.code, 'AVAILABLE');
+});

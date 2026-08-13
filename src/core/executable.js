@@ -31,13 +31,15 @@ function resolveNpmShim(command, candidate, platform) {
   return { kind: 'node-entry', executablePath: candidate.node.canonicalPath, argsPrefix: [candidate.entryPath], identity: `${candidate.node.canonicalPath}\u0000${candidate.entryPath}` };
 }
 
-export function resolveVerifiedExecutable({ command, platform, candidates, expectedIdentity } = {}) {
-  if (typeof command !== 'string' || !Array.isArray(candidates) || candidates.length === 0) refusal('Executable candidate is required');
-  const nativeCandidates = candidates.filter((candidate) => candidate?.type === 'native');
+export function resolveVerifiedExecutable({ command, platform, candidates, expectedIdentity, adapter } = {}) {
+  if (typeof command !== 'string' || !Array.isArray(candidates) || candidates.length === 0 || !adapter || typeof adapter.inspect !== 'function') refusal('Executable candidate is required');
+  const inspected = candidates.map((candidate) => adapter.inspect(candidate?.path));
+  if (inspected.some((candidate) => !candidate || typeof candidate !== 'object')) refusal('Executable inspection failed');
+  const nativeCandidates = inspected.filter((candidate) => candidate?.type === 'native');
   if (nativeCandidates.length > 1 || nativeCandidates.some((candidate) => !isSafeNative(candidate, platform))) refusal('Executable identity is ambiguous or unsafe');
   const result = nativeCandidates.length === 1
     ? { kind: 'native', executablePath: nativeCandidates[0].canonicalPath, argsPrefix: [], identity: nativeCandidates[0].canonicalPath }
-    : candidates.length === 1 ? resolveNpmShim(command, candidates[0], platform) : refusal('Executable identity is ambiguous or unsafe');
+    : inspected.length === 1 ? resolveNpmShim(command, inspected[0], platform) : refusal('Executable identity is ambiguous or unsafe');
   if (expectedIdentity !== undefined && result.identity !== expectedIdentity) throw new ClaudexError('PROCESS_IDENTITY_MISMATCH', 'Executable identity changed');
   return result;
 }
