@@ -157,6 +157,18 @@ test('builds and parses the strict schema-1 Windows helper protocol', async () =
   );
 });
 
+function isDaclVerifier(args) {
+  return args.includes('-File') && args[args.indexOf('-File') + 1].endsWith('request-dacl-helper.ps1');
+}
+
+function verifierResponse(args) {
+  return successfulHelperResponse({
+    requestId: args[args.indexOf('-RequestId') + 1],
+    path: args[args.indexOf('-Path') + 1],
+    expectedType: args[args.indexOf('-ExpectedType') + 1],
+    currentUserSid: args[args.indexOf('-CurrentUserSid') + 1]
+  });
+}
 function successfulHelperResponse(request) {
   return JSON.stringify({
     ok: true, schemaVersion: 1, requestId: request.requestId,
@@ -187,24 +199,25 @@ test('uses only canonical fixed system executables and the bundled helper identi
     spawn: async (command, args, options) => {
       launches.push({ command, args, options });
       if (command.endsWith('\\icacls.exe')) return { code: 0, stdout: 'processed', stderr: '' };
+      if (isDaclVerifier(args)) return { code: 0, stdout: verifierResponse(args), stderr: '' };
       const requestPath = args.at(-1);
       assert.deepEqual(JSON.parse(await fs.readFile(requestPath, 'utf8')), JSON.parse(buildSecurityHelperRequest(request)));
       return { code: 0, stderr: '', stdout: successfulHelperResponse(request) };
     }
   });
   assert.equal(response.ok, true);
-  assert.equal(launches.length, 3);
+  assert.equal(launches.length, 5);
   assert.equal(launches[0].command, 'C:\\Windows\\System32\\icacls.exe');
-  assert.equal(launches[1].command, 'C:\\Windows\\System32\\icacls.exe');
-  assert.equal(launches[2].command, 'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe');
-  assert.deepEqual(launches[2].args.slice(0, -1), [
+  assert.equal(launches[2].command, 'C:\\Windows\\System32\\icacls.exe');
+  assert.equal(launches[4].command, 'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe');
+  assert.deepEqual(launches[4].args.slice(0, -1), [
     '-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass',
     '-File', path.resolve('scripts/windows/security-helper.ps1'), '-RequestPath'
   ]);
-  assert.equal(launches[2].options.shell, false);
-  assert.equal(launches[2].options.input, undefined);
-  assert.notEqual(path.dirname(launches[2].args.at(-1)), 'C:\\attacker\\requests');
-  await assert.rejects(() => fs.access(path.dirname(launches[2].args.at(-1))), { code: 'ENOENT' });
+  assert.equal(launches[4].options.shell, false);
+  assert.equal(launches[4].options.input, undefined);
+  assert.notEqual(path.dirname(launches[4].args.at(-1)), 'C:\\attacker\\requests');
+  await assert.rejects(() => fs.access(path.dirname(launches[4].args.at(-1))), { code: 'ENOENT' });
 });
 
 test('fails closed when either helper output stream exceeds its cap', async () => {
@@ -215,16 +228,18 @@ test('fails closed when either helper output stream exceeds its cap', async () =
       path: 'C:\\managed\\state', expectedType: 'directory', currentUserSid: 'S-1-5-21-1-2-3-4'
     }
   }, {
-    spawn: async (command) => command.endsWith('\\icacls.exe')
+    spawn: async (command, args) => command.endsWith('\\icacls.exe')
       ? { code: 0, stdout: '', stderr: '' }
-      : { code: 0, stdout: '{}', stderr: 'too much diagnostic output' }
+      : isDaclVerifier(args)
+        ? { code: 0, stdout: verifierResponse(args), stderr: '' }
+        : { code: 0, stdout: '{}', stderr: 'too much diagnostic output' }
   }), (error) => error?.code === 'CAPABILITY_UNSUPPORTED');
 });
 function fakeProtectedRun(request, extraDeps = {}) {
   return runWindowsSecurityHelper({ request, timeoutMs: 50 }, {
-    spawn: async (command) => command.endsWith('\\icacls.exe')
+    spawn: async (command, args) => command.endsWith('\\icacls.exe')
       ? { code: 0, stdout: '', stderr: '' }
-      : { code: 0, stdout: successfulHelperResponse(request), stderr: '' },
+      : { code: 0, stdout: isDaclVerifier(args) ? verifierResponse(args) : successfulHelperResponse(request), stderr: '' },
     ...extraDeps
   });
 }
@@ -238,6 +253,7 @@ test('assertProtected derives the bundled Windows helper without a caller path',
     spawn: async (command, args) => {
       launches.push({ command, args });
       if (command.endsWith('\\icacls.exe')) return { code: 0, stdout: '', stderr: '' };
+      if (isDaclVerifier(args)) return { code: 0, stdout: verifierResponse(args), stderr: '' };
       const request = JSON.parse(await fs.readFile(args.at(-1), 'utf8'));
       return { code: 0, stdout: successfulHelperResponse(request), stderr: '' };
     }
@@ -421,12 +437,12 @@ test('cleans the exact request file and directory when file DACL protection fail
   let extras = [];
   try {
     await assert.rejects(() => runWindowsSecurityHelper({ request }, {
-      spawn: async (command) => {
+      spawn: async (command, args) => {
         if (command.endsWith('\\icacls.exe')) {
           icaclsCalls += 1;
           return { code: icaclsCalls === 2 ? 1 : 0, stdout: '', stderr: '' };
         }
-        return { code: 0, stdout: successfulHelperResponse(request), stderr: '' };
+        return { code: 0, stdout: isDaclVerifier(args) ? verifierResponse(args) : successfulHelperResponse(request), stderr: '' };
       }
     }), (error) => error?.code === 'CAPABILITY_UNSUPPORTED');
     const after = await listRequestDirectories();
@@ -463,4 +479,44 @@ test('escalates a timed-out child once and still rejects only after close', asyn
   await assert.rejects(() => runWindowsSecurityHelper({ request, timeoutMs: 20 }, { spawnChild }),
     (error) => error?.code === 'CAPABILITY_UNSUPPORTED');
   assert.deepEqual(signals, ['TERM', 'SIGKILL']);
+});
+test('bounds unconfirmed termination and retains protected request storage', async () => {
+  const request = {
+    requestId: '19191919-1919-4191-8191-191919191919', operation: 'inspect',
+    path: 'C:\\managed\\state', expectedType: 'directory', currentUserSid: 'S-1-5-21-1-2-3-4'
+  };
+  const signals = [];
+  let retainedDirectory;
+  const spawnChild = (command, args) => {
+    const child = new EventEmitter();
+    child.stdout = new PassThrough();
+    child.stderr = new PassThrough();
+    child.kill = (signal) => { signals.push(signal ?? 'TERM'); return true; };
+    if (command.endsWith('\\icacls.exe')) {
+      setImmediate(() => child.emit('close', 0));
+    } else if (args.includes('-File') && args[args.indexOf('-File') + 1].endsWith('request-dacl-helper.ps1')) {
+      const target = args[args.indexOf('-Path') + 1];
+      const expectedType = args[args.indexOf('-ExpectedType') + 1];
+      const currentUserSid = args[args.indexOf('-CurrentUserSid') + 1];
+      const requestId = args[args.indexOf('-RequestId') + 1];
+      child.stdout.end(successfulHelperResponse({ requestId, path: target, expectedType, currentUserSid }));
+      setImmediate(() => child.emit('close', 0));
+    } else {
+      retainedDirectory = path.dirname(args.at(-1));
+    }
+    return child;
+  };
+  const outcome = runWindowsSecurityHelper({ request, timeoutMs: 20, terminationGraceMs: 20, terminationDeadlineMs: 40 }, { spawnChild });
+  const bounded = Promise.race([
+    outcome,
+    new Promise((resolve) => setTimeout(() => resolve('UNBOUNDED'), 150))
+  ]);
+  try {
+    await assert.rejects(() => bounded,
+      (error) => error?.code === 'CAPABILITY_UNSUPPORTED' && error?.details?.requestStorageRetained === true);
+    assert.deepEqual(signals, ['TERM', 'SIGKILL']);
+    assert.equal(JSON.parse(await fs.readFile(path.join(retainedDirectory, 'request.json'), 'utf8')).requestId, request.requestId);
+  } finally {
+    if (retainedDirectory) await fs.rm(retainedDirectory, { recursive: true, force: true });
+  }
 });

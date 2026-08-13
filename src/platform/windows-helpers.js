@@ -1,4 +1,5 @@
 import { spawn as spawnChild } from 'node:child_process';
+import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -11,20 +12,22 @@ const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}
 const fixedPowerShellPath = 'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe';
 const fixedIcaclsPath = 'C:\\Windows\\System32\\icacls.exe';
 const bundledHelperPath = fileURLToPath(new URL('../../scripts/windows/security-helper.ps1', import.meta.url));
+const bundledDaclHelperPath = fileURLToPath(new URL('../../scripts/windows/request-dacl-helper.ps1', import.meta.url));
 const defaultTimeoutMs = 120_000;
 const defaultOutputLimitBytes = 64 * 1024;
 const defaultTerminationGraceMs = 250;
+const defaultTerminationDeadlineMs = 2_000;
 
-function fail(code, message, cause) {
-  return new ClaudexError(code, message, cause ? { cause } : undefined);
+function fail(code, message, cause, details) {
+  return new ClaudexError(code, message, { ...(cause ? { cause } : {}), ...(details ? { details } : {}) });
 }
 
 function safetyRefusal(message, cause) {
   return fail('SAFETY_REFUSAL', message, cause);
 }
 
-function capabilityUnsupported(message, cause) {
-  return fail('CAPABILITY_UNSUPPORTED', message, cause);
+function capabilityUnsupported(message, cause, details) {
+  return fail('CAPABILITY_UNSUPPORTED', message, cause, details);
 }
 
 function prerequisiteMissing(message, cause) {
@@ -171,6 +174,7 @@ async function verifyGeneratedIdentity(target, identity, { type, fsApi, parent }
 function defaultSpawn(command, args, {
   shell, windowsHide, timeoutMs, maxOutputBytes,
   terminationGraceMs = defaultTerminationGraceMs,
+  terminationDeadlineMs = defaultTerminationDeadlineMs,
   spawnChildApi = spawnChild
 }) {
   return new Promise((resolve, reject) => {
@@ -186,10 +190,12 @@ function defaultSpawn(command, args, {
     let terminationReason;
     let timeout;
     let escalation;
+    let terminalDeadline;
     let settled = false;
     const clearTimers = () => {
       clearTimeout(timeout);
       clearTimeout(escalation);
+      clearTimeout(terminalDeadline);
     };
     const finish = (callback, value) => {
       if (settled) return;
@@ -201,7 +207,10 @@ function defaultSpawn(command, args, {
       if (terminationReason) return;
       terminationReason = message;
       child.kill();
-      escalation = setTimeout(() => child.kill('SIGKILL'), terminationGraceMs);
+      escalation = setTimeout(() => {
+        child.kill('SIGKILL');
+        terminalDeadline = setTimeout(() => finish(reject, capabilityUnsupported(`${message} Child exit could not be confirmed.`, undefined, { exitUnconfirmed: true })), terminationDeadlineMs);
+      }, terminationGraceMs);
     };
     timeout = setTimeout(() => terminate('Windows helper timed out.'), timeoutMs);
     child.stdout.setEncoding('utf8');
@@ -248,6 +257,24 @@ async function protectRequestPath(target, { directory, currentUserSid, icaclsPat
   if (result.code !== 0) throw capabilityUnsupported('Windows request DACL protection failed.');
 }
 
+async function verifyPrivateDacl(target, expectedType, {
+  currentUserSid, powershellPath, daclHelperPath, limits, deps
+}) {
+  const requestId = crypto.randomUUID();
+  const result = await runProcess(powershellPath, [
+    '-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass',
+    '-File', daclHelperPath,
+    '-Path', target,
+    '-ExpectedType', expectedType,
+    '-CurrentUserSid', currentUserSid,
+    '-RequestId', requestId
+  ], limits, deps);
+  const response = parseSecurityHelperResponse(result.stdout, { requestId });
+  if (result.code !== 0 || response.ok === false) {
+    throw safetyRefusal('Private request DACL verification failed.');
+  }
+  return assertWindowsDacl(response.result, { expectedType, currentUserSid });
+}
 async function confirmAbsent(target, fsApi) {
   try {
     await fsApi.lstat(target);
@@ -272,7 +299,7 @@ async function cleanupRequestStorage(storage, fsApi) {
   await confirmAbsent(storage.directoryPath, fsApi);
 }
 
-async function createProtectedRequest(input, { currentUserSid, icaclsPath, limits, deps }) {
+async function createProtectedRequest(input, { currentUserSid, icaclsPath, powershellPath, daclHelperPath, limits, deps }) {
   const fsApi = deps.fsApi ?? fs;
   const storage = {};
   let handle;
@@ -286,7 +313,9 @@ async function createProtectedRequest(input, { currentUserSid, icaclsPath, limit
     }
     storage.directoryPath = canonicalDirectory;
     await protectRequestPath(storage.directoryPath, { directory: true, currentUserSid, icaclsPath, limits, deps });
+    await deps.afterDirectoryProtection?.({ directoryPath: storage.directoryPath });
     await verifyGeneratedIdentity(storage.directoryPath, storage.directoryIdentity, { type: 'directory', fsApi });
+    await verifyPrivateDacl(storage.directoryPath, 'directory', { currentUserSid, powershellPath, daclHelperPath, limits, deps });
     storage.requestPath = path.join(storage.directoryPath, 'request.json');
     handle = await fsApi.open(storage.requestPath, 'wx');
     await handle.writeFile(input, 'utf8');
@@ -298,6 +327,7 @@ async function createProtectedRequest(input, { currentUserSid, icaclsPath, limit
     await verifyGeneratedIdentity(storage.requestPath, storage.fileIdentity, {
       type: 'file', fsApi, parent: storage.directoryPath
     });
+    await verifyPrivateDacl(storage.requestPath, 'file', { currentUserSid, powershellPath, daclHelperPath, limits, deps });
     return storage;
   } catch (error) {
     await handle?.close().catch(() => {});
@@ -308,23 +338,28 @@ async function createProtectedRequest(input, { currentUserSid, icaclsPath, limit
 export async function runWindowsSecurityHelper({
   request,
   timeoutMs = defaultTimeoutMs,
-  maxOutputBytes = defaultOutputLimitBytes
+  maxOutputBytes = defaultOutputLimitBytes,
+  terminationGraceMs = defaultTerminationGraceMs,
+  terminationDeadlineMs = defaultTerminationDeadlineMs
 }, deps = {}) {
-  if (!Number.isInteger(timeoutMs) || timeoutMs <= 0 || !Number.isInteger(maxOutputBytes) || maxOutputBytes <= 0) {
+  if (!Number.isInteger(timeoutMs) || timeoutMs <= 0 || !Number.isInteger(maxOutputBytes) || maxOutputBytes <= 0
+    || !Number.isInteger(terminationGraceMs) || terminationGraceMs <= 0
+    || !Number.isInteger(terminationDeadlineMs) || terminationDeadlineMs <= 0) {
     throw safetyRefusal('Windows helper execution limits are invalid.');
   }
   const fsApi = deps.fsApi ?? fs;
   const input = buildSecurityHelperRequest(request);
-  const limits = { shell: false, windowsHide: true, timeoutMs, maxOutputBytes };
+  const limits = { shell: false, windowsHide: true, timeoutMs, maxOutputBytes, terminationGraceMs, terminationDeadlineMs };
   const powershellPath = await verifyTrustedPath(fixedPowerShellPath, { type: 'file', fsApi });
   const icaclsPath = await verifyTrustedPath(fixedIcaclsPath, { type: 'file', fsApi });
   const helperPath = await verifyTrustedPath(bundledHelperPath, { type: 'file', fsApi });
+  const daclHelperPath = await verifyTrustedPath(bundledDaclHelperPath, { type: 'file', fsApi });
   let storage;
   let operationError;
   let response;
   try {
     storage = await createProtectedRequest(input, {
-      currentUserSid: request.currentUserSid, icaclsPath, limits, deps: { ...deps, fsApi }
+      currentUserSid: request.currentUserSid, icaclsPath, powershellPath, daclHelperPath, limits, deps: { ...deps, fsApi }
     });
     const result = await runProcess(powershellPath, [
       '-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass',
@@ -337,6 +372,10 @@ export async function runWindowsSecurityHelper({
   } catch (error) {
     operationError = error;
     storage ??= error.requestStorage;
+  }
+  if (operationError?.details?.exitUnconfirmed) {
+    operationError.details.requestStorageRetained = true;
+    throw operationError;
   }
   try {
     await deps.beforeCleanup?.({ ...storage });

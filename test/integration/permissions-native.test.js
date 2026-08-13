@@ -196,3 +196,27 @@ test('Windows helper emits one UTF-8 JSON error for malformed protected request 
     rmSync(directory, { recursive: true, force: true });
   }
 });
+test('adapter rejects a retained foreign directory ACE before writing request.json', { skip: process.platform !== 'win32' }, async () => {
+  const target = await fs.mkdtemp(path.join(os.tmpdir(), 'claudexctl-dacl-prewrite-target-'));
+  const ownerSid = execFileSync(powershellPath, ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command', '[System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value'], { encoding: 'utf8' }).trim();
+  let requestWasAbsent = false;
+  try {
+    await assert.rejects(() => runWindowsSecurityHelper({
+      request: {
+        requestId: '18181818-1818-4181-8181-181818181818', operation: 'inspect',
+        path: target, expectedType: 'directory', currentUserSid: ownerSid
+      }
+    }, {
+      afterDirectoryProtection: async ({ directoryPath }) => {
+        execFileSync(icaclsPath, [directoryPath, '/grant', '*S-1-1-0:R', '/q']);
+      },
+      beforeCleanup: async ({ directoryPath }) => {
+        await assert.rejects(() => fs.access(path.join(directoryPath, 'request.json')), { code: 'ENOENT' });
+        requestWasAbsent = true;
+      }
+    }), (error) => error?.code === 'SAFETY_REFUSAL');
+    assert.equal(requestWasAbsent, true);
+  } finally {
+    await fs.rm(target, { recursive: true, force: true });
+  }
+});
