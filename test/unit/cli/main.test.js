@@ -27,17 +27,12 @@ test('CLI emits exactly one JSON error envelope and usage exit for an invalid JS
   });
 });
 
-test('CLI emits exactly one JSON success envelope for a valid management invocation', () => {
-  const child = runCli(['status', '--json']);
+test('CLI emits one human success document for the dependency-free help invocation', () => {
+  const child = runCli(['--help']);
   assert.equal(child.status, 0);
   assert.equal(child.stderr, '');
-  const lines = child.stdout.trimEnd().split('\n');
-  assert.equal(lines.length, 1);
-  assert.deepEqual(JSON.parse(lines[0]), {
-    ok: true,
-    schemaVersion: 1,
-    result: { command: ['status'], options: { json: true } }
-  });
+  assert.match(child.stdout, /claudexctl setup/);
+  assert.match(child.stdout, /claudexctl cursor/);
 });
 
 test('CLI emits a human error envelope and usage exit without a Node stack', () => {

@@ -11,6 +11,8 @@ export function emitSuccess(result, { json = false, progress } = {}, io = proces
     return;
   }
   if (progress) io.stderr.write(line(progress));
+  if (result?.type === 'help' && typeof result.text === 'string') io.stdout.write(result.text);
+  else io.stdout.write(line(JSON.stringify(result)));
 }
 
 export function emitError(error, { json = false } = {}, io = process) {

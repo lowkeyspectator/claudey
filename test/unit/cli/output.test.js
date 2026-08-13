@@ -43,3 +43,10 @@ test('human errors present a code and next action on stderr', () => {
     'error[MODEL_NOT_FOUND]: The requested model is not currently available.\nnext: Run claudexctl models codex.\n'
   ]);
 });
+
+test('human success writes one bounded result document', () => {
+  const captured = capture();
+  emitSuccess({ operation: 'status', state: 'healthy' }, {}, captured.io);
+  assert.deepEqual(captured.stdout, ['{"operation":"status","state":"healthy"}\n']);
+  assert.deepEqual(captured.stderr, []);
+});
