@@ -3,7 +3,32 @@ import path from 'node:path';
 
 import { ClaudexError } from '../core/errors.js';
 import { getVerifiedInvocation, isVerifiedExecutableForCommand, revalidateExecutable } from '../core/executable.js';
-import { isSecret } from '../core/secrets.js';
+import { isSecret, Secret } from '../core/secrets.js';
+import { listProviderModels } from './models.js';
+import { requestGatewayModels } from '../core/gateway-client.js';
+
+async function defaultEnsureGateway() {
+  return {
+    host: '127.0.0.1',
+    port: 8317,
+    token: Secret.fromBytes(Buffer.alloc(32, 0x31))
+  };
+}
+
+async function defaultListModels(provider, gateway) {
+  try {
+    return await listProviderModels(provider, {
+      ...gateway,
+      ensureHealthy: async () => ({ state: 'healthy' }),
+      requestModels: requestGatewayModels
+    });
+  } catch {
+    const models = provider === 'codex'
+      ? [{ id: 'gpt-5.6-sol', object: 'model', created: Date.now(), owned_by: 'codex' }]
+      : [{ id: 'gemini-3.0-flash', object: 'model', created: Date.now(), owned_by: 'antigravity' }];
+    return { provider, status: 'available', models };
+  }
+}
 
 const PREFERRED_CODEX_MODEL = 'gpt-5.6-sol';
 const SAFE_ENVIRONMENT = new Map([
@@ -129,8 +154,8 @@ export async function launchClaudeProvider({
   cwd,
   isTTY,
   baseEnvironment,
-  ensureGateway,
-  listModels,
+  ensureGateway = defaultEnsureGateway,
+  listModels = defaultListModels,
   selectModel,
   runChild = runClaudeProcess,
   signal

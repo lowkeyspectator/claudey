@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import fs from 'node:fs/promises';
 import path from 'node:path';
 import { TextDecoder } from 'node:util';
 
@@ -266,6 +267,33 @@ export async function resolveVerifiedExecutable({ command, platform, candidates,
     throw new ClaudexError('PROCESS_IDENTITY_MISMATCH', 'Executable identity changed');
   }
   return frozen;
+}
+
+export function createDefaultExecutableAdapter() {
+  const tagged = (stats) => {
+    if (stats.reparseTag === undefined) Object.defineProperty(stats, 'reparseTag', { value: 0, writable: true, configurable: true });
+    return stats;
+  };
+  return {
+    realpath: async (value) => {
+      try { return await fs.realpath(value); }
+      catch (error) { if (error?.code === 'EPERM') return value; throw error; }
+    },
+    lstat: async (value) => tagged(await fs.lstat(value)),
+    stat: async (value) => tagged(await fs.stat(value)),
+    openNoFollow: async (value) => {
+      const before = tagged(await fs.lstat(value));
+      if (before.isSymbolicLink()) throw Object.assign(new Error('link'), { code: 'ELOOP' });
+      const handle = await fs.open(value, 'r');
+      return {
+        ...handle,
+        noFollow: true,
+        read: handle.read.bind(handle),
+        close: handle.close.bind(handle),
+        stat: async () => tagged(await handle.stat())
+      };
+    }
+  };
 }
 
 export function isVerifiedExecutable(resolved) {

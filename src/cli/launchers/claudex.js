@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import path from 'node:path';
 
 import { ClaudexError } from '../../core/errors.js';
-import { resolveVerifiedExecutable } from '../../core/executable.js';
+import { createDefaultExecutableAdapter, resolveVerifiedExecutable } from '../../core/executable.js';
 import { parseLauncherArgs } from '../parse.js';
 import { launchClaudeProvider } from '../../providers/claude.js';
 
@@ -34,6 +34,29 @@ function digest(bytes) {
   return createHash('sha256').update(bytes).digest('hex');
 }
 
+export function defaultClaudeCandidates(platform = process.platform, env = process.env) {
+  const candidates = [];
+  if (platform === 'win32') {
+    if (env.APPDATA) {
+      candidates.push(path.win32.join(env.APPDATA, 'npm', 'node_modules', '@anthropic-ai', 'claude-code', 'bin', 'claude.exe'));
+      candidates.push(path.win32.join(env.APPDATA, 'npm', 'claude.cmd'));
+    }
+    if (env.LOCALAPPDATA) {
+      candidates.push(path.win32.join(env.LOCALAPPDATA, 'Programs', 'claude', 'claude.exe'));
+      candidates.push(path.win32.join(env.LOCALAPPDATA, 'claudexctl', 'bin', 'claude.exe'));
+    }
+  } else {
+    if (env.HOME) {
+      candidates.push(path.posix.join(env.HOME, '.local', 'bin', 'claude'));
+      candidates.push(path.posix.join(env.HOME, '.npm-global', 'bin', 'claude'));
+      candidates.push(path.posix.join(env.HOME, '.npm-global', 'lib', 'node_modules', '@anthropic-ai', 'claude-code', 'bin', 'claude'));
+    }
+    candidates.push('/usr/local/bin/claude');
+    candidates.push('/usr/bin/claude');
+  }
+  return candidates.map((target) => ({ path: target }));
+}
+
 export async function runClaudex(argv, environment, context = {}) {
   const parsed = parseLauncherArgs(argv, environment);
   const launch = context.launch ?? launchClaudeProvider;
@@ -41,10 +64,18 @@ export async function runClaudex(argv, environment, context = {}) {
 
   let claude = context.claude;
   if (!claude && typeof context.launch !== 'function') {
-    try {
-      claude = await resolveVerifiedExecutable({ command: 'claude', platform: process.platform });
-    } catch (cause) {
-      throw new ClaudexError('PREREQUISITE_MISSING', 'A verified Claude Code executable is required.', { cause });
+    const candidates = defaultClaudeCandidates(process.platform, environment);
+    const adapter = context.adapter ?? createDefaultExecutableAdapter();
+    for (const candidate of candidates) {
+      try {
+        claude = await resolveVerifiedExecutable({ command: 'claude', platform: process.platform, candidates: [candidate], adapter });
+        if (claude) break;
+      } catch {
+        continue;
+      }
+    }
+    if (!claude) {
+      throw new ClaudexError('PREREQUISITE_MISSING', 'A verified Claude Code executable is required.');
     }
   }
 

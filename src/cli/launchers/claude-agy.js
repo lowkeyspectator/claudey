@@ -1,6 +1,7 @@
 import { ClaudexError } from '../../core/errors.js';
-import { resolveVerifiedExecutable } from '../../core/executable.js';
+import { createDefaultExecutableAdapter, resolveVerifiedExecutable } from '../../core/executable.js';
 import { parseLauncherArgs } from '../parse.js';
+import { defaultClaudeCandidates } from './claudex.js';
 import { launchClaudeProvider } from '../../providers/claude.js';
 
 export async function runClaudeAgy(argv, environment, context = {}) {
@@ -10,10 +11,18 @@ export async function runClaudeAgy(argv, environment, context = {}) {
 
   let claude = context.claude;
   if (!claude && typeof context.launch !== 'function') {
-    try {
-      claude = await resolveVerifiedExecutable({ command: 'claude', platform: process.platform });
-    } catch (cause) {
-      throw new ClaudexError('PREREQUISITE_MISSING', 'A verified Claude Code executable is required.', { cause });
+    const candidates = defaultClaudeCandidates(process.platform, environment);
+    const adapter = context.adapter ?? createDefaultExecutableAdapter();
+    for (const candidate of candidates) {
+      try {
+        claude = await resolveVerifiedExecutable({ command: 'claude', platform: process.platform, candidates: [candidate], adapter });
+        if (claude) break;
+      } catch {
+        continue;
+      }
+    }
+    if (!claude) {
+      throw new ClaudexError('PREREQUISITE_MISSING', 'A verified Claude Code executable is required.');
     }
   }
 
