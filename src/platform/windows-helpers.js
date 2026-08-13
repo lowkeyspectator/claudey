@@ -1,4 +1,6 @@
 import { spawn as spawnChild } from 'node:child_process';
+import fs from 'node:fs/promises';
+import os from 'node:os';
 import path from 'node:path';
 
 import { ClaudexError } from '../core/errors.js';
@@ -81,36 +83,115 @@ export function parseSecurityHelperResponse(stdout, { requestId } = {}) {
   throw safetyRefusal('Windows helper response has an invalid envelope.');
 }
 
-function defaultSpawn(command, args, { input, shell }) {
+const defaultTimeoutMs = 10_000;
+const defaultOutputLimitBytes = 64 * 1024;
+
+function assertBoundedText(value, name, maxOutputBytes) {
+  if (typeof value !== 'string' || Buffer.byteLength(value, 'utf8') > maxOutputBytes) {
+    throw safetyRefusal(`Windows helper ${name} exceeded its permitted output.`);
+  }
+  return value;
+}
+
+function resolvePowerShellPath(powershellPath) {
+  const defaultPath = path.win32.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
+  const candidate = powershellPath ?? defaultPath;
+  const normalized = typeof candidate === 'string' ? path.win32.normalize(candidate) : '';
+  const fixedTail = normalized.toLowerCase().endsWith('\\system32\\windowspowershell\\v1.0\\powershell.exe');
+  if (typeof candidate !== 'string' || !path.win32.isAbsolute(candidate) || /[\0\r\n]/.test(candidate) || !fixedTail) {
+    throw safetyRefusal('Windows helper PowerShell executable is invalid.');
+  }
+  return normalized;
+}
+
+async function writePrivateRequestFile(input, { fsApi = fs, requestDirectory } = {}) {
+  const directory = requestDirectory ?? os.tmpdir();
+  if (typeof directory !== 'string' || directory.length === 0 || /[\0\r\n]/.test(directory)) {
+    throw safetyRefusal('Windows helper request directory is invalid.');
+  }
+  const requestPath = path.join(directory, `.claudexctl-security-${crypto.randomUUID()}.json`);
+  let handle;
+  try {
+    handle = await fsApi.open(requestPath, 'wx', 0o600);
+    await handle.writeFile(input, 'utf8');
+    await handle.sync();
+    await handle.close();
+    handle = undefined;
+    await fsApi.chmod(requestPath, 0o600);
+    return requestPath;
+  } catch (error) {
+    await handle?.close().catch(() => {});
+    await fsApi.rm(requestPath, { force: true }).catch(() => {});
+    throw error;
+  }
+}
+
+function defaultSpawn(command, args, { shell, windowsHide, timeoutMs, maxOutputBytes }) {
   return new Promise((resolve, reject) => {
-    const child = spawnChild(command, args, { shell, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
+    const child = spawnChild(command, args, { shell, stdio: ['ignore', 'pipe', 'pipe'], windowsHide });
     let stdout = '';
     let stderr = '';
+    let settled = false;
+    const finish = (callback, value) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      callback(value);
+    };
+    const terminate = (message) => {
+      child.kill();
+      finish(reject, safetyRefusal(message));
+    };
+    const timer = setTimeout(() => terminate('Windows helper timed out.'), timeoutMs);
     child.stdout.setEncoding('utf8');
     child.stderr.setEncoding('utf8');
-    child.stdout.on('data', (chunk) => { stdout += chunk; });
-    child.stderr.on('data', (chunk) => { stderr += chunk; });
-    child.once('error', reject);
-    child.once('close', (code) => resolve({ code, stdout, stderr }));
-    child.stdin.end(input);
+    child.stdout.on('data', (chunk) => {
+      stdout += chunk;
+      if (Buffer.byteLength(stdout, 'utf8') > maxOutputBytes) terminate('Windows helper stdout exceeded its permitted output.');
+    });
+    child.stderr.on('data', (chunk) => {
+      stderr += chunk;
+      if (Buffer.byteLength(stderr, 'utf8') > maxOutputBytes) terminate('Windows helper stderr exceeded its permitted output.');
+    });
+    child.once('error', (error) => finish(reject, error));
+    child.once('close', (code) => finish(resolve, { code, stdout, stderr }));
   });
 }
 
-export async function runWindowsSecurityHelper({ helperPath, request, spawn = defaultSpawn }) {
+export async function runWindowsSecurityHelper({
+  helperPath,
+  request,
+  powershellPath,
+  requestDirectory,
+  timeoutMs = defaultTimeoutMs,
+  maxOutputBytes = defaultOutputLimitBytes,
+  spawn = defaultSpawn,
+  fsApi = fs
+}) {
   if (typeof helperPath !== 'string' || !path.win32.isAbsolute(helperPath) || /[\0\r\n]/.test(helperPath)) {
     throw safetyRefusal('Windows helper path is invalid.');
   }
-  const input = buildSecurityHelperRequest(request);
-  const result = await spawn('powershell.exe', [
-    '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', helperPath
-  ], { input, shell: false });
-  const response = parseSecurityHelperResponse(result?.stdout, { requestId: request.requestId });
-  if (result?.code !== 0 || response.ok === false) {
-    throw new ClaudexError(response.code ?? 'SAFETY_REFUSAL', response.message ?? 'Windows helper refused the operation.');
+  if (!Number.isInteger(timeoutMs) || timeoutMs <= 0 || !Number.isInteger(maxOutputBytes) || maxOutputBytes <= 0) {
+    throw safetyRefusal('Windows helper execution limits are invalid.');
   }
-  return response;
+  const input = buildSecurityHelperRequest(request);
+  const requestPath = await writePrivateRequestFile(input, { fsApi, requestDirectory });
+  try {
+    const result = await spawn(resolvePowerShellPath(powershellPath), [
+      '-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass',
+      '-File', helperPath, '-RequestPath', requestPath
+    ], { shell: false, windowsHide: true, timeoutMs, maxOutputBytes });
+    assertBoundedText(result?.stdout, 'stdout', maxOutputBytes);
+    assertBoundedText(result?.stderr, 'stderr', maxOutputBytes);
+    const response = parseSecurityHelperResponse(result.stdout, { requestId: request.requestId });
+    if (result?.code !== 0 || response.ok === false) {
+      throw new ClaudexError(response.code ?? 'SAFETY_REFUSAL', response.message ?? 'Windows helper refused the operation.');
+    }
+    return response;
+  } finally {
+    await fsApi.rm(requestPath, { force: true }).catch(() => {});
+  }
 }
-
 export function assertWindowsDacl(result, { expectedType, currentUserSid }) {
   if (result.isReparsePoint || result.type !== expectedType || !result.daclProtected || result.ownerSid !== currentUserSid) {
     throw safetyRefusal('Windows managed path protection is invalid.');

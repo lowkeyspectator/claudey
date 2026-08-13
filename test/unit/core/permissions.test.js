@@ -155,11 +155,13 @@ test('builds and parses the strict schema-1 Windows helper protocol', async () =
   );
 });
 
-test('uses a fixed no-profile Windows helper invocation and rejects unexpected helper output', async () => {
+test('rejects unexpected Windows helper output after a fixed no-stdin invocation', async (t) => {
+  const root = await tempRoot(t);
   const launches = [];
   await assert.rejects(
     () => runWindowsSecurityHelper({
-      helperPath: 'C:\\managed\\security-helper.ps1',
+      helperPath: 'C:\\managed\\security-helper.ps1', requestDirectory: root,
+      powershellPath: 'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe',
       request: {
         requestId: '11111111-1111-4111-8111-111111111111', operation: 'inspect',
         path: 'C:\\managed\\state', expectedType: 'directory', currentUserSid: 'S-1-5-21-1-2-3-4'
@@ -171,12 +173,62 @@ test('uses a fixed no-profile Windows helper invocation and rejects unexpected h
     }),
     (error) => error?.code === 'SAFETY_REFUSAL'
   );
-  assert.deepEqual(launches, [{
-    command: 'powershell.exe',
-    args: ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', 'C:\\managed\\security-helper.ps1'],
-    options: { input: buildSecurityHelperRequest({
-      requestId: '11111111-1111-4111-8111-111111111111', operation: 'inspect',
+  assert.equal(launches.length, 1);
+  assert.equal(launches[0].command, 'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe');
+  assert.deepEqual(launches[0].args.slice(0, -1), [
+    '-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass',
+    '-File', 'C:\\managed\\security-helper.ps1', '-RequestPath'
+  ]);
+  assert.equal(launches[0].options.input, undefined);
+  assert.equal(launches[0].options.shell, false);
+  assert.equal(launches[0].options.windowsHide, true);
+});
+test('writes one private request file, passes its path, and removes it after the helper exits', async (t) => {
+  const root = await tempRoot(t);
+  const request = {
+    requestId: '77777777-7777-4777-8777-777777777777', operation: 'inspect',
+    path: 'C:\\managed\\state', expectedType: 'directory', currentUserSid: 'S-1-5-21-1-2-3-4'
+  };
+  let requestPath;
+  const response = await runWindowsSecurityHelper({
+    helperPath: 'C:\\managed\\security-helper.ps1', request, requestDirectory: root,
+    powershellPath: 'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe',
+    spawn: async (command, args, options) => {
+      requestPath = args.at(-1);
+      assert.equal(command, 'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe');
+      assert.deepEqual(args.slice(0, -1), [
+        '-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass',
+        '-File', 'C:\\managed\\security-helper.ps1', '-RequestPath'
+      ]);
+      assert.equal(options.input, undefined);
+      assert.deepEqual(JSON.parse(await fs.readFile(requestPath, 'utf8')), JSON.parse(buildSecurityHelperRequest(request)));
+      return { code: 0, stderr: '', stdout: JSON.stringify({
+        ok: true, schemaVersion: 1, requestId: request.requestId,
+        result: {
+          canonicalPath: request.path, type: 'directory', isReparsePoint: false,
+          ownerSid: request.currentUserSid, daclProtected: true,
+          aces: [
+            { type: 'allow', sid: request.currentUserSid, rights: 'full-control', inherited: false },
+            { type: 'allow', sid: 'S-1-5-18', rights: 'full-control', inherited: false }
+          ]
+        }
+      }) };
+    }
+  });
+  assert.equal(response.ok, true);
+  assert.equal(path.dirname(requestPath), root);
+  await assert.rejects(() => fs.access(requestPath), { code: 'ENOENT' });
+});
+test('fails closed when either helper output stream exceeds its cap', async (t) => {
+  const root = await tempRoot(t);
+  await assert.rejects(() => runWindowsSecurityHelper({
+    helperPath: 'C:\\managed\\security-helper.ps1', requestDirectory: root,
+    powershellPath: 'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe',
+    maxOutputBytes: 8,
+    request: {
+      requestId: '88888888-8888-4888-8888-888888888888', operation: 'inspect',
       path: 'C:\\managed\\state', expectedType: 'directory', currentUserSid: 'S-1-5-21-1-2-3-4'
-    }), shell: false }
-  }]);
+    },
+    spawn: async () => ({ code: 0, stdout: '{}', stderr: 'too much diagnostic output' })
+  }), (error) => error?.code === 'SAFETY_REFUSAL');
 });
