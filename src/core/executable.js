@@ -272,6 +272,11 @@ export function isVerifiedExecutable(resolved) {
   return Boolean(resolved && typeof resolved === 'object' && PRIVATE_EXECUTABLES.has(resolved));
 }
 
+export function isVerifiedExecutableForCommand(resolved, command) {
+  const facts = PRIVATE_EXECUTABLES.get(resolved);
+  return Boolean(facts && typeof command === 'string' && facts.command === command);
+}
+
 export function getVerifiedInvocation(resolved) {
   const facts = PRIVATE_EXECUTABLES.get(resolved);
   if (!facts) return null;

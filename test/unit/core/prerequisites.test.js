@@ -47,7 +47,11 @@ function input(overrides = {}) {
   return {
     platform: 'win32', nodeVersion: '22.20.0', supportedNodeMajors: [22, 24, 26],
     powerShell: windows.powerShell, taskkill: windows.taskkill, git: windows.git,
-    systemAdapter: { systemDirectory: async () => windows.systemDirectory, probePowerShellVersion: async () => '5.1' },
+    systemAdapter: {
+      systemDirectory: async () => windows.systemDirectory,
+      probePowerShellVersion: async () => '5.1',
+      probeGitVersion: async () => ({ code: 0, stdout: 'git version 2.50.1\n', stderr: '' })
+    },
     ...overrides
   };
 }
@@ -86,11 +90,69 @@ test('derives PowerShell and taskkill only from the trusted alternate system dir
 
 test('requires Git only for the Cursor worktree capability', async () => {
   assert.equal((await assessPrerequisites(input({ git: null }))).ready, true);
+  const available = await assessPrerequisites(input({ cursorWorktreeRequested: true }));
+  assert.equal(available.ready, true);
+  assert.equal(available.capabilities.git.version, '2.50.1');
   const required = await assessPrerequisites(input({ git: null, cursorWorktreeRequested: true }));
   assert.equal(required.ready, false);
   assert.equal(required.capabilities.git.code, 'PREREQUISITE_MISSING');
 });
 
+test('rejects a branded non-Git executable before the fixed Git version probe', async () => {
+  const fakeGitPath = path.join(root, 'not-git', 'node.exe');
+  await fs.mkdir(path.dirname(fakeGitPath), { recursive: true });
+  await fs.copyFile(process.execPath, fakeGitPath);
+  const brandedClaude = await resolveVerifiedExecutable({
+    command: 'claude', platform: 'win32', candidates: [{ path: fakeGitPath }], adapter: adapter()
+  });
+  let probes = 0;
+  const result = await assessPrerequisites(input({
+    cursorWorktreeRequested: true,
+    git: brandedClaude,
+    systemAdapter: {
+      systemDirectory: async () => windows.systemDirectory,
+      probePowerShellVersion: async () => '5.1',
+      probeGitVersion: async () => { probes += 1; return { code: 0, stdout: 'git version 2.50.1\n', stderr: '' }; }
+    }
+  }));
+  assert.equal(result.capabilities.git.code, 'PREREQUISITE_MISSING');
+  assert.equal(probes, 0);
+});
+
+test('uses an exact bounded Git version probe and rejects confused output', async () => {
+  let observed;
+  const systemAdapter = {
+    systemDirectory: async () => windows.systemDirectory,
+    probePowerShellVersion: async () => '5.1',
+    probeGitVersion: async (request) => {
+      observed = request;
+      return { code: 0, stdout: 'git version 2.50.1.windows.1\n', stderr: '' };
+    }
+  };
+  const accepted = await assessPrerequisites(input({ cursorWorktreeRequested: true, systemAdapter }));
+  assert.equal(accepted.capabilities.git.version, '2.50.1.windows.1');
+  assert.deepEqual(observed.args, ['--version']);
+  assert.equal(observed.executable, windows.git);
+  assert.equal(observed.shell, false);
+  assert.equal(observed.timeoutMs, 3_000);
+  assert.equal(observed.maxStdoutBytes, 256);
+  assert.equal(observed.maxStderrBytes, 256);
+  assert.equal(Object.isFrozen(observed), true);
+  assert.equal(Object.isFrozen(observed.args), true);
+
+  for (const response of [
+    { code: 1, stdout: 'git version 2.50.1\n', stderr: '' },
+    { code: 0, stdout: 'git version 2.50.1\n', stderr: 'warning' },
+    { code: 0, stdout: 'git version 2.50\n', stderr: '' },
+    { code: 0, stdout: 'prefix git version 2.50.1\n', stderr: '' }
+  ]) {
+    const refused = await assessPrerequisites(input({
+      cursorWorktreeRequested: true,
+      systemAdapter: { ...systemAdapter, probeGitVersion: async () => response }
+    }));
+    assert.equal(refused.capabilities.git.code, 'PREREQUISITE_MISSING');
+  }
+});
 test('accepts only a branded fixed POSIX tar resolved through real filesystem handles', async (t) => {
   const hostRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'claudex-posix-root-'));
   t.after(() => fs.rm(hostRoot, { recursive: true, force: true }));
