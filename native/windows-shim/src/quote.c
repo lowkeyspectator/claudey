@@ -13,7 +13,7 @@ static int append_slashes(size_t count, wchar_t *output, size_t capacity, size_t
   return 1;
 }
 
-int claudex_quote_argument(const wchar_t *argument, wchar_t *output, size_t capacity, size_t *written) {
+int claudey_quote_argument(const wchar_t *argument, wchar_t *output, size_t capacity, size_t *written) {
   size_t index = 0, position = 0, backslashes = 0;
   int needs_quotes = 0;
   if (!argument || !output || !written || capacity == 0) return 0;

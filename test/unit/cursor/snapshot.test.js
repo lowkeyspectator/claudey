@@ -30,13 +30,13 @@ function fixture({ files = ['src/a.js', 'README.md'], selected, states = {}, lim
   });
   const copied = new Map();
   const descriptor = Object.freeze({
-    path: '/home/casey/.local/state/claudexctl/snapshots/snap-1',
-    canonicalPath: '/home/casey/.local/state/claudexctl/snapshots/snap-1',
+    path: '/home/casey/.local/state/claudeyctl/snapshots/snap-1',
+    canonicalPath: '/home/casey/.local/state/claudeyctl/snapshots/snap-1',
     dev: '7', identity: 'snapshot:1', owned: true, empty: true, private: true,
     isLink: false, isJunction: false, isReparsePoint: false
   });
   const service = createCursorSnapshotService({
-    platform: 'linux', snapshotParent: '/home/casey/.local/state/claudexctl/snapshots', limits,
+    platform: 'linux', snapshotParent: '/home/casey/.local/state/claudeyctl/snapshots', limits,
     now: now ?? (() => 1),
     inspectRepositoryRoot: async () => repositoryStates?.shift() ?? ({
       canonicalPath: ROOT, dev: '7', type: 'directory', isLink: false, isJunction: false, isReparsePoint: false

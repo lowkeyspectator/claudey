@@ -41,13 +41,13 @@ export function buildSpdxDocument({ managerVersion, sourceRevision, inventory } 
     checksums: [{ algorithm: 'SHA256', checksumValue: entry.sha256 }],
     licenseConcluded: 'NOASSERTION', licenseInfoInFiles: ['NOASSERTION'], copyrightText: 'NOASSERTION'
   }));
-    const packageId = 'SPDXRef-Package-Claudex-Manager';
+    const packageId = 'SPDXRef-Package-Claudey-Manager';
     const document = {
     spdxVersion: 'SPDX-2.3', dataLicense: 'CC0-1.0', SPDXID: 'SPDXRef-DOCUMENT',
-    name: `claudex-manager-${managerVersion}`,
+    name: `claudey-manager-${managerVersion}`,
     documentNamespace: `https://github.com/ramsaijanapana/claude_code_cliProxy/spdx/${managerVersion}/${sourceRevision}`,
-    creationInfo: { created: '1970-01-01T00:00:00Z', creators: ['Tool: claudexctl-sbom-1'] },
-    packages: [{ SPDXID: packageId, name: 'claudex-manager', versionInfo: managerVersion,
+    creationInfo: { created: '1970-01-01T00:00:00Z', creators: ['Tool: claudeyctl-sbom-1'] },
+    packages: [{ SPDXID: packageId, name: 'claudey-manager', versionInfo: managerVersion,
       downloadLocation: 'NOASSERTION', filesAnalyzed: true, licenseConcluded: 'NOASSERTION',
       licenseDeclared: 'MIT', copyrightText: 'NOASSERTION' }],
     files,
@@ -57,7 +57,7 @@ export function buildSpdxDocument({ managerVersion, sourceRevision, inventory } 
     ]
     };
     const bytes = canonical(document);
-    const artifact = Object.freeze({ name: `claudex-manager-${managerVersion}.spdx.json`,
+    const artifact = Object.freeze({ name: `claudey-manager-${managerVersion}.spdx.json`,
       sha256: hash(bytes), size: bytes.length });
     return Object.freeze({ bytes, descriptor: Object.freeze({ schemaVersion: 1, kind: 'manager-sbom',
       managerVersion, sourceRevision, artifact }) });

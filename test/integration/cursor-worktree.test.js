@@ -21,8 +21,8 @@ async function repository() {
 
 function fixture({
   runnerFailure = false, linksSafe = true, writesEnabled = true, platform = 'linux',
-  worktreeRoot = platform === 'win32' ? 'C:\\Users\\Casey\\AppData\\Local\\claudexctl\\worktrees'
-    : '/home/casey/.local/state/claudexctl/worktrees',
+  worktreeRoot = platform === 'win32' ? 'C:\\Users\\Casey\\AppData\\Local\\claudeyctl\\worktrees'
+    : '/home/casey/.local/state/claudeyctl/worktrees',
   requestResult, consumeResult, addResult, addFailure = false, collectFailure = false
 } = {}) {
   const events = [];
@@ -83,7 +83,7 @@ test('second request consumes exact approval immediately before fixed worktree c
     'resolve-base', 'consume-approval', 'add-worktree', 'scan-links', 'run-cursor', 'collect-result'
   ]);
   assert.deepEqual(f.events[2][1], {
-    branch: 'claudey/cursor-abc123', path: '/home/casey/.local/state/claudexctl/worktrees/abc123', commit: COMMIT
+    branch: 'claudey/cursor-abc123', path: '/home/casey/.local/state/claudeyctl/worktrees/abc123', commit: COMMIT
   });
   assert.equal(f.events[4][1].scope.kind, 'worktree');
   assert.equal(f.events[4][1].signal, controller.signal);
@@ -129,7 +129,7 @@ test('uses the declared Windows path family for generated worktrees and the runn
   const repo = await repository();
   const f = fixture({ platform: 'win32' });
   const result = await f.service.run(input(repo, { approvalId: 'approval-1' }));
-  assert.equal(result.path, 'C:\\Users\\Casey\\AppData\\Local\\claudexctl\\worktrees\\abc123');
+  assert.equal(result.path, 'C:\\Users\\Casey\\AppData\\Local\\claudeyctl\\worktrees\\abc123');
   assert.equal(f.events.find(([event]) => event === 'run-cursor')[1].scope.platform, 'win32');
 });
 
@@ -154,7 +154,7 @@ test('reports the retained recovery identity when creation or result collection 
     await assert.rejects(f.service.run(input(repo, { approvalId: 'approval-1' })), (error) => {
       assert.equal(error.code, 'SAFETY_REFUSAL');
       assert.deepEqual(error.details, {
-        retained: true, path: '/home/casey/.local/state/claudexctl/worktrees/abc123',
+        retained: true, path: '/home/casey/.local/state/claudeyctl/worktrees/abc123',
         branch: 'claudey/cursor-abc123', baseCommit: COMMIT
       });
       assert.equal(JSON.stringify(error).includes('private'), false);

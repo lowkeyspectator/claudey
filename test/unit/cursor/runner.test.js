@@ -36,8 +36,8 @@ function probeInvoke({ args, stdin }) {
 const CAPS = await probeCursorCapabilities(BINDING, { invoke: probeInvoke, nonceFactory: () => 'runner' });
 const CATALOG = await listCursorModels(BINDING, CAPS, { invoke: probeInvoke });
 const ENV = buildCursorEnvironment({ HOME: '/home/casey', PATH: '/usr/bin:/bin', LANG: 'C.UTF-8' }, { platform: 'linux' });
-const SNAPSHOT = createCursorRunScope({ kind: 'snapshot', cwd: '/tmp/claudex-snapshot-1', platform: 'linux' });
-const WORKTREE = createCursorRunScope({ kind: 'worktree', cwd: '/tmp/claudex-worktree-1', platform: 'linux' });
+const SNAPSHOT = createCursorRunScope({ kind: 'snapshot', cwd: '/tmp/claudey-snapshot-1', platform: 'linux' });
+const WORKTREE = createCursorRunScope({ kind: 'worktree', cwd: '/tmp/claudey-worktree-1', platform: 'linux' });
 
 function request(mode, scope, overrides = {}) {
   return {

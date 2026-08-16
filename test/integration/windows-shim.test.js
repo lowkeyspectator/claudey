@@ -27,9 +27,9 @@ test('native shim sources enforce fixed profiles, authenticated metadata, wide C
   const quote = await fs.readFile(path.join(root, 'native/windows-shim/src/quote.c'), 'utf8');
   const header = await fs.readFile(path.join(root, 'native/windows-shim/src/quote.h'), 'utf8');
   const cmake = await fs.readFile(path.join(root, 'native/windows-shim/CMakeLists.txt'), 'utf8');
-  for (const token of ['claudeyctl.exe', 'claudexctl.exe', 'claude-codex.exe', 'claudex.exe', 'claude-agy.exe', 'claude-grok.exe', 'claudey.exe',
-    'claudey-launcher.bin', 'claudey-launcher.key', 'claudex-launcher.bin',
-    'claudex-launcher.key', 'BCryptOpenAlgorithmProvider', 'BCryptHashData', 'BCryptFinishHash',
+  for (const token of ['claudeyctl.exe', 'claude-codex.exe', 'claude-agy.exe', 'claude-grok.exe', 'claudey.exe',
+    'claudey-launcher.bin', 'claudey-launcher.key',
+    'BCryptOpenAlgorithmProvider', 'BCryptHashData', 'BCryptFinishHash',
     'CreateProcessW', 'CREATE_UNICODE_ENVIRONMENT', 'GetStdHandle', 'SetConsoleCtrlHandler',
     'WaitForSingleObject', 'GetExitCodeProcess', 'pin_executable_leaf']) assert.match(main, new RegExp(token.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
   assert.match(main, /L"launcher"[\s\S]+L"claude-codex"/u);
@@ -38,7 +38,7 @@ test('native shim sources enforce fixed profiles, authenticated metadata, wide C
   assert.match(main, /L"launcher"[\s\S]+L"claudey"/u);
   assert.doesNotMatch(`${main}\n${quote}`, /cmd\.exe|\.cmd\b|powershell|%\*/iu);
   assert.match(quote, /2\s*\*\s*backslashes\s*\+\s*1/u);
-  assert.match(header, /claudex_quote_argument/u);
+  assert.match(header, /claudey_quote_argument/u);
   assert.match(cmake, /UNICODE/u);
   assert.match(cmake, /bcrypt/u);
 });
@@ -76,7 +76,7 @@ test('build script has fixed x64/ARM64 schemas and records immutable compiler, f
     '-OutputDirectory', output],
   { cwd: root, encoding: 'utf8' });
   assert.equal(built.status, 0, built.stderr);
-  const descriptor = JSON.parse(await fs.readFile(path.join(output, 'claudex-windows-x64.exe.json'), 'utf8'));
+  const descriptor = JSON.parse(await fs.readFile(path.join(output, 'claudey-windows-x64.exe.json'), 'utf8'));
   assert.match(descriptor.sha256, /^[0-9a-f]{64}$/u);
   assert.equal(descriptor.managerShimCompatibilityVersion, 1);
   assert.equal(descriptor.sourceRevision, 'a'.repeat(40));

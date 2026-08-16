@@ -31,16 +31,16 @@ test('rejects syntactically unsafe managed child paths before filesystem access'
 
 test('resolves safe nested Unicode children with platform-specific containment semantics', () => {
   assert.equal(
-    resolveManagedChild('/srv/claudexctl', 'releases/日本語 build/file.txt', { platform: 'posix' }),
-    '/srv/claudexctl/releases/日本語 build/file.txt'
+    resolveManagedChild('/srv/claudeyctl', 'releases/日本語 build/file.txt', { platform: 'posix' }),
+    '/srv/claudeyctl/releases/日本語 build/file.txt'
   );
   assert.equal(
-    resolveManagedChild('C:\\Users\\Casey\\AppData\\Local\\claudexctl', 'state\\locks\\install.lock', { platform: 'win32' }),
-    'C:\\Users\\Casey\\AppData\\Local\\claudexctl\\state\\locks\\install.lock'
+    resolveManagedChild('C:\\Users\\Casey\\AppData\\Local\\claudeyctl', 'state\\locks\\install.lock', { platform: 'win32' }),
+    'C:\\Users\\Casey\\AppData\\Local\\claudeyctl\\state\\locks\\install.lock'
   );
   assert.equal(
-    resolveManagedChild('C:\\Users\\Casey\\AppData\\Local\\claudexctl', 'STATE\\locks\\install.lock', { platform: 'win32' }),
-    'C:\\Users\\Casey\\AppData\\Local\\claudexctl\\STATE\\locks\\install.lock'
+    resolveManagedChild('C:\\Users\\Casey\\AppData\\Local\\claudeyctl', 'STATE\\locks\\install.lock', { platform: 'win32' }),
+    'C:\\Users\\Casey\\AppData\\Local\\claudeyctl\\STATE\\locks\\install.lock'
   );
 });
 
@@ -49,14 +49,14 @@ test('rejects roots that are filesystem roots, home roots, repository roots, or 
   safetyRefusal(() => assertManagedRoot('/home/casey', { platform: 'posix', homeRoot: '/home/casey' }), 'home root');
   safetyRefusal(() => assertManagedRoot('/work/repository', { platform: 'posix', repositoryRoot: '/work/repository' }), 'repository root');
   safetyRefusal(
-    () => assertManagedRoot('/srv/claudexctl', { platform: 'posix', expectedRoot: '/srv/other' }),
+    () => assertManagedRoot('/srv/claudeyctl', { platform: 'posix', expectedRoot: '/srv/other' }),
     'unexpected canonical root'
   );
 });
 
 test('rejects a real symbolic-link ancestor instead of following it outside the managed root', async (t) => {
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'claudexctl-fs-safe-'));
-  const outside = await fs.mkdtemp(path.join(os.tmpdir(), 'claudexctl-outside-'));
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'claudeyctl-fs-safe-'));
+  const outside = await fs.mkdtemp(path.join(os.tmpdir(), 'claudeyctl-outside-'));
   t.after(async () => {
     await fs.rm(root, { recursive: true, force: true });
     await fs.rm(outside, { recursive: true, force: true });
@@ -78,7 +78,7 @@ test('rejects a real symbolic-link ancestor instead of following it outside the 
 });
 
 test('treats an injected reparse point as unsafe before the leaf is used', async () => {
-  const root = 'C:\\Users\\Casey\\AppData\\Local\\claudexctl';
+  const root = 'C:\\Users\\Casey\\AppData\\Local\\claudeyctl';
   const normal = { isSymbolicLink: () => false, isDirectory: () => true, isReparsePoint: false };
   const reparse = { isSymbolicLink: () => false, isDirectory: () => false, isReparsePoint: true };
   await assert.rejects(

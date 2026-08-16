@@ -20,24 +20,24 @@ $utf8 = [Text.UTF8Encoding]::new($false)
 [Console]::OutputEncoding = $utf8
 $OutputEncoding = $utf8
 
-if (-not ('ClaudexArchiveNativeIdentity' -as [type])) {
+if (-not ('ClaudeyArchiveNativeIdentity' -as [type])) {
     Add-Type -TypeDefinition @'
 using System;
 using System.IO;
 using System.Runtime.InteropServices;
 using Microsoft.Win32.SafeHandles;
 
-public sealed class ClaudexArchiveDirectoryIdentity : IDisposable {
+public sealed class ClaudeyArchiveDirectoryIdentity : IDisposable {
     public readonly SafeFileHandle Handle;
     public readonly uint VolumeSerialNumber;
     public readonly ulong FileId;
-    public ClaudexArchiveDirectoryIdentity(SafeFileHandle handle, uint volume, ulong fileId) {
+    public ClaudeyArchiveDirectoryIdentity(SafeFileHandle handle, uint volume, ulong fileId) {
         Handle = handle; VolumeSerialNumber = volume; FileId = fileId;
     }
     public void Dispose() { Handle.Dispose(); }
 }
 
-public static class ClaudexArchiveNativeIdentity {
+public static class ClaudeyArchiveNativeIdentity {
     [StructLayout(LayoutKind.Sequential)]
     private struct BY_HANDLE_FILE_INFORMATION {
         public uint FileAttributes;
@@ -56,7 +56,7 @@ public static class ClaudexArchiveNativeIdentity {
     [DllImport("kernel32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool GetFileInformationByHandle(SafeFileHandle handle, out BY_HANDLE_FILE_INFORMATION info);
-    public static ClaudexArchiveDirectoryIdentity OpenDirectory(string path) {
+    public static ClaudeyArchiveDirectoryIdentity OpenDirectory(string path) {
         const uint FILE_FLAG_BACKUP_SEMANTICS = 0x02000000;
         const uint FILE_FLAG_OPEN_REPARSE_POINT = 0x00200000;
         SafeFileHandle handle = CreateFileW(path, 0, FileShare.Read | FileShare.Write, IntPtr.Zero, FileMode.Open, FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT, IntPtr.Zero);
@@ -85,7 +85,7 @@ public static class ClaudexArchiveNativeIdentity {
         out IO_STATUS_BLOCK ioStatus, IntPtr allocationSize, uint fileAttributes, uint shareAccess,
         uint createDisposition, uint createOptions, IntPtr eaBuffer, uint eaLength);
 
-    private static ClaudexArchiveDirectoryIdentity DescribeDirectory(SafeFileHandle handle) {
+    private static ClaudeyArchiveDirectoryIdentity DescribeDirectory(SafeFileHandle handle) {
         BY_HANDLE_FILE_INFORMATION info;
         if (!GetFileInformationByHandle(handle, out info)) {
             int code = Marshal.GetLastWin32Error(); handle.Dispose();
@@ -95,7 +95,7 @@ public static class ClaudexArchiveNativeIdentity {
             handle.Dispose(); throw new IOException("Created directory is unsafe.");
         }
         ulong fileId = ((ulong)info.FileIndexHigh << 32) | info.FileIndexLow;
-        return new ClaudexArchiveDirectoryIdentity(handle, info.VolumeSerialNumber, fileId);
+        return new ClaudeyArchiveDirectoryIdentity(handle, info.VolumeSerialNumber, fileId);
     }
 
     private static SafeFileHandle CreateRelative(SafeFileHandle parent, string leaf, uint access, uint options) {
@@ -133,7 +133,7 @@ public static class ClaudexArchiveNativeIdentity {
         }
     }
 
-    public static ClaudexArchiveDirectoryIdentity CreateDirectoryRelative(SafeFileHandle parent, string leaf) {
+    public static ClaudeyArchiveDirectoryIdentity CreateDirectoryRelative(SafeFileHandle parent, string leaf) {
         const uint FILE_LIST_DIRECTORY = 0x0001;
         const uint FILE_READ_ATTRIBUTES = 0x0080;
         const uint SYNCHRONIZE = 0x00100000;
@@ -208,7 +208,7 @@ function Get-DirectoryIdentity([string]$LiteralPath) {
     $safe = Assert-NoReparse $LiteralPath
     $item = Get-Item -LiteralPath $safe -Force
     if (-not $item.PSIsContainer -or ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { throw 'Destination.' }
-    $native = [ClaudexArchiveNativeIdentity]::OpenDirectory($safe)
+    $native = [ClaudeyArchiveNativeIdentity]::OpenDirectory($safe)
     return [pscustomobject]@{ path = $item.FullName; volume = $native.VolumeSerialNumber; fileId = $native.FileId; native = $native }
 }
 
@@ -301,7 +301,7 @@ try {
         if ($planned.type -eq 'directory') {
             if ($zipEntry.Length -ne 0) { throw 'ZIP directory.' }
             $leaf = [IO.Path]::GetFileName($target)
-            $createdNative = [ClaudexArchiveNativeIdentity]::CreateDirectoryRelative($parentIdentity.native.Handle, $leaf)
+            $createdNative = [ClaudeyArchiveNativeIdentity]::CreateDirectoryRelative($parentIdentity.native.Handle, $leaf)
             try {
                 $createdIdentity = [pscustomobject]@{
                     path = $target
@@ -320,7 +320,7 @@ try {
             [void](Assert-DirectoryIdentity $parent $parentIdentity)
             $inputStream = $zipEntry.Open()
             $leaf = [IO.Path]::GetFileName($target)
-            $fileHandle = [ClaudexArchiveNativeIdentity]::CreateFileRelative($parentIdentity.native.Handle, $leaf)
+            $fileHandle = [ClaudeyArchiveNativeIdentity]::CreateFileRelative($parentIdentity.native.Handle, $leaf)
             $outputStream = [IO.FileStream]::new($fileHandle, [IO.FileAccess]::Write, 4096, $false)
             try {
                 [void](Assert-DirectoryIdentity $parent $parentIdentity)

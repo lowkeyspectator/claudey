@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
 import test from 'node:test';
 
-import { ClaudeyError, ClaudexError } from '../../../src/core/errors.js';
+import { ClaudeyError } from '../../../src/core/errors.js';
 import { Secret } from '../../../src/core/secrets.js';
 import {
   createRuntimeStore,
@@ -15,8 +15,8 @@ import {
 
 const INSTALLATION_ID = '11111111-1111-4111-8111-111111111111';
 const EXECUTABLE = Object.freeze({ kind: 'verified-fixture' });
-const EXECUTABLE_PATH = 'C:\\Program Files\\Claudex\\CLIProxyAPI.exe';
-const CONFIG_PATH = 'C:\\Users\\fixture\\Claudex\\config.yaml';
+const EXECUTABLE_PATH = 'C:\\Program Files\\Claudey\\CLIProxyAPI.exe';
+const CONFIG_PATH = 'C:\\Users\\fixture\\Claudey\\config.yaml';
 const TOKEN = () => Secret.fromBytes(Buffer.alloc(32, 7));
 const READINESS_DOMAIN = 'claudeyctl-gateway-readiness-v1\0';
 
@@ -71,7 +71,7 @@ function makeContext({ installed = false, graceful = true, requestFailures = 0, 
         },
         descendants: [{
           pid: identity.pid + 1, parentPid: identity.pid, processGroupId: identity.processGroupId,
-          processStartTime: '2026-08-13T10:11:12.500Z', executableCanonicalPath: 'C:\\Program Files\\Claudex\\worker.exe'
+          processStartTime: '2026-08-13T10:11:12.500Z', executableCanonicalPath: 'C:\\Program Files\\Claudey\\worker.exe'
         }]
       };
       return treeMutation ? treeMutation(structuredClone(tree), captureCount) : tree;
@@ -103,7 +103,7 @@ function makeContext({ installed = false, graceful = true, requestFailures = 0, 
     isChildExited: async () => exited,
     requestGatewayModels: async () => {
       requestCount += 1;
-      if (requestCount <= requestFailures) throw new ClaudexError('GATEWAY_UNHEALTHY', 'not ready');
+      if (requestCount <= requestFailures) throw new ClaudeyError('GATEWAY_UNHEALTHY', 'not ready');
       return { object: 'list', data: [{ id: 'gpt-fixture', object: 'model', created: 1, owned_by: 'codex' }] };
     },
     randomUUID: () => '22222222-2222-4222-8222-222222222222',
@@ -143,7 +143,7 @@ test('healthy readiness requires the exact owned listener, process tree, and aut
   const result = await ensureGatewayHealthy(fixture.ctx);
   assert.equal(result.state, 'healthy');
   assert.equal(await verifyOwnedProcess(fixture.current, fixture.processAdapter).then(() => true), true);
-  fixture.ctx.requestGatewayModels = async () => { throw new ClaudexError('GATEWAY_UNHEALTHY', 'wrong bearer'); };
+  fixture.ctx.requestGatewayModels = async () => { throw new ClaudeyError('GATEWAY_UNHEALTHY', 'wrong bearer'); };
   await assert.rejects(ensureGatewayHealthy(fixture.ctx), (error) => error.code === 'GATEWAY_UNHEALTHY');
 });
 
@@ -159,8 +159,8 @@ test('readiness refuses a validly authenticated runtime record that is not bound
     { installationId: '33333333-3333-4333-8333-333333333333' },
     { version: '7.2.131' },
     { port: 9000 },
-    { configCanonicalPath: 'C:\\Users\\fixture\\Claudex\\other.yaml' },
-    { executableCanonicalPath: 'C:\\Program Files\\Claudex\\other.exe' }
+    { configCanonicalPath: 'C:\\Users\\fixture\\Claudey\\other.yaml' },
+    { executableCanonicalPath: 'C:\\Program Files\\Claudey\\other.exe' }
   ]) {
     const fixture = makeContext({ installed: true });
     Object.assign(fixture.current, mutation);
@@ -222,7 +222,7 @@ test('early child exit, startup timeout, cancellation, and record write failure 
     const controller = new AbortController();
     if (scenario === 'early') fixture.exited = true;
     if (scenario === 'cancel') {
-      fixture.ctx.requestGatewayModels = async () => { controller.abort(); throw new ClaudexError('GATEWAY_UNHEALTHY', 'cancel'); };
+      fixture.ctx.requestGatewayModels = async () => { controller.abort(); throw new ClaudeyError('GATEWAY_UNHEALTHY', 'cancel'); };
     }
     await assert.rejects(
       startOwnedGateway({ ...fixture.ctx, signal: controller.signal }),
@@ -247,7 +247,7 @@ test('failed start redacts injected error text from diagnostics and the public f
   const fixture = makeContext({ requestFailures: 99 });
   const diagnostics = [];
   fixture.ctx.requestGatewayModels = async () => {
-    throw new ClaudexError('GATEWAY_UNHEALTHY', 'TASK8_SECRET_CANARY');
+    throw new ClaudeyError('GATEWAY_UNHEALTHY', 'TASK8_SECRET_CANARY');
   };
   fixture.ctx.onLifecycleDiagnostic = (value) => diagnostics.push(value);
   await assert.rejects(startOwnedGateway(fixture.ctx), (error) => {
@@ -343,7 +343,7 @@ test('restart stops the exact owned instance before starting a new authenticated
 
 test('runtime load proves protection and exact file identity before and after reading bytes', async () => {
   const fixture = makeContext({ installed: true });
-  const root = 'C:\\Users\\fixture\\Claudex';
+  const root = 'C:\\Users\\fixture\\Claudey';
   const target = `${root}\\gateway-runtime.json`;
   const events = [];
   let swapped = false;
@@ -381,7 +381,7 @@ test('runtime load proves protection and exact file identity before and after re
 });
 
 test('runtime removal refuses an identity swap and never calls pathname deletion', async () => {
-  const root = 'C:\\Users\\fixture\\Claudex';
+  const root = 'C:\\Users\\fixture\\Claudey';
   const target = `${root}\\gateway-runtime.json`;
   let targetStats = 0;
   let removals = 0;
@@ -408,7 +408,7 @@ test('runtime removal refuses an identity swap and never calls pathname deletion
 
 test('runtime write refuses success unless the exact protected record is readable afterward', async () => {
   const fixture = makeContext({ installed: true });
-  const root = 'C:\\Users\\fixture\\Claudex';
+  const root = 'C:\\Users\\fixture\\Claudey';
   const missing = Object.assign(new Error('missing'), { code: 'ENOENT' });
   const fsApi = {
     realpath: async (value) => value,

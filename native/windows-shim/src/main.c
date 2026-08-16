@@ -10,7 +10,6 @@
 #include "quote.h"
 
 #define METADATA_MAGIC "CLDYL001"
-#define METADATA_MAGIC_LEGACY "CLDXL001"
 #define METADATA_SCHEMA 1u
 #define SHIM_COMPATIBILITY 1u
 #define MAX_PATH_CHARS 4096u
@@ -123,7 +122,7 @@ static int append_argument(wchar_t *command_line, size_t capacity, size_t *posit
   wchar_t quoted[65536];
   size_t written = 0;
   if (*position && *position + 1 < capacity) command_line[(*position)++] = L' ';
-  if (!claudex_quote_argument(argument, quoted, sizeof(quoted) / sizeof(quoted[0]), &written)
+  if (!claudey_quote_argument(argument, quoted, sizeof(quoted) / sizeof(quoted[0]), &written)
     || *position + written + 1 > capacity) return 0;
   memcpy(command_line + *position, quoted, (written + 1) * sizeof(wchar_t));
   *position += written;
@@ -132,9 +131,7 @@ static int append_argument(wchar_t *command_line, size_t capacity, size_t *posit
 
 static int profile_for_basename(const wchar_t *basename) {
   if (_wcsicmp(basename, L"claudeyctl.exe") == 0) return 0;
-  if (_wcsicmp(basename, L"claudexctl.exe") == 0) return 0;
   if (_wcsicmp(basename, L"claude-codex.exe") == 0) return 1;
-  if (_wcsicmp(basename, L"claudex.exe") == 0) return 1;
   if (_wcsicmp(basename, L"claude-agy.exe") == 0) return 2;
   if (_wcsicmp(basename, L"claude-grok.exe") == 0) return 3;
   if (_wcsicmp(basename, L"claudey.exe") == 0) return 4;
@@ -163,23 +160,16 @@ int wmain(int argc, wchar_t **argv) {
   profile = profile_for_basename(basename);
   if (profile < 0) goto cleanup;
 
-  if (fixed_sibling(directory, L"claudey-launcher.bin", metadata_path, MAX_PATH_CHARS + 32)
-      && fixed_sibling(directory, L"claudey-launcher.key", key_path, MAX_PATH_CHARS + 32)
-      && read_no_reparse(metadata_path, &metadata, &metadata_length, 0)
-      && read_no_reparse(key_path, &key, &key_length, 32)) {
-    /* claudey metadata loaded */
-  } else if (fixed_sibling(directory, L"claudex-launcher.bin", metadata_path, MAX_PATH_CHARS + 32)
-      && fixed_sibling(directory, L"claudex-launcher.key", key_path, MAX_PATH_CHARS + 32)
-      && read_no_reparse(metadata_path, &metadata, &metadata_length, 0)
-      && read_no_reparse(key_path, &key, &key_length, 32)) {
-    /* fallback to claudex metadata */
-  } else {
+  if (!fixed_sibling(directory, L"claudey-launcher.bin", metadata_path, MAX_PATH_CHARS + 32)
+      || !fixed_sibling(directory, L"claudey-launcher.key", key_path, MAX_PATH_CHARS + 32)
+      || !read_no_reparse(metadata_path, &metadata, &metadata_length, 0)
+      || !read_no_reparse(key_path, &key, &key_length, 32)) {
     goto cleanup;
   }
 
   if (metadata_length < sizeof(LauncherHeader)) goto cleanup;
   header = (LauncherHeader *)metadata;
-  if ((memcmp(header->magic, METADATA_MAGIC, 8) != 0 && memcmp(header->magic, METADATA_MAGIC_LEGACY, 8) != 0)
+  if (memcmp(header->magic, METADATA_MAGIC, 8) != 0
     || header->schema_version != METADATA_SCHEMA
     || header->manager_shim_compatibility_version != SHIM_COMPATIBILITY
     || header->node_chars < 4 || header->node_chars > MAX_PATH_CHARS

@@ -10,7 +10,7 @@ import {
 } from '../../src/cli/commands/cursor.js';
 
 const UUID = '11111111-1111-4111-8111-111111111111';
-const MANAGER = '/home/casey/.local/share/claudexctl';
+const MANAGER = '/home/casey/.local/share/claudeyctl';
 const MARKETPLACE = `${MANAGER}/marketplace`;
 const PROJECT = '/home/casey/project';
 

@@ -32,8 +32,6 @@ export class ClaudeyError extends Error {
   }
 }
 
-export { ClaudeyError as ClaudexError };
-
 export function exitCodeFor(error) {
   return exitCodes.get(error?.code) ?? 2;
 }

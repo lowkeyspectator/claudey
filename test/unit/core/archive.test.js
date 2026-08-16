@@ -13,7 +13,7 @@ import {
 const sha256 = (bytes) => createHash('sha256').update(bytes).digest('hex');
 
 async function archiveFixture(t, bytes, kind, expectedExecutable, options = {}) {
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'claudexctl-archive-unit-'));
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'claudeyctl-archive-unit-'));
   t.after(() => fs.rm(root, { recursive: true, force: true }));
   const archivePath = path.join(root, kind === 'zip' ? 'fixture.zip' : 'fixture.tar.gz');
   await fs.writeFile(archivePath, bytes, { mode: 0o600 });
@@ -42,7 +42,7 @@ async function validateBytes(t, bytes, kind, expectedExecutable, options = {}) {
 }
 
 function unsafe(error) {
-  return error?.code === 'ARCHIVE_UNSAFE' && !String(error.message).includes(process.env.CLAUDEX_SECRET_CANARY ?? '\0never');
+  return error?.code === 'ARCHIVE_UNSAFE' && !String(error.message).includes(process.env.CLAUDEY_SECRET_CANARY ?? '\0never');
 }
 
 test('accepts valid ZIP and TAR.GZ metadata into sorted deeply immutable plans without extraction', async (t) => {

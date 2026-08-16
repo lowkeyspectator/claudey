@@ -17,7 +17,7 @@ function fixedNow(value = '2026-08-12T00:00:00.000Z') {
 }
 
 async function tempRoot(t) {
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'claudexctl-lock-'));
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'claudeyctl-lock-'));
   t.after(() => fs.rm(root, { recursive: true, force: true }));
   return root;
 }
@@ -122,7 +122,7 @@ test('treats a reused PID as stale only after expiry and refuses swapped release
 
 test('refuses a link lock path rather than following it', async (t) => {
   const root = await tempRoot(t);
-  const outside = await fs.mkdtemp(path.join(os.tmpdir(), 'claudexctl-lock-outside-'));
+  const outside = await fs.mkdtemp(path.join(os.tmpdir(), 'claudeyctl-lock-outside-'));
   t.after(() => fs.rm(outside, { recursive: true, force: true }));
   await fs.mkdir(path.join(root, 'state'));
   try {

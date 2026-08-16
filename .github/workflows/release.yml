@@ -96,14 +96,14 @@ jobs:
           & $devShell -Arch $targetArch -HostArch 'amd64' -SkipAutomaticLocation
           if ($null -eq (Get-Command 'cl.exe' -CommandType Application -ErrorAction SilentlyContinue)) { exit 1 }
           & ./scripts/build-windows-shim.ps1 -Architecture '${{ matrix.arch }}' -SourceRevision $env:GITHUB_SHA -OutputDirectory (Join-Path $pwd 'native-artifacts')
-          node .\scripts\verify-release-artifacts.mjs --verify-shim --descriptor "native-artifacts\claudex-windows-${{ matrix.arch }}.exe.json" --shim "native-artifacts\claudex-windows-${{ matrix.arch }}.exe" --target "windows-${{ matrix.arch }}" --source-revision $env:GITHUB_SHA
+          node .\scripts\verify-release-artifacts.mjs --verify-shim --descriptor "native-artifacts\claudey-windows-${{ matrix.arch }}.exe.json" --shim "native-artifacts\claudey-windows-${{ matrix.arch }}.exe" --target "windows-${{ matrix.arch }}" --source-revision $env:GITHUB_SHA
       - name: Upload immutable native shim and descriptor
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         with:
           name: native-shim-windows-${{ matrix.arch }}-${{ github.sha }}
           path: |
-            native-artifacts/claudex-windows-${{ matrix.arch }}.exe
-            native-artifacts/claudex-windows-${{ matrix.arch }}.exe.json
+            native-artifacts/claudey-windows-${{ matrix.arch }}.exe
+            native-artifacts/claudey-windows-${{ matrix.arch }}.exe.json
           if-no-files-found: error
           retention-days: 7
           compression-level: 0
@@ -173,17 +173,17 @@ jobs:
       - name: Create runtime secret canary on Windows
         if: matrix.shell_kind == 'windows'
         shell: powershell
-        run: node -e "require('fs').appendFileSync(process.env.GITHUB_ENV,'CLAUDEX_SECRET_CANARY='+require('crypto').randomBytes(32).toString('hex')+'\n')"
+        run: node -e "require('fs').appendFileSync(process.env.GITHUB_ENV,'CLAUDEY_SECRET_CANARY='+require('crypto').randomBytes(32).toString('hex')+'\n')"
       - name: Create runtime secret canary on POSIX
         if: matrix.shell_kind == 'posix'
         shell: bash
-        run: node -e "require('fs').appendFileSync(process.env.GITHUB_ENV,'CLAUDEX_SECRET_CANARY='+require('crypto').randomBytes(32).toString('hex')+'\n')"
+        run: node -e "require('fs').appendFileSync(process.env.GITHUB_ENV,'CLAUDEY_SECRET_CANARY='+require('crypto').randomBytes(32).toString('hex')+'\n')"
       - name: Verify consumed shim proofs and run Windows gates
         if: matrix.shell_kind == 'windows'
         shell: powershell
         run: |
-          node .\scripts\verify-release-artifacts.mjs --verify-shim --descriptor native-artifacts\claudex-windows-x64.exe.json --shim native-artifacts\claudex-windows-x64.exe --target windows-x64 --source-revision $env:GITHUB_SHA
-          node .\scripts\verify-release-artifacts.mjs --verify-shim --descriptor native-artifacts\claudex-windows-arm64.exe.json --shim native-artifacts\claudex-windows-arm64.exe --target windows-arm64 --source-revision $env:GITHUB_SHA
+          node .\scripts\verify-release-artifacts.mjs --verify-shim --descriptor native-artifacts\claudey-windows-x64.exe.json --shim native-artifacts\claudey-windows-x64.exe --target windows-x64 --source-revision $env:GITHUB_SHA
+          node .\scripts\verify-release-artifacts.mjs --verify-shim --descriptor native-artifacts\claudey-windows-arm64.exe.json --shim native-artifacts\claudey-windows-arm64.exe --target windows-arm64 --source-revision $env:GITHUB_SHA
           if ((node -p process.arch) -ne '${{ matrix.arch }}') { exit 1 }
           npm.cmd run check
           npm.cmd test
@@ -193,8 +193,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          node scripts/verify-release-artifacts.mjs --verify-shim --descriptor native-artifacts/claudex-windows-x64.exe.json --shim native-artifacts/claudex-windows-x64.exe --target windows-x64 --source-revision "$GITHUB_SHA"
-          node scripts/verify-release-artifacts.mjs --verify-shim --descriptor native-artifacts/claudex-windows-arm64.exe.json --shim native-artifacts/claudex-windows-arm64.exe --target windows-arm64 --source-revision "$GITHUB_SHA"
+          node scripts/verify-release-artifacts.mjs --verify-shim --descriptor native-artifacts/claudey-windows-x64.exe.json --shim native-artifacts/claudey-windows-x64.exe --target windows-x64 --source-revision "$GITHUB_SHA"
+          node scripts/verify-release-artifacts.mjs --verify-shim --descriptor native-artifacts/claudey-windows-arm64.exe.json --shim native-artifacts/claudey-windows-arm64.exe --target windows-arm64 --source-revision "$GITHUB_SHA"
           test "$(node -p process.arch)" = '${{ matrix.arch }}'
           npm run check
           npm test
@@ -230,15 +230,15 @@ jobs:
           VERSION: ${{ needs['release-context'].outputs.version }}
         run: |
           set -euo pipefail
-          node scripts/verify-release-artifacts.mjs --verify-shim --descriptor native-artifacts/claudex-windows-x64.exe.json --shim native-artifacts/claudex-windows-x64.exe --target windows-x64 --source-revision "$GITHUB_SHA"
-          node scripts/verify-release-artifacts.mjs --verify-shim --descriptor native-artifacts/claudex-windows-arm64.exe.json --shim native-artifacts/claudex-windows-arm64.exe --target windows-arm64 --source-revision "$GITHUB_SHA"
+          node scripts/verify-release-artifacts.mjs --verify-shim --descriptor native-artifacts/claudey-windows-x64.exe.json --shim native-artifacts/claudey-windows-x64.exe --target windows-x64 --source-revision "$GITHUB_SHA"
+          node scripts/verify-release-artifacts.mjs --verify-shim --descriptor native-artifacts/claudey-windows-arm64.exe.json --shim native-artifacts/claudey-windows-arm64.exe --target windows-arm64 --source-revision "$GITHUB_SHA"
           mkdir -m 700 package-output release
           node scripts/package.mjs --root . --out package-output --version "$VERSION" --source-revision "$GITHUB_SHA"
-          cp "package-output/claudex-manager-$VERSION.tar.gz" "release/claudex-manager-$VERSION.tar.gz"
-          cp "package-output/claudex-manager-$VERSION.spdx.json" "release/claudex-manager-$VERSION.spdx.json"
-          cp native-artifacts/claudex-windows-x64.exe native-artifacts/claudex-windows-arm64.exe release/
+          cp "package-output/claudey-manager-$VERSION.tar.gz" "release/claudey-manager-$VERSION.tar.gz"
+          cp "package-output/claudey-manager-$VERSION.spdx.json" "release/claudey-manager-$VERSION.spdx.json"
+          cp native-artifacts/claudey-windows-x64.exe native-artifacts/claudey-windows-arm64.exe release/
           cp install.sh install.ps1 release/
-          node scripts/assemble-release-manifest.mjs --payload-descriptor "package-output/claudex-manager-$VERSION.tar.gz.json" --sbom-descriptor "package-output/claudex-manager-$VERSION.spdx.json.descriptor.json" --shim-x64-descriptor native-artifacts/claudex-windows-x64.exe.json --shim-arm64-descriptor native-artifacts/claudex-windows-arm64.exe.json --artifacts release --out release/project-manifest.json
+          node scripts/assemble-release-manifest.mjs --payload-descriptor "package-output/claudey-manager-$VERSION.tar.gz.json" --sbom-descriptor "package-output/claudey-manager-$VERSION.spdx.json.descriptor.json" --shim-x64-descriptor native-artifacts/claudey-windows-x64.exe.json --shim-arm64-descriptor native-artifacts/claudey-windows-arm64.exe.json --artifacts release --out release/project-manifest.json
           node scripts/verify-release-artifacts.mjs --write-checksums --artifacts release --manifest release/project-manifest.json --out release/SHA256SUMS
           node scripts/verify-release-artifacts.mjs --verify --artifacts release --manifest release/project-manifest.json --checksums release/SHA256SUMS
       - name: Upload immutable complete release set

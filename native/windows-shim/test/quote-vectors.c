@@ -16,7 +16,7 @@ int main(void) {
     { L";&|`$()%VAR%", L";&|`$()%VAR%" }, { L"line\r\nbreak", L"\"line\r\nbreak\"" }
   };
   for (index = 0; index < sizeof(vectors) / sizeof(vectors[0]); ++index) {
-    if (!claudex_quote_argument(vectors[index].input, output, sizeof(output) / sizeof(output[0]), &written)
+    if (!claudey_quote_argument(vectors[index].input, output, sizeof(output) / sizeof(output[0]), &written)
       || wcscmp(output, vectors[index].expected) != 0 || written != wcslen(output)) {
       fwprintf(stderr, L"vector %zu failed\n", index); return 1;
     }

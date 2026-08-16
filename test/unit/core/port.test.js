@@ -12,8 +12,8 @@ function runtime() {
   return createRuntimeRecord({
     schemaVersion: 1, installationId, instanceId, pid: 3210, processGroupId: 3210,
     processStartTime: '2026-08-13T10:11:12.000Z',
-    executableCanonicalPath: 'C:\\Program Files\\Claudex\\CLIProxyAPI.exe',
-    configCanonicalPath: 'C:\\Users\\fixture\\Claudex\\config.yaml', version: '7.2.130',
+    executableCanonicalPath: 'C:\\Program Files\\Claudey\\CLIProxyAPI.exe',
+    configCanonicalPath: 'C:\\Users\\fixture\\Claudey\\config.yaml', version: '7.2.130',
     host: '127.0.0.1', port: 8317, nonce,
     readinessIdentity: Buffer.alloc(32, 4).toString('base64url'),
     lastSuccessfulReadinessAt: '2026-08-13T10:11:13.000Z'
@@ -25,8 +25,8 @@ function tree() {
     complete: true,
     root: {
       pid: 3210, parentPid: 100, processGroupId: 3210, processStartTime: '2026-08-13T10:11:12.000Z',
-      executableCanonicalPath: 'C:\\Program Files\\Claudex\\CLIProxyAPI.exe',
-      configCanonicalPath: 'C:\\Users\\fixture\\Claudex\\config.yaml', installationId, instanceId, nonce
+      executableCanonicalPath: 'C:\\Program Files\\Claudey\\CLIProxyAPI.exe',
+      configCanonicalPath: 'C:\\Users\\fixture\\Claudey\\config.yaml', installationId, instanceId, nonce
     },
     descendants: []
   };

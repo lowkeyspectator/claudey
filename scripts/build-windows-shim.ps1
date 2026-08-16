@@ -19,7 +19,7 @@ $source = [IO.Path]::GetFullPath((Join-Path $SourceRoot 'native\windows-shim'))
 $output = [IO.Path]::GetFullPath($OutputDirectory)
 $build = [IO.Path]::GetFullPath((Join-Path $output "build-$Architecture"))
 $generatorArchitecture = if ($Architecture -eq 'x64') { 'x64' } else { 'ARM64' }
-$artifactName = "claudex-windows-${Architecture}.exe"
+$artifactName = "claudey-windows-${Architecture}.exe"
 $artifact = Join-Path $output $artifactName
 $compilerFlags = @('/W4', '/WX', '/O2', '/guard:cf', '/sdl', '/DYNAMICBASE', '/NXCOMPAT')
 
@@ -27,10 +27,10 @@ $compilerFlags = @('/W4', '/WX', '/O2', '/guard:cf', '/sdl', '/DYNAMICBASE', '/N
 [IO.Directory]::CreateDirectory($build) | Out-Null
 & $cmake '-S' $source '-B' $build '-A' $generatorArchitecture
 if ($LASTEXITCODE -ne 0) { throw 'CMake configure failed.' }
-& $cmake '--build' $build '--config' 'Release' '--target' 'claudex-shim' 'capture-child'
+& $cmake '--build' $build '--config' 'Release' '--target' 'claudey-shim' 'capture-child'
 if ($LASTEXITCODE -ne 0) { throw 'CMake build failed.' }
 
-$candidate = Join-Path $build 'Release\claudex-shim.exe'
+$candidate = Join-Path $build 'Release\claudey-shim.exe'
 $captureChild = Join-Path $build 'Release\capture-child.exe'
 if (-not (Test-Path -LiteralPath $candidate -PathType Leaf)) { throw 'The shim artifact is absent.' }
 if (-not (Test-Path -LiteralPath $captureChild -PathType Leaf)) { throw 'The capture child is absent.' }
@@ -54,15 +54,15 @@ $descriptorPath = Join-Path $output "$artifactName.json"
 
 $captureRoot = Join-Path $output "capture-$Architecture"
 [IO.Directory]::CreateDirectory($captureRoot) | Out-Null
-$captureLauncher = Join-Path $captureRoot 'claudexctl.exe'
+$captureLauncher = Join-Path $captureRoot 'claudeyctl.exe'
 Copy-Item -LiteralPath $candidate -Destination $captureLauncher -Force
-$managerPath = [IO.Path]::GetFullPath((Join-Path $SourceRoot 'bin\claudexctl.js'))
+$managerPath = [IO.Path]::GetFullPath((Join-Path $SourceRoot 'bin\claudeyctl.js'))
 $nodeBytes = [Text.Encoding]::Unicode.GetBytes([IO.Path]::GetFullPath($captureChild))
 $managerBytes = [Text.Encoding]::Unicode.GetBytes($managerPath)
 $key = [byte[]](0..31)
 $prefixStream = [IO.MemoryStream]::new()
 $writer = [IO.BinaryWriter]::new($prefixStream, [Text.Encoding]::UTF8, $true)
-$writer.Write([Text.Encoding]::ASCII.GetBytes('CLDXL001'))
+$writer.Write([Text.Encoding]::ASCII.GetBytes('CLDYL001'))
 $writer.Write([uint32]1)
 $writer.Write([uint32]1)
 $writer.Write([uint32]($nodeBytes.Length / 2))
@@ -81,8 +81,8 @@ $metadata = [byte[]]::new($prefix.Length + $tag.Length + $nodeBytes.Length + $ma
 [Array]::Copy($tag, 0, $metadata, $prefix.Length, $tag.Length)
 [Array]::Copy($nodeBytes, 0, $metadata, $prefix.Length + $tag.Length, $nodeBytes.Length)
 [Array]::Copy($managerBytes, 0, $metadata, $prefix.Length + $tag.Length + $nodeBytes.Length, $managerBytes.Length)
-[IO.File]::WriteAllBytes((Join-Path $captureRoot 'claudex-launcher.bin'), $metadata)
-[IO.File]::WriteAllBytes((Join-Path $captureRoot 'claudex-launcher.key'), $key)
+[IO.File]::WriteAllBytes((Join-Path $captureRoot 'claudey-launcher.bin'), $metadata)
+[IO.File]::WriteAllBytes((Join-Path $captureRoot 'claudey-launcher.key'), $key)
 $node = (Get-Command 'node.exe' -CommandType Application -ErrorAction Stop).Source
 & $node (Join-Path $SourceRoot 'scripts\windows-shim-capture.mjs') $captureLauncher $managerPath
 if ($LASTEXITCODE -ne 0) { throw 'Native launcher capture proof failed.' }

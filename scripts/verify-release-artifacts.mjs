@@ -52,10 +52,10 @@ function validateSbom(bytes, manifest) {
   const value = parseJson(bytes);
   if (!exact(value, ['spdxVersion', 'dataLicense', 'SPDXID', 'name', 'documentNamespace', 'creationInfo',
     'packages', 'files', 'relationships']) || value.spdxVersion !== 'SPDX-2.3' || value.dataLicense !== 'CC0-1.0'
-    || value.SPDXID !== 'SPDXRef-DOCUMENT' || value.name !== `claudex-manager-${manifest.managerVersion}`
+    || value.SPDXID !== 'SPDXRef-DOCUMENT' || value.name !== `claudey-manager-${manifest.managerVersion}`
     || value.documentNamespace !== `https://github.com/ramsaijanapana/claude_code_cliProxy/spdx/${manifest.managerVersion}/${manifest.sourceRevision}`
     || !Array.isArray(value.packages) || value.packages.length !== 1
-    || value.packages[0]?.name !== 'claudex-manager' || value.packages[0]?.versionInfo !== manifest.managerVersion
+    || value.packages[0]?.name !== 'claudey-manager' || value.packages[0]?.versionInfo !== manifest.managerVersion
     || !Array.isArray(value.files) || value.files.length < 1 || !Array.isArray(value.relationships)
     || value.relationships.length !== value.files.length + 1) throw failure();
 }
@@ -174,7 +174,7 @@ export function verifyShimDescriptor({ descriptor, bytes, target, sourceRevision
       || !exact(descriptor, ['schemaVersion', 'target', 'sourceRevision', 'name', 'sha256', 'size',
         'managerShimCompatibilityVersion', 'compiler']) || descriptor.schemaVersion !== 1
       || descriptor.target !== target || descriptor.sourceRevision !== sourceRevision
-      || descriptor.name !== `claudex-${target}.exe` || !SHA256.test(descriptor.sha256)
+      || descriptor.name !== `claudey-${target}.exe` || !SHA256.test(descriptor.sha256)
       || descriptor.sha256 !== hash(bytes) || descriptor.size !== bytes.length
       || descriptor.managerShimCompatibilityVersion !== 1) throw failure();
     compiler(descriptor.compiler);

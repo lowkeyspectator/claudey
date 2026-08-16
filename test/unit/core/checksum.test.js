@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import test from 'node:test';
 
-import { ClaudexError } from '../../../src/core/errors.js';
+import { ClaudeyError } from '../../../src/core/errors.js';
 import { parseChecksumManifest, verifySha256 } from '../../../src/core/checksum.js';
 import { downloadVerifiedRelease, resolveReleaseAsset } from '../../../src/core/release.js';
 import { createReleaseHttp } from '../../support/release-server.js';
@@ -40,13 +40,13 @@ function releaseDescriptor(asset) {
 }
 
 async function temporaryStaging(t) {
-  const root = await mkdtemp(join(tmpdir(), 'claudex-release-'));
+  const root = await mkdtemp(join(tmpdir(), 'claudey-release-'));
   t.after(() => rm(root, { recursive: true, force: true }));
   return root;
 }
 
 function expectsIntegrityFailure(error) {
-  return error instanceof ClaudexError && error.code === 'CHECKSUM_MISMATCH';
+  return error instanceof ClaudeyError && error.code === 'CHECKSUM_MISMATCH';
 }
 
 test('parses exactly one lowercase or uppercase SHA-256 record for the selected basename', () => {
@@ -160,7 +160,7 @@ test('fails checksum parsing or a bounded archive stream before an unverified fi
   ]) });
   await assert.rejects(
     () => downloadVerifiedRelease(release, asset, root, { http: boundedHttp, limits: { archiveBytes: 5 } }),
-    (error) => error instanceof ClaudexError && error.code === 'NETWORK_FAILURE'
+    (error) => error instanceof ClaudeyError && error.code === 'NETWORK_FAILURE'
   );
   assert.deepEqual((await readdir(root)).filter((name) => name.endsWith('.part')), []);
 });

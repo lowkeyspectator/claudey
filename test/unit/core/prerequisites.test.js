@@ -8,7 +8,7 @@ import test, { after } from 'node:test';
 import { resolveVerifiedExecutable } from '../../../src/core/executable.js';
 import { assessPrerequisites } from '../../../src/core/prerequisites.js';
 
-const root = await fs.mkdtemp(path.join(os.tmpdir(), 'claudex-prerequisites-'));
+const root = await fs.mkdtemp(path.join(os.tmpdir(), 'claudey-prerequisites-'));
 after(() => fs.rm(root, { recursive: true, force: true }));
 
 function tagged(stats, tag = 0) { Object.defineProperty(stats, 'reparseTag', { value: tag, configurable: true }); return stats; }
@@ -163,7 +163,7 @@ test('uses an exact bounded Git version probe and rejects confused output', asyn
   }
 });
 test('accepts only a branded fixed POSIX tar resolved through real filesystem handles', async (t) => {
-  const hostRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'claudex-posix-root-'));
+  const hostRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'claudey-posix-root-'));
   t.after(() => fs.rm(hostRoot, { recursive: true, force: true }));
   const hostTar = path.join(hostRoot, 'usr', 'bin', 'tar');
   await fs.mkdir(path.dirname(hostTar), { recursive: true });

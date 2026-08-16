@@ -37,13 +37,13 @@ function fixture() {
   const installSh = Buffer.from('#!/bin/sh\nset -eu\n');
   const installPs1 = Buffer.from("Set-StrictMode -Version Latest\r\n");
   const sbom = buildSpdxDocument({ managerVersion: '1.2.3', sourceRevision: REVISION,
-    inventory: [{ path: 'bin/claudexctl.js', sha256: 'a'.repeat(64), size: 10, mode: 0o755 }] });
-  const payload = artifact('claudex-manager-1.2.3.tar.gz', payloadBytes);
-  const x64 = { ...artifact('claudex-windows-x64.exe', x64Bytes),
+    inventory: [{ path: 'bin/claudeyctl.js', sha256: 'a'.repeat(64), size: 10, mode: 0o755 }] });
+  const payload = artifact('claudey-manager-1.2.3.tar.gz', payloadBytes);
+  const x64 = { ...artifact('claudey-windows-x64.exe', x64Bytes),
     compiler: { name: 'MSVC', version: '19.44', flags: ['/O2'] } };
-  const arm64 = { ...artifact('claudex-windows-arm64.exe', arm64Bytes),
+  const arm64 = { ...artifact('claudey-windows-arm64.exe', arm64Bytes),
     compiler: { name: 'MSVC', version: '19.44', flags: ['/O2'] } };
-  const sbomArtifact = artifact('claudex-manager-1.2.3.spdx.json', sbom.bytes);
+  const sbomArtifact = artifact('claudey-manager-1.2.3.spdx.json', sbom.bytes);
   const manifest = {
     schemaVersion: 1, managerVersion: '1.2.3', sourceRevision: REVISION, managerShimCompatibilityVersion: 1,
     payload, shims: { 'windows-x64': x64, 'windows-arm64': arm64 },
@@ -95,7 +95,7 @@ test('release workflow is a blocking artifact-consuming DAG and publishes only a
     'scripts/e2e-validate-report.mjs', 'PRIVATE_REPORTING_NOT_VERIFIED', 'subject-checksums:',
     'gh attestation verify', '--source-digest "$GITHUB_SHA"', '--source-ref "$GITHUB_REF"',
     '--signer-workflow "$GITHUB_REPOSITORY/.github/workflows/release.yml"', 'gh release create',
-    'retention-days: 7', 'overwrite: false', 'CLAUDEX_SECRET_CANARY'
+    'retention-days: 7', 'overwrite: false', 'CLAUDEY_SECRET_CANARY'
   ]) assert.ok(source.includes(token), token);
   for (const osName of ['windows-latest', 'windows-11-arm', 'macos-15-intel', 'macos-15', 'ubuntu-24.04', 'ubuntu-24.04-arm']) {
     assert.ok(source.includes(osName), osName);
@@ -177,7 +177,7 @@ test('actual attestation verification output must cover every exact checksum sub
 test('native shim descriptors are bound to real bytes, target, source revision, compiler, and compatibility', () => {
   const bytes = Buffer.from('shim');
   const descriptor = {
-    schemaVersion: 1, target: 'windows-x64', sourceRevision: REVISION, name: 'claudex-windows-x64.exe',
+    schemaVersion: 1, target: 'windows-x64', sourceRevision: REVISION, name: 'claudey-windows-x64.exe',
     sha256: hash(bytes), size: bytes.length, managerShimCompatibilityVersion: 1,
     compiler: { name: 'MSVC', version: '19.44', flags: ['/O2', '/guard:cf'] }
   };
@@ -197,7 +197,7 @@ test('native shim descriptors are bound to real bytes, target, source revision, 
 });
 
 test('verifier CLI writes once, re-reads regular files, and fails with one sanitized error', async (t) => {
-  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'claudex-release-verify-'));
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'claudey-release-verify-'));
   t.after(() => fs.rm(directory, { recursive: true, force: true }));
   const value = fixture();
   for (const [name, bytes] of value.artifacts) await fs.writeFile(path.join(directory, name), bytes, { flag: 'wx' });

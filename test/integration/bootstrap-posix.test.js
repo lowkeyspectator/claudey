@@ -59,28 +59,28 @@ import fs from 'node:fs';
 import path from 'node:path';
 const args = process.argv.slice(2);
 fs.appendFileSync(path.join(process.env.HOME, 'bootstrap-capture.jsonl'), JSON.stringify({ version: '${version}', args }) + '\\n');
-if (args.length === 1 && args[0] === '--help') process.stdout.write('claudexctl setup\\n');
+if (args.length === 1 && args[0] === '--help') process.stdout.write('claudeyctl setup\\n');
 else if (args[0] !== 'setup' && args[0] !== 'launcher') process.exitCode = 2;
 `;
   return tar([
-    { name: 'bin/claudexctl.js', mode: 0o755, bytes: manager },
-    { name: 'bin/claudexctl', mode: 0o755, bytes: '#!/bin/sh\nexit 99\n' },
-    { name: 'bin/claudex', mode: 0o755, bytes: '#!/bin/sh\nexit 99\n' },
+    { name: 'bin/claudeyctl.js', mode: 0o755, bytes: manager },
+    { name: 'bin/claudeyctl', mode: 0o755, bytes: '#!/bin/sh\nexit 99\n' },
+    { name: 'bin/claude-codex', mode: 0o755, bytes: '#!/bin/sh\nexit 99\n' },
     { name: 'bin/claude-agy', mode: 0o755, bytes: '#!/bin/sh\nexit 99\n' },
     { name: 'bin/claude-grok', mode: 0o755, bytes: '#!/bin/sh\nexit 99\n' },
     { name: 'bin/claudey', mode: 0o755, bytes: '#!/bin/sh\nexit 99\n' },
-    { name: 'package.json', mode: 0o644, bytes: `${JSON.stringify({ name: 'claudexctl', version, type: 'module' })}\n` },
+    { name: 'package.json', mode: 0o644, bytes: `${JSON.stringify({ name: 'claudeyctl', version, type: 'module' })}\n` },
     { name: 'LICENSE', mode: 0o644, bytes: 'test license\n' }
   ]);
 }
 
 function manifest(version, bytes) {
-  const payloadArtifact = { name: `claudex-manager-${version}.tar.gz`, sha256: sha256(bytes), size: bytes.length };
-  const x64 = { name: 'claudex-windows-x64.exe', sha256: 'b'.repeat(64), size: 1,
+  const payloadArtifact = { name: `claudey-manager-${version}.tar.gz`, sha256: sha256(bytes), size: bytes.length };
+  const x64 = { name: 'claudey-windows-x64.exe', sha256: 'b'.repeat(64), size: 1,
     compiler: { name: 'MSVC', version: '19.44.35211', flags: ['/O2'] } };
-  const arm64 = { name: 'claudex-windows-arm64.exe', sha256: 'c'.repeat(64), size: 1,
+  const arm64 = { name: 'claudey-windows-arm64.exe', sha256: 'c'.repeat(64), size: 1,
     compiler: { name: 'MSVC', version: '19.44.35211', flags: ['/O2'] } };
-  const sbom = { name: `claudex-manager-${version}.spdx.json`, sha256: 'd'.repeat(64), size: 1 };
+  const sbom = { name: `claudey-manager-${version}.spdx.json`, sha256: 'd'.repeat(64), size: 1 };
   const target = (shim = null) => ({ payload: payloadArtifact.name, shim });
   return {
     schemaVersion: 1, managerVersion: version, sourceRevision: REVISION, managerShimCompatibilityVersion: 1,
@@ -142,7 +142,7 @@ test('checked-in bootstrap is valid POSIX shell with fixed HTTPS project origin 
 test('bootstrap rejects root and unsupported Node lines while accepting a supported absolute Node path with spaces', async (t) => {
   const shell = shellPath();
   if (!shell) return t.skip('A POSIX shell is unavailable on this host.');
-  const temporary = await fs.mkdtemp(path.join(os.tmpdir(), 'claudex-bootstrap-prereq-'));
+  const temporary = await fs.mkdtemp(path.join(os.tmpdir(), 'claudey-bootstrap-prereq-'));
   t.after(() => fs.rm(temporary, { recursive: true, force: true }));
   const fakeBin = path.join(temporary, 'fake bin'); await fs.mkdir(fakeBin);
   const fakeNode = path.join(fakeBin, 'node');
@@ -170,28 +170,28 @@ test('bootstrap rejects root and unsupported Node lines while accepting a suppor
 test('actual checked-in POSIX launchers preserve every hostile argument as a discrete value', async (t) => {
   const shell = shellPath();
   if (!shell) return t.skip('A POSIX shell is unavailable on this host.');
-  const temporary = await fs.mkdtemp(path.join(os.tmpdir(), 'claudex-launcher-posix-'));
+  const temporary = await fs.mkdtemp(path.join(os.tmpdir(), 'claudey-launcher-posix-'));
   t.after(() => fs.rm(temporary, { recursive: true, force: true }));
   const capture = path.join(temporary, 'capture.mjs');
   const output = path.join(temporary, 'capture.jsonl');
-  await fs.writeFile(capture, "import fs from 'node:fs'; fs.appendFileSync(process.env.CLDX_CAPTURE_FILE, JSON.stringify(process.argv.slice(2)) + '\\n');\n");
+  await fs.writeFile(capture, "import fs from 'node:fs'; fs.appendFileSync(process.env.CLDY_CAPTURE_FILE, JSON.stringify(process.argv.slice(2)) + '\\n');\n");
   const hostile = ['', 'two words', 'quote"value', "single'value", '$()', '%PATH%', '--flag', 'line\nbreak', '\\end\\'];
   const expected = {
-    claudexctl: hostile,
-    claudex: ['launcher', 'claudex', ...hostile],
+    claudeyctl: hostile,
+    claudey: ['launcher', 'claudey', ...hostile],
+    'claude-codex': ['launcher', 'claude-codex', ...hostile],
     'claude-agy': ['launcher', 'claude-agy', ...hostile],
-    'claude-grok': ['launcher', 'claude-grok', ...hostile],
-    claudey: ['launcher', 'claudey', ...hostile]
+    'claude-grok': ['launcher', 'claude-grok', ...hostile]
   };
   for (const name of Object.keys(expected)) {
     const template = await fs.readFile(path.join(root, 'bin', name), 'utf8');
-    const rendered = template.replace('__CLAUDEX_NODE__', process.execPath.replaceAll("'", `'"'"'`))
-      .replace('__CLAUDEX_MANAGER__', capture.replaceAll("'", `'"'"'`));
+    const rendered = template.replace('__CLAUDEY_NODE__', process.execPath.replaceAll("'", `'"'"'`))
+      .replace('__CLAUDEY_MANAGER__', capture.replaceAll("'", `'"'"'`));
     const target = path.join(temporary, name); await fs.writeFile(target, rendered, { mode: 0o755 });
     const driver = path.join(temporary, `${name}-driver.sh`);
     await fs.writeFile(driver, `#!/bin/sh\nexec ${shellQuote(shellPathFor(target))} ${hostile.map(shellQuote).join(' ')}\n`, { mode: 0o755 });
     const result = spawnSync(shell, [shellPathFor(driver)], {
-      encoding: 'utf8', env: { PATH: process.env.PATH, CLDX_CAPTURE_FILE: output }
+      encoding: 'utf8', env: { PATH: process.env.PATH, CLDY_CAPTURE_FILE: output }
     });
     assert.equal(result.status, 0, result.stderr);
   }
@@ -201,14 +201,14 @@ test('actual checked-in POSIX launchers preserve every hostile argument as a dis
 
 test('native POSIX bootstrap verifies, activates, updates, forwards exact setup flags, and consumes one rollback', async (t) => {
   if (process.platform === 'win32') return t.skip('Native POSIX filesystem and launcher proof runs on Linux/macOS CI.');
-  const temporary = await fs.mkdtemp(path.join(os.homedir(), '.claudex-bootstrap-posix-'));
+  const temporary = await fs.mkdtemp(path.join(os.homedir(), '.claudey-bootstrap-posix-'));
   t.after(() => fs.rm(temporary, { recursive: true, force: true }));
   const home = path.join(temporary, 'home'); await fs.mkdir(home);
   const releases = new Map([['1.0.0', payload('1.0.0')], ['1.0.1', payload('1.0.1')]]);
   const requests = [];
   const server = http.createServer((request, response) => {
     requests.push(request.url);
-    const match = /^\/releases\/download\/v(1\.0\.[01])\/(project-manifest\.json|claudex-manager-\1\.tar\.gz)$/u.exec(request.url);
+    const match = /^\/releases\/download\/v(1\.0\.[01])\/(project-manifest\.json|claudey-manager-\1\.tar\.gz)$/u.exec(request.url);
     if (!match) { response.writeHead(404).end(); return; }
     const bytes = releases.get(match[1]);
     const body = match[2] === 'project-manifest.json' ? Buffer.from(`${JSON.stringify(manifest(match[1], bytes))}\n`) : bytes;
@@ -228,7 +228,7 @@ test('native POSIX bootstrap verifies, activates, updates, forwards exact setup 
     assert.equal(result.status, 0, result.stderr);
     assert.equal(result.stdout.includes('OAuth'), false);
   }
-  const managerRoot = path.join(home, 'data', 'claudexctl');
+  const managerRoot = path.join(home, 'data', 'claudeyctl');
   assert.equal((await fs.lstat(managerRoot)).mode & 0o777, 0o700);
   assert.equal((await fs.lstat(path.join(managerRoot, 'current'))).isSymbolicLink(), true);
   assert.match(await fs.readlink(path.join(managerRoot, 'current')), /1\.0\.1/u);
@@ -236,20 +236,20 @@ test('native POSIX bootstrap verifies, activates, updates, forwards exact setup 
   assert.equal(await fs.lstat(path.join(active, 'capture')).then(() => true, () => false), false);
   const bin = path.join(home, '.local', 'bin');
   const hostile = ['', 'two words', 'quote"value', "single'value", '$()', '%PATH%', '--flag', 'line\nbreak'];
-  const launch = await runShell('/bin/sh', path.join(bin, 'claudex'), ['--model', 'live', '--', ...hostile], env);
+  const launch = await runShell('/bin/sh', path.join(bin, 'claude-codex'), ['--model', 'live', '--', ...hostile], env);
   assert.equal(launch.status, 0, launch.stderr);
   const captured = (await fs.readFile(path.join(home, 'bootstrap-capture.jsonl'), 'utf8')).trim().split('\n').map(JSON.parse);
   assert.deepEqual(captured.filter(({ args }) => args[0] === 'setup').map(({ version, args }) => ({ version, args })), [
     { version: '1.0.0', args: ['setup', '--yes', '--no-path'] },
     { version: '1.0.1', args: ['setup', '--yes', '--no-path'] }
   ]);
-  assert.deepEqual(captured.at(-1), { version: '1.0.1', args: ['launcher', 'claudex', '--model', 'live', '--', ...hostile] });
+  assert.deepEqual(captured.at(-1), { version: '1.0.1', args: ['launcher', 'claude-codex', '--model', 'live', '--', ...hostile] });
   const rollback = await runShell('/bin/sh', rendered, ['--rollback-manager'], env);
   assert.equal(rollback.status, 0, rollback.stderr);
   assert.match(await fs.readlink(path.join(managerRoot, 'current')), /1\.0\.0/u);
   assert.equal(await fs.lstat(path.join(managerRoot, 'previous')).then(() => true, () => false), false);
   assert.deepEqual(requests, [
-    '/releases/download/v1.0.0/project-manifest.json', '/releases/download/v1.0.0/claudex-manager-1.0.0.tar.gz',
-    '/releases/download/v1.0.1/project-manifest.json', '/releases/download/v1.0.1/claudex-manager-1.0.1.tar.gz'
+    '/releases/download/v1.0.0/project-manifest.json', '/releases/download/v1.0.0/claudey-manager-1.0.0.tar.gz',
+    '/releases/download/v1.0.1/project-manifest.json', '/releases/download/v1.0.1/claudey-manager-1.0.1.tar.gz'
   ]);
 });

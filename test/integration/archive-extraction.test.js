@@ -8,7 +8,7 @@ import path from 'node:path';
 import { PassThrough } from 'node:stream';
 import test from 'node:test';
 
-import { ClaudexError } from '../../src/core/errors.js';
+import { ClaudeyError } from '../../src/core/errors.js';
 
 import {
   buildArchiveHelperRequest,
@@ -26,7 +26,7 @@ import { buildTarGz, buildZip, validTarEntries, validZipEntries } from '../suppo
 const sha256 = (bytes) => createHash('sha256').update(bytes).digest('hex');
 
 async function extractionFixture(t, kind = 'tar.gz', options = {}) {
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'claudexctl-archive-extraction-'));
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'claudeyctl-archive-extraction-'));
   t.after(() => fs.rm(root, { recursive: true, force: true }));
   await fs.chmod(root, 0o700);
   const bytes = kind === 'zip' ? buildZip(options.entries ?? validZipEntries) : buildTarGz(options.entries ?? validTarEntries);
@@ -565,13 +565,13 @@ test('last launch seam pins tools, request digest, and destination before Window
       runProcess: async (command, args, options) => {
         spawned = true;
         assert.equal(args[5], '-EncodedCommand');
-        const expectedDigest = options.env.CLAUDEX_ARCHIVE_REQUEST_SHA256;
+        const expectedDigest = options.env.CLAUDEY_ARCHIVE_REQUEST_SHA256;
         const actualDigest = sha256(await fs.readFile(requestPath));
         const actualHelperDigest = sha256(await fsApi.readFile(ARCHIVE_HELPER_PATH));
         const destinationStats = await fs.lstat(fixture.staging, { bigint: true });
-        const destinationMatches = String(destinationStats.dev) === options.env.CLAUDEX_ARCHIVE_DESTINATION_VOLUME
-          && String(destinationStats.ino) === options.env.CLAUDEX_ARCHIVE_DESTINATION_FILE_ID;
-        if (actualDigest !== expectedDigest || actualHelperDigest !== options.env.CLAUDEX_ARCHIVE_HELPER_SHA256
+        const destinationMatches = String(destinationStats.dev) === options.env.CLAUDEY_ARCHIVE_DESTINATION_VOLUME
+          && String(destinationStats.ino) === options.env.CLAUDEY_ARCHIVE_DESTINATION_FILE_ID;
+        if (actualDigest !== expectedDigest || actualHelperDigest !== options.env.CLAUDEY_ARCHIVE_HELPER_SHA256
           || !destinationMatches) return { code: 1, stderr: '', stdout: JSON.stringify({
           ok: false, schemaVersion: 1, requestId, code: 'SAFETY_REFUSAL', message: 'Archive extraction was refused.'
         }) };
@@ -623,7 +623,7 @@ test('child termination deadline reports exitUnconfirmed when close never arrive
 test('unconfirmed extractor exit retains original staging and skips every cleanup hook', async (t) => {
   const fixture = await extractionFixture(t);
   let cleanupHookCalled = false;
-  const unconfirmed = new ClaudexError('CAPABILITY_UNSUPPORTED', 'Extractor exit could not be confirmed.', {
+  const unconfirmed = new ClaudeyError('CAPABILITY_UNSUPPORTED', 'Extractor exit could not be confirmed.', {
     details: { exitUnconfirmed: true }
   });
   const adapter = posixAdapter(fixture.plan, { staging: fixture.staging, error: unconfirmed });
@@ -641,7 +641,7 @@ test('unconfirmed Windows helper exit retains request, staging, and archive evid
   const fixture = await extractionFixture(t, 'zip');
   const requestPath = path.join(fixture.root, 'retained-request.json');
   let requestCleanupCalled = false;
-  const unconfirmed = new ClaudexError('CAPABILITY_UNSUPPORTED', 'Helper exit could not be confirmed.', {
+  const unconfirmed = new ClaudeyError('CAPABILITY_UNSUPPORTED', 'Helper exit could not be confirmed.', {
     details: { exitUnconfirmed: true }
   });
   await assert.rejects(() => extractValidatedArchive(fixture.plan, fixture.staging, {
@@ -937,16 +937,16 @@ test('bundled helper refuses a pre-created planned directory after its empty-roo
   const probeScript = String.raw`$ErrorActionPreference='Stop'
 Add-Type @'
 using System; using System.IO; using System.Runtime.InteropServices; using Microsoft.Win32.SafeHandles;
-public static class ClaudexDeleteProbe {
+public static class ClaudeyDeleteProbe {
  [DllImport("kernel32.dll",CharSet=CharSet.Unicode,SetLastError=true)] public static extern SafeFileHandle CreateFileW(string n,uint a,FileShare s,IntPtr x,FileMode m,uint f,IntPtr t);
 }
 '@
 [Console]::Out.WriteLine('READY');[Console]::Out.Flush()
-while($true){$h=[ClaudexDeleteProbe]::CreateFileW($env:CLAUDEX_PROBE_PATH,0x10000,[IO.FileShare]::Read -bor [IO.FileShare]::Write -bor [IO.FileShare]::Delete,[IntPtr]::Zero,[IO.FileMode]::Open,0,[IntPtr]::Zero);if($h.IsInvalid){if([Runtime.InteropServices.Marshal]::GetLastWin32Error()-eq 32){[Console]::Out.WriteLine('LOCKED');[Console]::Out.Flush();break}}else{$h.Dispose()};Start-Sleep -Milliseconds 1}`;
+while($true){$h=[ClaudeyDeleteProbe]::CreateFileW($env:CLAUDEY_PROBE_PATH,0x10000,[IO.FileShare]::Read -bor [IO.FileShare]::Write -bor [IO.FileShare]::Delete,[IntPtr]::Zero,[IO.FileMode]::Open,0,[IntPtr]::Zero);if($h.IsInvalid){if([Runtime.InteropServices.Marshal]::GetLastWin32Error()-eq 32){[Console]::Out.WriteLine('LOCKED');[Console]::Out.Flush();break}}else{$h.Dispose()};Start-Sleep -Milliseconds 1}`;
   const probe = spawn(powershell, [
     '-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass',
     '-EncodedCommand', Buffer.from(probeScript, 'utf16le').toString('base64')
-  ], { windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, CLAUDEX_PROBE_PATH: fixture.archivePath } });
+  ], { windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, CLAUDEY_PROBE_PATH: fixture.archivePath } });
   probe.stdout.setEncoding('utf8');
   let probeOutput = '';
   const ready = new Promise((resolve, reject) => {

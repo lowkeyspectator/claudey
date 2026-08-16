@@ -16,7 +16,7 @@ import {
 } from '../../../src/platform/windows-helpers.js';
 
 async function tempRoot(t) {
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'claudexctl-permissions-'));
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'claudeyctl-permissions-'));
   t.after(() => fs.rm(root, { recursive: true, force: true }));
   return root;
 }
@@ -37,7 +37,7 @@ test('atomically replaces an owned file with the requested protected mode', asyn
 
 test('rejects a link swap before rename without writing outside the managed root', async (t) => {
   const root = await tempRoot(t);
-  const outside = await fs.mkdtemp(path.join(os.tmpdir(), 'claudexctl-permissions-outside-'));
+  const outside = await fs.mkdtemp(path.join(os.tmpdir(), 'claudeyctl-permissions-outside-'));
   t.after(() => fs.rm(outside, { recursive: true, force: true }));
   await fs.mkdir(path.join(root, 'state'));
   const outsideTarget = path.join(outside, 'config.json');
@@ -69,7 +69,7 @@ test('rejects a link swap before rename without writing outside the managed root
 
 test('rejects a staged temporary file that becomes a link before activation', async (t) => {
   const root = await tempRoot(t);
-  const outside = await fs.mkdtemp(path.join(os.tmpdir(), 'claudexctl-permissions-temp-outside-'));
+  const outside = await fs.mkdtemp(path.join(os.tmpdir(), 'claudeyctl-permissions-temp-outside-'));
   t.after(() => fs.rm(outside, { recursive: true, force: true }));
   await fs.mkdir(path.join(root, 'state'));
   const outsideTarget = path.join(outside, 'config.json');
@@ -120,7 +120,7 @@ test('builds and parses the strict schema-1 Windows helper protocol', async () =
   const request = buildSecurityHelperRequest({
     requestId: '11111111-1111-4111-8111-111111111111',
     operation: 'inspect',
-    path: 'C:\\Users\\Casey\\AppData\\Local\\claudexctl\\state',
+    path: 'C:\\Users\\Casey\\AppData\\Local\\claudeyctl\\state',
     expectedType: 'directory',
     currentUserSid: 'S-1-5-21-1-2-3-4'
   });
@@ -128,7 +128,7 @@ test('builds and parses the strict schema-1 Windows helper protocol', async () =
     schemaVersion: 1,
     requestId: '11111111-1111-4111-8111-111111111111',
     operation: 'inspect',
-    path: 'C:\\Users\\Casey\\AppData\\Local\\claudexctl\\state',
+    path: 'C:\\Users\\Casey\\AppData\\Local\\claudeyctl\\state',
     expectedType: 'directory',
     currentUserSid: 'S-1-5-21-1-2-3-4'
   });
@@ -138,7 +138,7 @@ test('builds and parses the strict schema-1 Windows helper protocol', async () =
     schemaVersion: 1,
     requestId: '11111111-1111-4111-8111-111111111111',
     result: {
-      canonicalPath: 'C:\\Users\\Casey\\AppData\\Local\\claudexctl\\state',
+      canonicalPath: 'C:\\Users\\Casey\\AppData\\Local\\claudeyctl\\state',
       type: 'directory',
       isReparsePoint: false,
       ownerSid: 'S-1-5-21-1-2-3-4',
@@ -427,7 +427,7 @@ test('cleans the exact dedicated directory when DACL bootstrap fails before requ
     path: 'C:\\managed\\state', expectedType: 'directory', currentUserSid: 'S-1-5-21-1-2-3-4'
   };
   const listRequestDirectories = async () => new Set((await fs.readdir(os.tmpdir()))
-    .filter((name) => name.startsWith('claudexctl-security-')));
+    .filter((name) => name.startsWith('claudeyctl-security-')));
   const before = await listRequestDirectories();
   let extras = [];
   try {
@@ -449,7 +449,7 @@ test('cleans the exact request file and directory when file DACL protection fail
     path: 'C:\\managed\\state', expectedType: 'directory', currentUserSid: 'S-1-5-21-1-2-3-4'
   };
   const listRequestDirectories = async () => new Set((await fs.readdir(os.tmpdir()))
-    .filter((name) => name.startsWith('claudexctl-security-')));
+    .filter((name) => name.startsWith('claudeyctl-security-')));
   const before = await listRequestDirectories();
   let icaclsCalls = 0;
   let extras = [];

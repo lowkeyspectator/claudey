@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import crypto from 'node:crypto';
 import test from 'node:test';
 
 import {
@@ -14,14 +15,13 @@ import {
 import { Secret } from '../../../src/core/secrets.js';
 
 const ROOTS = Object.freeze({
-  managerRoot: 'C:\\Users\\Casey\\AppData\\Local\\claudexctl',
-  stateRoot: 'C:\\Users\\Casey\\AppData\\Local\\claudexctl\\state',
-  userBinRoot: 'C:\\Users\\Casey\\AppData\\Local\\claudexctl\\bin',
-  ownedPluginRoots: ['C:\\Users\\Casey\\AppData\\Local\\claudexctl\\plugins']
+  managerRoot: 'C:\\Users\\Casey\\AppData\\Local\\claudeyctl',
+  stateRoot: 'C:\\Users\\Casey\\AppData\\Local\\claudeyctl\\state',
+  userBinRoot: 'C:\\Users\\Casey\\AppData\\Local\\claudeyctl\\bin',
+  ownedPluginRoots: ['C:\\Users\\Casey\\AppData\\Local\\claudeyctl\\plugins']
 });
 const FILE_HASH = 'a'.repeat(64);
-const CANONICAL = '{"files":[{"relativePath":"releases/7.2.130/CLIProxyAPI.exe","sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","type":"file"}],"installationId":"11111111-1111-4111-8111-111111111111","managedRoots":{"managerRoot":"C:\\\\Users\\\\Casey\\\\AppData\\\\Local\\\\claudexctl","ownedPluginRoots":["C:\\\\Users\\\\Casey\\\\AppData\\\\Local\\\\claudexctl\\\\plugins"],"stateRoot":"C:\\\\Users\\\\Casey\\\\AppData\\\\Local\\\\claudexctl\\\\state","userBinRoot":"C:\\\\Users\\\\Casey\\\\AppData\\\\Local\\\\claudexctl\\\\bin"},"platform":{"family":"windows","runtimeArch":"x64"},"schemaVersion":1}';
-const HMAC = 'CgHxuFvgsUpkHZ-jPqd-S28pNY7r7R535lzgSZ332co';
+const CANONICAL = '{"files":[{"relativePath":"releases/7.2.130/CLIProxyAPI.exe","sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","type":"file"}],"installationId":"11111111-1111-4111-8111-111111111111","managedRoots":{"managerRoot":"C:\\\\Users\\\\Casey\\\\AppData\\\\Local\\\\claudeyctl","ownedPluginRoots":["C:\\\\Users\\\\Casey\\\\AppData\\\\Local\\\\claudeyctl\\\\plugins"],"stateRoot":"C:\\\\Users\\\\Casey\\\\AppData\\\\Local\\\\claudeyctl\\\\state","userBinRoot":"C:\\\\Users\\\\Casey\\\\AppData\\\\Local\\\\claudeyctl\\\\bin"},"platform":{"family":"windows","runtimeArch":"x64"},"schemaVersion":1}';
 
 function unsignedManifest(overrides = {}) {
   return {
@@ -34,8 +34,14 @@ function unsignedManifest(overrides = {}) {
   };
 }
 
+const HMAC = crypto.createHmac('sha256', Buffer.alloc(32, 0x22))
+  .update(canonicalManifestBytes(unsignedManifest())).digest('base64url');
+
 function signedManifest(overrides = {}) {
-  return { ...unsignedManifest(overrides), hmac: HMAC };
+  const unsigned = unsignedManifest(overrides);
+  const hmac = crypto.createHmac('sha256', Buffer.alloc(32, 0x22))
+    .update(canonicalManifestBytes(unsigned)).digest('base64url');
+  return { ...unsigned, hmac: overrides.hmac ?? hmac };
 }
 
 function key(byte = 0x22) {
@@ -175,9 +181,9 @@ test('rejects exact protected directory segments with minimal fixed paths withou
 test('rejects adapter-protected roots and credential filenames without banning ordinary release files', async () => {
   const protectedPaths = {
     ...ROOTS,
-    configRoot: 'C:\\Users\\Casey\\AppData\\Local\\claudexctl\\settings',
-    authRoot: 'C:\\Users\\Casey\\AppData\\Local\\claudexctl\\credentials',
-    protectedRoots: ['C:\\Users\\Casey\\AppData\\Local\\claudexctl\\private-state']
+    configRoot: 'C:\\Users\\Casey\\AppData\\Local\\claudeyctl\\settings',
+    authRoot: 'C:\\Users\\Casey\\AppData\\Local\\claudeyctl\\credentials',
+    protectedRoots: ['C:\\Users\\Casey\\AppData\\Local\\claudeyctl\\private-state']
   };
   const unsafePaths = [
     'settings/user.json',
@@ -209,8 +215,8 @@ test('rejects adapter-protected roots and credential filenames without banning o
 test('plans removal only for authenticated unchanged files and preserves modified or missing files', async () => {
   const manifest = verifyManifest(signedManifest(), key(), { fixedPaths: ROOTS });
   const states = [
-    { exists: true, canonicalPath: 'C:\\Users\\Casey\\AppData\\Local\\claudexctl\\releases\\7.2.130\\CLIProxyAPI.exe', type: 'file', sha256: FILE_HASH },
-    { exists: true, canonicalPath: 'C:\\Users\\Casey\\AppData\\Local\\claudexctl\\releases\\7.2.130\\CLIProxyAPI.exe', type: 'file', sha256: 'b'.repeat(64) },
+    { exists: true, canonicalPath: 'C:\\Users\\Casey\\AppData\\Local\\claudeyctl\\releases\\7.2.130\\CLIProxyAPI.exe', type: 'file', sha256: FILE_HASH },
+    { exists: true, canonicalPath: 'C:\\Users\\Casey\\AppData\\Local\\claudeyctl\\releases\\7.2.130\\CLIProxyAPI.exe', type: 'file', sha256: 'b'.repeat(64) },
     { exists: false }
   ];
   const expected = [
@@ -233,7 +239,7 @@ test('owned-file removal rechecks the planned target under lock and never unlink
   const manifest = verifyManifest(signedManifest(), key(), { fixedPaths: ROOTS });
   const unchanged = {
     exists: true,
-    canonicalPath: 'C:\\Users\\Casey\\AppData\\Local\\claudexctl\\releases\\7.2.130\\CLIProxyAPI.exe',
+    canonicalPath: 'C:\\Users\\Casey\\AppData\\Local\\claudeyctl\\releases\\7.2.130\\CLIProxyAPI.exe',
     type: 'file',
     sha256: FILE_HASH
   };
@@ -245,7 +251,7 @@ test('owned-file removal rechecks the planned target under lock and never unlink
   for (const changed of [
     { ...unchanged, sha256: 'b'.repeat(64) },
     { ...unchanged, type: 'directory' },
-    { ...unchanged, canonicalPath: 'C:\\Users\\Casey\\AppData\\Local\\claudexctl\\foreign.exe' }
+    { ...unchanged, canonicalPath: 'C:\\Users\\Casey\\AppData\\Local\\claudeyctl\\foreign.exe' }
   ]) {
     const unlinked = [];
     const result = await removeVerifiedOwnedFile(

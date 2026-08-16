@@ -31,7 +31,7 @@ test('marketplace, plugin, and MCP manifests are exact local static definitions 
 test('wrapper passes only a no-follow link-free Git source candidate to the fixed absolute manager invocation', async () => {
   const calls = [];
   const result = await runPluginForwarder({
-    cwd: '/home/casey/project/subdir', pluginRoot: '/home/casey/.claude/plugins/cache/claudex/cursor-agent/1',
+    cwd: '/home/casey/project/subdir', pluginRoot: '/home/casey/.claude/plugins/cache/claudey/cursor-agent/1',
     ambientEnvironment: { PATH: '/usr/bin', HOME: '/home/casey', LANG: 'en_US.UTF-8', ANTHROPIC_API_KEY: 'private-canary' },
     inspectSourceRoot: async (candidate) => {
       calls.push(['inspect-source', candidate]);
@@ -39,8 +39,8 @@ test('wrapper passes only a no-follow link-free Git source candidate to the fixe
         isLink: false, isJunction: false, isReparsePoint: false };
     },
     discoverManager: async () => ({
-      nodePath: '/usr/bin/node', managerPath: '/home/casey/.local/share/claudexctl/manager/index.mjs',
-      managerRoot: '/home/casey/.local/share/claudexctl', installationId: UUID
+      nodePath: '/usr/bin/node', managerPath: '/home/casey/.local/share/claudeyctl/manager/index.mjs',
+      managerRoot: '/home/casey/.local/share/claudeyctl', installationId: UUID
     }),
     revalidateManager: async (identity) => { calls.push(['revalidate-manager', identity]); return true; },
     spawnManager: async (invocation) => { calls.push(['spawn', invocation]); return { code: 0, signal: null }; }
@@ -49,17 +49,17 @@ test('wrapper passes only a no-follow link-free Git source candidate to the fixe
   assert.deepEqual(calls.map(([name]) => name), ['inspect-source', 'revalidate-manager', 'spawn']);
   assert.deepEqual(calls[1][1], {
     manager: {
-      nodePath: '/usr/bin/node', managerPath: '/home/casey/.local/share/claudexctl/manager/index.mjs',
-      managerRoot: '/home/casey/.local/share/claudexctl', installationId: UUID
+      nodePath: '/usr/bin/node', managerPath: '/home/casey/.local/share/claudeyctl/manager/index.mjs',
+      managerRoot: '/home/casey/.local/share/claudeyctl', installationId: UUID
     },
-    pluginRoot: '/home/casey/.claude/plugins/cache/claudex/cursor-agent/1'
+    pluginRoot: '/home/casey/.claude/plugins/cache/claudey/cursor-agent/1'
   });
   assert.deepEqual(calls[2][1], {
     executable: '/usr/bin/node',
-    args: ['/home/casey/.local/share/claudexctl/manager/index.mjs', 'cursor', 'mcp-serve',
+    args: ['/home/casey/.local/share/claudeyctl/manager/index.mjs', 'cursor', 'mcp-serve',
       '--source-root', '/home/casey/project', '--installation-id', UUID,
-      '--manager-root', '/home/casey/.local/share/claudexctl'],
-    cwd: '/home/casey/.local/share/claudexctl',
+      '--manager-root', '/home/casey/.local/share/claudeyctl'],
+    cwd: '/home/casey/.local/share/claudeyctl',
     env: { PATH: '/usr/bin', HOME: '/home/casey', LANG: 'en_US.UTF-8', CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: '1' },
     stdio: 'inherit', shell: false
   });

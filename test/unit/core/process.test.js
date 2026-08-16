@@ -38,8 +38,8 @@ function record(overrides = {}) {
     pid: 3210,
     processGroupId: 3210,
     processStartTime: '2026-08-13T10:11:12.000Z',
-    executableCanonicalPath: 'C:\\Program Files\\Claudex\\CLIProxyAPI.exe',
-    configCanonicalPath: 'C:\\Users\\fixture\\Claudex\\config.yaml',
+    executableCanonicalPath: 'C:\\Program Files\\Claudey\\CLIProxyAPI.exe',
+    configCanonicalPath: 'C:\\Users\\fixture\\Claudey\\config.yaml',
     version: '7.2.130',
     host: '127.0.0.1',
     port: 8317,
@@ -58,8 +58,8 @@ function snapshot(overrides = {}) {
       parentPid: 100,
       processGroupId: 3210,
       processStartTime: '2026-08-13T10:11:12.000Z',
-      executableCanonicalPath: 'C:\\Program Files\\Claudex\\CLIProxyAPI.exe',
-      configCanonicalPath: 'C:\\Users\\fixture\\Claudex\\config.yaml',
+      executableCanonicalPath: 'C:\\Program Files\\Claudey\\CLIProxyAPI.exe',
+      configCanonicalPath: 'C:\\Users\\fixture\\Claudey\\config.yaml',
       installationId: INSTALLATION_ID,
       instanceId: INSTANCE_ID,
       nonce: NONCE
@@ -69,7 +69,7 @@ function snapshot(overrides = {}) {
       parentPid: 3210,
       processGroupId: 3210,
       processStartTime: '2026-08-13T10:11:12.500Z',
-      executableCanonicalPath: 'C:\\Program Files\\Claudex\\worker.exe'
+      executableCanonicalPath: 'C:\\Program Files\\Claudey\\worker.exe'
     }],
     ...overrides
   };
@@ -193,7 +193,7 @@ test('force signaling revalidates and targets an exact surviving descendant afte
         parentPid: 3210,
         processGroupId: 3210,
         processStartTime: '2026-08-13T10:11:12.500Z',
-        executableCanonicalPath: 'C:\\Program Files\\Claudex\\worker.exe'
+        executableCanonicalPath: 'C:\\Program Files\\Claudey\\worker.exe'
       }]
     }),
     signalTree: async (request) => { signals.push(structuredClone(request)); return { acknowledged: true }; }
@@ -214,11 +214,11 @@ test('Windows helper protocol accepts PID-only operations and rejects broad or m
   assert.throws(() => buildProcessHelperRequest({ requestId: INSTALLATION_ID, operation: 'signalProcess', pid: 3210, imageName: 'CLIProxyAPI.exe' }));
   const response = JSON.stringify({
     schemaVersion: 1, requestId: INSTALLATION_ID, ok: true,
-    result: { pid: 3210, parentPid: 100, processStartTime: '2026-08-13T10:11:12.000Z', executableCanonicalPath: 'C:\\Program Files\\Claudex\\CLIProxyAPI.exe' }
+    result: { pid: 3210, parentPid: 100, processStartTime: '2026-08-13T10:11:12.000Z', executableCanonicalPath: 'C:\\Program Files\\Claudey\\CLIProxyAPI.exe' }
   });
   assert.deepEqual(parseProcessHelperResponse(response, { requestId: INSTALLATION_ID, operation: 'inspectProcess', pid: 3210 }).pid, 3210);
   assert.throws(() => parseProcessHelperResponse(response.replace('3210', '3211'), { requestId: INSTALLATION_ID, operation: 'inspectProcess', pid: 3210 }));
-  assert.throws(() => parseProcessHelperResponse(response.replace('C:\\\\Program Files\\\\Claudex\\\\CLIProxyAPI.exe', 'relative.exe'), { requestId: INSTALLATION_ID, operation: 'inspectProcess', pid: 3210 }));
+  assert.throws(() => parseProcessHelperResponse(response.replace('C:\\\\Program Files\\\\Claudey\\\\CLIProxyAPI.exe', 'relative.exe'), { requestId: INSTALLATION_ID, operation: 'inspectProcess', pid: 3210 }));
   assert.throws(() => parseProcessHelperResponse(`${response}\nnoise`, { requestId: INSTALLATION_ID, operation: 'inspectProcess', pid: 3210 }));
 
   const descendants = JSON.stringify({
@@ -226,7 +226,7 @@ test('Windows helper protocol accepts PID-only operations and rejects broad or m
     result: {
       rootPid: 3210, complete: true, processes: [{
         pid: 3211, parentPid: 3210, processStartTime: '2026-08-13T10:11:12.500Z',
-        executableCanonicalPath: 'C:\\Program Files\\Claudex\\worker.exe'
+        executableCanonicalPath: 'C:\\Program Files\\Claudey\\worker.exe'
       }]
     }
   });
@@ -262,7 +262,7 @@ test('native Windows helper returns exact CIM identity for one PID without image
   const powershell = POWERSHELL_PATH;
   const icacls = 'C:\\Windows\\System32\\icacls.exe';
   const helper = path.resolve('scripts/windows/process-helper.ps1');
-  const directory = mkdtempSync(path.join(os.tmpdir(), 'claudexctl-process-request-'));
+  const directory = mkdtempSync(path.join(os.tmpdir(), 'claudeyctl-process-request-'));
   const requestPath = path.join(directory, 'request.json');
   const ownerSid = execFileSync(powershell, ['-NoProfile', '-NonInteractive', '-Command', '[System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value'], { encoding: 'utf8' }).trim();
   try {

@@ -43,14 +43,14 @@ test('manager payload is byte-deterministic, sorted, timestamp-free, and contain
   assert.deepEqual(names, [...names].sort());
   assert.equal(entries.every(({ mtime }) => mtime === 0), true);
   assert.equal(first.archiveBytes[9], 255);
-  for (const required of ['.claude-plugin/marketplace.json', 'LICENSE', 'package.json', 'bin/claudex',
-    'bin/claude-agy', 'bin/claude-grok', 'bin/claudey', 'bin/claudexctl', 'bin/claudexctl.js', 'plugins/cursor-agent/.mcp.json',
+  for (const required of ['.claude-plugin/marketplace.json', 'LICENSE', 'package.json', 'bin/claude-codex',
+    'bin/claude-agy', 'bin/claude-grok', 'bin/claudey', 'bin/claudeyctl', 'bin/claudeyctl.js', 'plugins/cursor-agent/.mcp.json',
     'scripts/windows/archive-helper.ps1', 'src/cli/main.js']) assert.equal(names.includes(required), true, required);
   assert.equal(names.some((name) => /^(?:docs|test|schemas|\.superpowers|\.git)(?:\/|$)/u.test(name)), false);
   assert.equal(names.some((name) => name === 'node_modules' || name.startsWith('node_modules/')), false);
   assert.deepEqual(first.inventory.map(({ path }) => path), names);
   assert.deepEqual(first.payloadDescriptor.artifact, {
-    name: 'claudex-manager-1.0.0.tar.gz',
+    name: 'claudey-manager-1.0.0.tar.gz',
     sha256: crypto.createHash('sha256').update(first.archiveBytes).digest('hex'), size: first.archiveBytes.length
   });
   const packagedJson = JSON.parse(entries.find(({ name }) => name === 'package.json').bytes.toString('utf8'));
@@ -58,17 +58,17 @@ test('manager payload is byte-deterministic, sorted, timestamp-free, and contain
   assert.equal(packagedJson.dependencies, undefined);
   assert.equal(packagedJson.optionalDependencies, undefined);
   assert.equal(packagedJson.peerDependencies, undefined);
-  assert.equal(entries.find(({ name }) => name === 'bin/claudexctl.js').mode, 0o755);
+  assert.equal(entries.find(({ name }) => name === 'bin/claudeyctl.js').mode, 0o755);
   assert.equal(entries.find(({ name }) => name === 'src/cli/main.js').mode, 0o644);
 
-  const extracted = await fs.mkdtemp(path.join(os.tmpdir(), 'claudex-payload-'));
+  const extracted = await fs.mkdtemp(path.join(os.tmpdir(), 'claudey-payload-'));
   t.after(() => fs.rm(extracted, { recursive: true, force: true }));
   for (const entry of entries) {
     const target = path.join(extracted, ...entry.name.split('/'));
     await fs.mkdir(path.dirname(target), { recursive: true });
     await fs.writeFile(target, entry.bytes, { mode: entry.mode });
   }
-  const help = spawnSync(process.execPath, [path.join(extracted, 'bin/claudexctl.js'), '--help'], {
+  const help = spawnSync(process.execPath, [path.join(extracted, 'bin/claudeyctl.js'), '--help'], {
     cwd: extracted, encoding: 'utf8', env: { PATH: process.env.PATH }
   });
   assert.equal(help.status, 0, help.stderr);
@@ -76,7 +76,7 @@ test('manager payload is byte-deterministic, sorted, timestamp-free, and contain
 });
 
 test('packager rejects undeclared runtime files, secret canaries, runtime dependencies, and hostile metadata before output', async (t) => {
-  const temporary = await fs.mkdtemp(path.join(os.tmpdir(), 'claudex-package-'));
+  const temporary = await fs.mkdtemp(path.join(os.tmpdir(), 'claudey-package-'));
   t.after(() => fs.rm(temporary, { recursive: true, force: true }));
   for (const item of ['.claude-plugin', 'bin', 'plugins', 'scripts', 'src']) {
     await fs.cp(path.join(root, item), path.join(temporary, item), { recursive: true });
@@ -113,26 +113,26 @@ test('SPDX inventory and descriptors are deterministic and bind every packaged f
   assert.deepEqual(document.files.map(({ fileName }) => fileName), packaged.inventory.map(({ path }) => path));
   assert.deepEqual(first.descriptor, {
     schemaVersion: 1, kind: 'manager-sbom', managerVersion: '1.0.0', sourceRevision: REVISION,
-    artifact: { name: 'claudex-manager-1.0.0.spdx.json',
+    artifact: { name: 'claudey-manager-1.0.0.spdx.json',
       sha256: crypto.createHash('sha256').update(first.bytes).digest('hex'), size: first.bytes.length }
   });
   assert.equal(first.bytes.includes(Buffer.from('task18-private-secret-canary')), false);
 });
 
 test('packaging CLI writes only the payload, payload descriptor, SBOM, and SBOM descriptor without npm install', async (t) => {
-  const out = await fs.mkdtemp(path.join(os.tmpdir(), 'claudex-package-out-'));
+  const out = await fs.mkdtemp(path.join(os.tmpdir(), 'claudey-package-out-'));
   t.after(() => fs.rm(out, { recursive: true, force: true }));
   const child = spawnSync(process.execPath, [path.join(root, 'scripts/package.mjs'), '--root', root, '--out', out,
     '--version', '1.0.0', '--source-revision', REVISION], {
-    cwd: root, encoding: 'utf8', env: { PATH: process.env.PATH, CLAUDEX_SECRET_CANARY: 'task18-cli-output-canary' }
+    cwd: root, encoding: 'utf8', env: { PATH: process.env.PATH, CLAUDEY_SECRET_CANARY: 'task18-cli-output-canary' }
   });
   assert.equal(child.status, 0, child.stderr);
   assert.equal(child.stdout, '');
   assert.deepEqual((await fs.readdir(out)).sort(), [
-    'claudex-manager-1.0.0.spdx.json', 'claudex-manager-1.0.0.spdx.json.descriptor.json',
-    'claudex-manager-1.0.0.tar.gz', 'claudex-manager-1.0.0.tar.gz.json'
+    'claudey-manager-1.0.0.spdx.json', 'claudey-manager-1.0.0.spdx.json.descriptor.json',
+    'claudey-manager-1.0.0.tar.gz', 'claudey-manager-1.0.0.tar.gz.json'
   ]);
-  const descriptor = JSON.parse(await fs.readFile(path.join(out, 'claudex-manager-1.0.0.tar.gz.json'), 'utf8'));
+  const descriptor = JSON.parse(await fs.readFile(path.join(out, 'claudey-manager-1.0.0.tar.gz.json'), 'utf8'));
   const bytes = await fs.readFile(path.join(out, descriptor.artifact.name));
   assert.equal(descriptor.sourceRevision, REVISION);
   assert.equal(descriptor.artifact.sha256, crypto.createHash('sha256').update(bytes).digest('hex'));
@@ -146,14 +146,14 @@ test('schema-1 project manifest accepts the complete six-target fixture and reje
     (value) => { delete value.payload.sha256; },
     (value) => { value.extra = true; },
     (value) => { delete value.targets['linux-arm64']; },
-    (value) => { value.targets['darwin-arm64'].shim = 'claudex-windows-arm64.exe'; },
+    (value) => { value.targets['darwin-arm64'].shim = 'claudey-windows-arm64.exe'; },
     (value) => { value.provenanceSubjects[0].sha256 = 'f'.repeat(64); },
     (value) => { value.managerShimCompatibilityVersion = 0; },
     (value) => { value.shims['windows-x64'].compiler.flags.push(7); },
     (value) => {
       value.shims['windows-x64'].name = 'foreign-x64.exe';
       value.targets['windows-x64'].shim = 'foreign-x64.exe';
-      value.provenanceSubjects.find(({ name }) => name === 'claudex-windows-x64.exe').name = 'foreign-x64.exe';
+      value.provenanceSubjects.find(({ name }) => name === 'claudey-windows-x64.exe').name = 'foreign-x64.exe';
       value.provenanceSubjects.sort((left, right) => left.name.localeCompare(right.name, 'en'));
     }
   ]) {

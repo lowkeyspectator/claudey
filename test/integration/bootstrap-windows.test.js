@@ -49,18 +49,18 @@ import fs from 'node:fs';
 import path from 'node:path';
 const args = process.argv.slice(2);
 fs.appendFileSync(path.join(process.env.LOCALAPPDATA, 'bootstrap-capture.jsonl'), JSON.stringify({ version: '${version}', args }) + '\\n');
-if (args.length === 1 && args[0] === '--help') process.stdout.write('claudexctl setup\\n');
+if (args.length === 1 && args[0] === '--help') process.stdout.write('claudeyctl setup\\n');
 else if (args[0] === 'setup') process.exitCode = ${failSetup ? '23' : '0'};
 else if (args[0] !== 'launcher') process.exitCode = 2;
 `;
   return tar([
-    { name: 'bin/claudexctl.js', mode: 0o755, bytes: manager },
-    { name: 'bin/claudexctl', mode: 0o755, bytes: '#!/bin/sh\nexit 99\n' },
-    { name: 'bin/claudex', mode: 0o755, bytes: '#!/bin/sh\nexit 99\n' },
+    { name: 'bin/claudeyctl.js', mode: 0o755, bytes: manager },
+    { name: 'bin/claudeyctl', mode: 0o755, bytes: '#!/bin/sh\nexit 99\n' },
+    { name: 'bin/claude-codex', mode: 0o755, bytes: '#!/bin/sh\nexit 99\n' },
     { name: 'bin/claude-agy', mode: 0o755, bytes: '#!/bin/sh\nexit 99\n' },
     { name: 'bin/claude-grok', mode: 0o755, bytes: '#!/bin/sh\nexit 99\n' },
     { name: 'bin/claudey', mode: 0o755, bytes: '#!/bin/sh\nexit 99\n' },
-    { name: 'package.json', mode: 0o644, bytes: `${JSON.stringify({ name: 'claudexctl', version, type: 'module' })}\n` },
+    { name: 'package.json', mode: 0o644, bytes: `${JSON.stringify({ name: 'claudeyctl', version, type: 'module' })}\n` },
     { name: 'LICENSE', mode: 0o644, bytes: 'test license\n' }
   ]);
 }
@@ -79,14 +79,14 @@ function payloadWithNonzeroNamePadding(bytes) {
 }
 
 function manifest(version, payloadBytes, shimBytes, target = 'windows-x64') {
-  const payloadArtifact = { name: `claudex-manager-${version}.tar.gz`, sha256: sha256(payloadBytes), size: payloadBytes.length };
+  const payloadArtifact = { name: `claudey-manager-${version}.tar.gz`, sha256: sha256(payloadBytes), size: payloadBytes.length };
   const x64Bytes = target === 'windows-x64' ? shimBytes : Buffer.from('other-x64');
   const arm64Bytes = target === 'windows-arm64' ? shimBytes : Buffer.from('other-arm64');
-  const x64 = { name: 'claudex-windows-x64.exe', sha256: sha256(x64Bytes), size: x64Bytes.length,
+  const x64 = { name: 'claudey-windows-x64.exe', sha256: sha256(x64Bytes), size: x64Bytes.length,
     compiler: { name: 'MSVC', version: '19.44.35211', flags: ['/O2'] } };
-  const arm64 = { name: 'claudex-windows-arm64.exe', sha256: sha256(arm64Bytes), size: arm64Bytes.length,
+  const arm64 = { name: 'claudey-windows-arm64.exe', sha256: sha256(arm64Bytes), size: arm64Bytes.length,
     compiler: { name: 'MSVC', version: '19.44.35211', flags: ['/O2'] } };
-  const sbom = { name: `claudex-manager-${version}.spdx.json`, sha256: 'd'.repeat(64), size: 1 };
+  const sbom = { name: `claudey-manager-${version}.spdx.json`, sha256: 'd'.repeat(64), size: 1 };
   const mapping = (shim = null) => ({ payload: payloadArtifact.name, shim });
   return {
     schemaVersion: 1, managerVersion: version, sourceRevision: REVISION, managerShimCompatibilityVersion: 1,
@@ -122,19 +122,19 @@ public static class FixtureShim {
   public static int Main(string[] args) {
     try {
       string directory = Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location);
-      byte[] metadata = File.ReadAllBytes(Path.Combine(directory, "claudex-launcher.bin"));
-      if (metadata.Length < 72 || Encoding.ASCII.GetString(metadata, 0, 8) != "CLDXL001"
+      byte[] metadata = File.ReadAllBytes(Path.Combine(directory, "claudey-launcher.bin"));
+      if (metadata.Length < 72 || Encoding.ASCII.GetString(metadata, 0, 8) != "CLDYL001"
           || BitConverter.ToInt32(metadata, 8) != 1 || BitConverter.ToInt32(metadata, 12) != 1) return 7;
       int nodeChars = BitConverter.ToInt32(metadata, 16); int managerChars = BitConverter.ToInt32(metadata, 20);
       string node = Encoding.Unicode.GetString(metadata, 72, nodeChars * 2);
       string manager = Encoding.Unicode.GetString(metadata, 72 + nodeChars * 2, managerChars * 2);
       List<string> child = new List<string>(); child.Add(manager);
       string name = Path.GetFileName(Assembly.GetExecutingAssembly().Location).ToLowerInvariant();
-      if (name == "claudex.exe") { child.Add("launcher"); child.Add("claudex"); }
+      if (name == "claude-codex.exe") { child.Add("launcher"); child.Add("claude-codex"); }
       else if (name == "claude-agy.exe") { child.Add("launcher"); child.Add("claude-agy"); }
       else if (name == "claude-grok.exe") { child.Add("launcher"); child.Add("claude-grok"); }
       else if (name == "claudey.exe") { child.Add("launcher"); child.Add("claudey"); }
-      else if (name != "claudexctl.exe") return 7;
+      else if (name != "claudeyctl.exe") return 7;
       child.AddRange(args); List<string> quoted = new List<string>(); foreach (string item in child) quoted.Add(Quote(item));
       ProcessStartInfo start = new ProcessStartInfo(node, String.Join(" ", quoted.ToArray())); start.UseShellExecute = false;
       Process process = Process.Start(start); process.WaitForExit(); return process.ExitCode;
@@ -179,12 +179,12 @@ async function fixtureServer(t, releases, target) {
   const requests = [];
   const server = http.createServer((request, response) => {
     requests.push(request.url);
-    const match = /^\/releases\/download\/v(1\.0\.[0-9])\/(project-manifest\.json|claudex-manager-\1\.tar\.gz|claudex-windows-(?:x64|arm64)\.exe)$/u.exec(request.url);
+    const match = /^\/releases\/download\/v(1\.0\.[0-9])\/(project-manifest\.json|claudey-manager-\1\.tar\.gz|claudey-windows-(?:x64|arm64)\.exe)$/u.exec(request.url);
     if (!match || !releases.has(match[1])) { response.writeHead(404).end(); return; }
     const release = releases.get(match[1]); let body;
     if (match[2] === 'project-manifest.json') body = release.servedManifest ?? Buffer.from(`${JSON.stringify(release.manifest)}\n`);
     else if (match[2].endsWith('.tar.gz')) body = release.servedPayload ?? release.payload;
-    else if (match[2] === `claudex-${target}.exe`) body = release.servedShim ?? release.shim;
+    else if (match[2] === `claudey-${target}.exe`) body = release.servedShim ?? release.shim;
     else { response.writeHead(404).end(); return; }
     response.writeHead(200, { 'content-length': body.length }); response.end(body);
   });
@@ -200,7 +200,7 @@ test('checked-in bootstrap has fixed syntax, origin, options, static embedded No
   assert.equal(parsed.status, 0, parsed.stdout + parsed.stderr);
   assert.match(source, /\$ProjectOrigin = 'https:\/\/github\.com\/ramsaijanapana\/claude_code_cliProxy'/u);
   for (const token of ["'-Version'", "'-Yes'", "'-NoPath'", "'-RollbackManager'", 'SetAccessRuleProtection',
-    'ContainerInherit', 'ObjectInherit', 'FileShare]::None', 'ClaudexBootstrapDirectoryPin', 'CreateFileW',
+    'ContainerInherit', 'ObjectInherit', 'FileShare]::None', 'ClaudeyBootstrapDirectoryPin', 'CreateFileW',
     'BackupSemanticsOpenReparse', '& "$launcherPath" @setupArgs']) assert.match(source, new RegExp(token.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
   assert.equal(/(?:npm install|npm ci|auth codex|auth antigravity|cursor login|cmd\.exe|\.cmd\b)/iu.test(source), false);
   assert.doesNotMatch(source, /(?:Start-Process[^\r\n]+-Verb\s+RunAs|require[^\r\n]+administrator)/iu);
@@ -211,7 +211,7 @@ test('checked-in bootstrap has fixed syntax, origin, options, static embedded No
 });
 
 test('bootstrap rejects unknown, duplicate, malformed, conflicting, and missing-Node invocations before managed writes', async (t) => {
-  const temporary = await fs.mkdtemp(path.join(os.tmpdir(), 'claudex-bootstrap-windows-parser-'));
+  const temporary = await fs.mkdtemp(path.join(os.tmpdir(), 'claudey-bootstrap-windows-parser-'));
   t.after(() => fs.rm(temporary, { recursive: true, force: true }));
   for (const args of [['-Unknown'], ['-Version'], ['-Version', 'v1.0.0'], ['-Yes', '-Yes'],
     ['-RollbackManager', '-Version', '1.0.0'], ['-RollbackManager', '-NoPath']]) {
@@ -219,28 +219,28 @@ test('bootstrap rejects unknown, duplicate, malformed, conflicting, and missing-
     await fs.mkdir(env.TEMP, { recursive: true });
     const result = await runPowerShell(installer, args, env);
     assert.equal(result.status, 64, `${args.join(' ')}\n${result.stdout}\n${result.stderr}`);
-    await assert.rejects(fs.lstat(path.join(env.LOCALAPPDATA, 'claudexctl')), { code: 'ENOENT' });
+    await assert.rejects(fs.lstat(path.join(env.LOCALAPPDATA, 'claudeyctl')), { code: 'ENOENT' });
   }
   const absentNodeRoot = path.join(temporary, 'absent-node'); const env = testEnvironment(absentNodeRoot);
   env.PATH = `${process.env.SystemRoot}\\System32;${process.env.SystemRoot}`; await fs.mkdir(env.TEMP, { recursive: true });
   const result = await runPowerShell(installer, ['-Version', '1.0.0'], env);
   assert.equal(result.status, 69, result.stderr);
   assert.match(result.stderr, /PREREQUISITE_MISSING/u);
-  await assert.rejects(fs.lstat(path.join(env.LOCALAPPDATA, 'claudexctl')), { code: 'ENOENT' });
+  await assert.rejects(fs.lstat(path.join(env.LOCALAPPDATA, 'claudeyctl')), { code: 'ENOENT' });
 
   const unsafeRoot = path.join(temporary, 'unsafe-root'); const unsafeEnv = testEnvironment(unsafeRoot);
   unsafeEnv.LOCALAPPDATA = `${unsafeRoot}\\base\\..\\escaped`;
   await fs.mkdir(unsafeEnv.TEMP, { recursive: true });
   const unsafe = await runPowerShell(installer, ['-Version', '1.0.0'], unsafeEnv);
   assert.equal(unsafe.status, 7, unsafe.stderr);
-  await assert.rejects(fs.lstat(path.join(unsafeRoot, 'escaped', 'claudexctl')), { code: 'ENOENT' });
+  await assert.rejects(fs.lstat(path.join(unsafeRoot, 'escaped', 'claudeyctl')), { code: 'ENOENT' });
 });
 
 test('native bootstrap verifies target artifacts, self-tests shims, activates, forwards exact setup flags, and consumes rollback', async (t) => {
   if (process.platform !== 'win32' || spawnSync(csc, ['/nologo', '/?'], { encoding: 'utf8' }).status !== 0) {
     return t.skip('Native Windows bootstrap proof requires the inbox .NET C# compiler.');
   }
-  const temporary = await fs.mkdtemp(path.join(os.tmpdir(), 'claudex-bootstrap-windows-native-'));
+  const temporary = await fs.mkdtemp(path.join(os.tmpdir(), 'claudey-bootstrap-windows-native-'));
   t.after(() => fs.rm(temporary, { recursive: true, force: true }));
   const env = testEnvironment(temporary); await fs.mkdir(env.TEMP, { recursive: true });
   const shim = await buildFixtureShim(temporary);
@@ -256,16 +256,16 @@ test('native bootstrap verifies target artifacts, self-tests shims, activates, f
     assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
     assert.equal(`${result.stdout}${result.stderr}`.includes('OAuth'), false);
   }
-  const managerRoot = path.join(env.LOCALAPPDATA, 'claudexctl');
+  const managerRoot = path.join(env.LOCALAPPDATA, 'claudeyctl');
   const current = JSON.parse(await fs.readFile(path.join(managerRoot, 'current.json'), 'utf8'));
   const previous = JSON.parse(await fs.readFile(path.join(managerRoot, 'previous.json'), 'utf8'));
   assert.match(current.target, /1\.0\.1/u); assert.match(previous.target, /1\.0\.0/u);
   const bin = path.join(managerRoot, 'bin');
-  const launcherBytes = await Promise.all(['claudexctl.exe', 'claudex.exe', 'claude-agy.exe', 'claude-grok.exe', 'claudey.exe']
+  const launcherBytes = await Promise.all(['claudeyctl.exe', 'claude-codex.exe', 'claude-agy.exe', 'claude-grok.exe', 'claudey.exe']
     .map((name) => fs.readFile(path.join(bin, name))));
   assert.ok(launcherBytes.every((bytes) => bytes.equals(shim)));
-  assert.equal((await fs.readFile(path.join(bin, 'claudex-launcher.key'))).length, 32);
-  assert.equal((await fs.readFile(path.join(bin, 'claudex-launcher.bin'))).subarray(0, 8).toString('ascii'), 'CLDXL001');
+  assert.equal((await fs.readFile(path.join(bin, 'claudey-launcher.key'))).length, 32);
+  assert.equal((await fs.readFile(path.join(bin, 'claudey-launcher.bin'))).subarray(0, 8).toString('ascii'), 'CLDYL001');
   assert.deepEqual((await fs.readdir(path.join(managerRoot, 'staging'))).sort(), []);
   const aclScript = `$a=Get-Acl -LiteralPath '${managerRoot.replaceAll("'", "''")}';$r=@($a.GetAccessRules($true,$false,[Security.Principal.SecurityIdentifier]));[pscustomobject]@{protected=$a.AreAccessRulesProtected;count=$r.Count;sids=@($r|%{$_.IdentityReference.Value}|sort)}|ConvertTo-Json -Compress`;
   const acl = spawnSync(powershell, ['-NoProfile', '-NonInteractive', '-Command', aclScript], { env, encoding: 'utf8' });
@@ -276,14 +276,14 @@ test('native bootstrap verifies target artifacts, self-tests shims, activates, f
     ['-NoProfile', '-NonInteractive', '-Command', '[Security.Principal.WindowsIdentity]::GetCurrent().User.Value'],
     { env, encoding: 'utf8' }).stdout.trim()].sort());
   const hostile = ['', 'two words', 'quote"value', '%PATH%', '--flag', 'line\r\nbreak'];
-  const launch = spawnSync(path.join(bin, 'claudex.exe'), hostile, { env, encoding: 'utf8', windowsHide: true });
+  const launch = spawnSync(path.join(bin, 'claude-codex.exe'), hostile, { env, encoding: 'utf8', windowsHide: true });
   assert.equal(launch.status, 0, launch.stderr);
   let rows = (await fs.readFile(path.join(env.LOCALAPPDATA, 'bootstrap-capture.jsonl'), 'utf8')).trim().split(/\r?\n/u).map(JSON.parse);
   assert.deepEqual(rows.filter(({ args }) => args[0] === 'setup').map(({ version, args }) => ({ version, args })), [
     { version: '1.0.0', args: ['setup', '--yes', '--no-path'] },
     { version: '1.0.1', args: ['setup', '--yes', '--no-path'] }
   ]);
-  assert.deepEqual(rows.at(-1), { version: '1.0.1', args: ['launcher', 'claudex', ...hostile] });
+  assert.deepEqual(rows.at(-1), { version: '1.0.1', args: ['launcher', 'claude-codex', ...hostile] });
   const rollback = await runPowerShell(rendered, ['-RollbackManager'], env);
   assert.equal(rollback.status, 0, rollback.stderr);
   assert.match(JSON.parse(await fs.readFile(path.join(managerRoot, 'current.json'), 'utf8')).target, /1\.0\.0/u);
@@ -291,10 +291,10 @@ test('native bootstrap verifies target artifacts, self-tests shims, activates, f
   rows = (await fs.readFile(path.join(env.LOCALAPPDATA, 'bootstrap-capture.jsonl'), 'utf8')).trim().split(/\r?\n/u).map(JSON.parse);
   assert.equal(rows.some(({ args }) => args.includes('1.0.1')), false, 'manager version was forwarded to setup');
   assert.deepEqual(served.requests, [
-    '/releases/download/v1.0.0/project-manifest.json', '/releases/download/v1.0.0/claudex-manager-1.0.0.tar.gz',
-    `/releases/download/v1.0.0/claudex-${target}.exe`,
-    '/releases/download/v1.0.1/project-manifest.json', '/releases/download/v1.0.1/claudex-manager-1.0.1.tar.gz',
-    `/releases/download/v1.0.1/claudex-${target}.exe`
+    '/releases/download/v1.0.0/project-manifest.json', '/releases/download/v1.0.0/claudey-manager-1.0.0.tar.gz',
+    `/releases/download/v1.0.0/claudey-${target}.exe`,
+    '/releases/download/v1.0.1/project-manifest.json', '/releases/download/v1.0.1/claudey-manager-1.0.1.tar.gz',
+    `/releases/download/v1.0.1/claudey-${target}.exe`
   ]);
 });
 
@@ -302,7 +302,7 @@ test('failed post-switch setup and an interrupted journal restore the last verif
   if (process.platform !== 'win32' || spawnSync(csc, ['/nologo', '/?'], { encoding: 'utf8' }).status !== 0) {
     return t.skip('Native Windows bootstrap proof requires the inbox .NET C# compiler.');
   }
-  const temporary = await fs.mkdtemp(path.join(os.tmpdir(), 'claudex-bootstrap-windows-recovery-'));
+  const temporary = await fs.mkdtemp(path.join(os.tmpdir(), 'claudey-bootstrap-windows-recovery-'));
   t.after(() => fs.rm(temporary, { recursive: true, force: true }));
   const env = testEnvironment(temporary); await fs.mkdir(env.TEMP, { recursive: true });
   const shim = await buildFixtureShim(temporary);
@@ -317,7 +317,7 @@ test('failed post-switch setup and an interrupted journal restore the last verif
   assert.equal(result.status, 0, result.stderr);
   result = await runPowerShell(rendered, ['-Version', '1.0.1', '-Yes'], env);
   assert.notEqual(result.status, 0);
-  const managerRoot = path.join(env.LOCALAPPDATA, 'claudexctl');
+  const managerRoot = path.join(env.LOCALAPPDATA, 'claudeyctl');
   const journalPath = path.join(managerRoot, 'state', 'manager-journal.json');
   const oldCurrent = JSON.parse(await fs.readFile(path.join(managerRoot, 'current.json'), 'utf8'));
   assert.match(oldCurrent.target, /1\.0\.0/u);
@@ -339,7 +339,7 @@ test('manifest, payload, target mapping, compatibility, and shim corruption fail
   if (process.platform !== 'win32' || spawnSync(csc, ['/nologo', '/?'], { encoding: 'utf8' }).status !== 0) {
     return t.skip('Native Windows bootstrap proof requires the inbox .NET C# compiler.');
   }
-  const fixtureRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'claudex-bootstrap-windows-integrity-'));
+  const fixtureRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'claudey-bootstrap-windows-integrity-'));
   t.after(() => fs.rm(fixtureRoot, { recursive: true, force: true }));
   const shim = await buildFixtureShim(fixtureRoot);
   const target = process.arch === 'arm64' ? 'windows-arm64' : 'windows-x64';
@@ -362,7 +362,7 @@ test('manifest, payload, target mapping, compatibility, and shim corruption fail
     const rendered = await renderedInstaller(temporary, served.origin);
     const result = await runPowerShell(rendered, ['-Version', '1.0.0', '-Yes'], env);
     assert.notEqual(result.status, 0, `${index}\n${result.stdout}\n${result.stderr}`);
-    await assert.rejects(fs.lstat(path.join(env.LOCALAPPDATA, 'claudexctl', 'current.json')), { code: 'ENOENT' });
+    await assert.rejects(fs.lstat(path.join(env.LOCALAPPDATA, 'claudeyctl', 'current.json')), { code: 'ENOENT' });
     assert.equal(`${result.stdout}${result.stderr}`.includes('OAuth'), false);
   }
 });
@@ -371,16 +371,16 @@ test('a first install refuses pre-existing launcher identity material instead of
   if (process.platform !== 'win32' || spawnSync(csc, ['/nologo', '/?'], { encoding: 'utf8' }).status !== 0) {
     return t.skip('Native Windows bootstrap proof requires the inbox .NET C# compiler.');
   }
-  const temporary = await fs.mkdtemp(path.join(os.tmpdir(), 'claudex-bootstrap-windows-foreign-key-'));
+  const temporary = await fs.mkdtemp(path.join(os.tmpdir(), 'claudey-bootstrap-windows-foreign-key-'));
   t.after(() => fs.rm(temporary, { recursive: true, force: true }));
   const env = testEnvironment(temporary); await fs.mkdir(env.TEMP, { recursive: true });
   const shim = await buildFixtureShim(temporary); const target = process.arch === 'arm64' ? 'windows-arm64' : 'windows-x64';
   const bytes = payload('1.0.0'); const release = { payload: bytes, shim, manifest: manifest('1.0.0', bytes, shim, target) };
   const served = await fixtureServer(t, new Map([['1.0.0', release]]), target);
   const rendered = await renderedInstaller(temporary, served.origin);
-  const managerRoot = path.join(env.LOCALAPPDATA, 'claudexctl');
+  const managerRoot = path.join(env.LOCALAPPDATA, 'claudeyctl');
   await fs.mkdir(path.join(managerRoot, 'bin'), { recursive: true });
-  await fs.writeFile(path.join(managerRoot, 'bin', 'claudex-launcher.key'), Buffer.alloc(32, 0x5a));
+  await fs.writeFile(path.join(managerRoot, 'bin', 'claudey-launcher.key'), Buffer.alloc(32, 0x5a));
   const result = await runPowerShell(rendered, ['-Version', '1.0.0', '-Yes'], env);
   assert.notEqual(result.status, 0, result.stderr);
   await assert.rejects(fs.lstat(path.join(managerRoot, 'current.json')), { code: 'ENOENT' });

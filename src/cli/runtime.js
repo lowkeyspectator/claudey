@@ -465,7 +465,6 @@ export function createProductionContainer(environment = process.env) {
       get claudey() { return getLauncher(); },
       get claudeyctl() { return getLauncher(); },
       get 'claude-codex'() { return getLauncher(); },
-      get claudex() { return getLauncher(); },
       get 'claude-agy'() { return getLauncher(); },
       get 'claude-grok'() { return getLauncher(); },
       get models() { return models ??= createGatewayQueryContext(environment); },

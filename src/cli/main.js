@@ -11,7 +11,7 @@ import { runSetupCommand } from './commands/setup.js';
 import { runStatusCommand } from './commands/status.js';
 import { runUninstallCommand } from './commands/uninstall.js';
 import { runUpdateCommand } from './commands/update.js';
-import { runClaudeCodex, runClaudex } from './launchers/claude-codex.js';
+import { runClaudeCodex } from './launchers/claude-codex.js';
 import { runClaudeAgy } from './launchers/claude-agy.js';
 import { runClaudeGrok } from './launchers/claude-grok.js';
 import { runClaudey } from './launchers/claudey.js';
@@ -113,7 +113,6 @@ const DEFAULT_HANDLERS = Object.freeze({
   cursorMcpServe: ({ options, context }) => runCursorMcpServe(options, context),
   uninstall: ({ options, context }) => runUninstallCommand(options, context),
   'claude-codex': ({ options, context }) => runClaudeCodex(options?.rawArgv ?? [], process.env, context),
-  claudex: ({ options, context }) => runClaudex(options?.rawArgv ?? [], process.env, context),
   'claude-agy': ({ options, context }) => runClaudeAgy(options?.rawArgv ?? [], process.env, context),
   'claude-grok': ({ options, context }) => runClaudeGrok(options?.rawArgv ?? [], process.env, context),
   claudey: ({ options, context }) => runClaudey(options?.rawArgv ?? [], process.env, context),

@@ -1,4 +1,4 @@
-# Claudex Cross-Platform Gateway and Cursor Bridge
+# Claudey Cross-Platform Gateway and Cursor Bridge
 
 Date: 2026-08-12
 
@@ -12,13 +12,13 @@ This project provides a safe, repeatable way to use Claude Code with models avai
 
 The implementation has three user-facing entry points:
 
-- `claudex` runs Claude Code against the locally managed CLIProxyAPI gateway and a live-selected Codex model.
+- `claudey` runs Claude Code against the locally managed CLIProxyAPI gateway with live model selection across providers (and dedicated launchers `claude-codex`, `claude-agy`, and `claude-grok`).
 - `claude-agy` runs Claude Code against the same gateway and a live-selected Antigravity model.
 - The optional Claude Code plugin exposes Cursor Agent through typed MCP tools for asking, planning, model discovery, and explicitly approved worktree changes.
 
 The normal `claude` command and the user's existing Claude configuration remain unchanged. Proxy variables and tokens exist only in the launched child process.
 
-The implementation is a zero-runtime-dependency Node.js command named `claudexctl`, with thin `install.ps1` and `install.sh` bootstrap scripts. It supports native Windows, macOS, Linux, and WSL as an independent Linux environment.
+The implementation is a zero-runtime-dependency Node.js command named `claudeyctl`, with thin `install.ps1` and `install.sh` bootstrap scripts. It supports native Windows, macOS, Linux, and WSL as an independent Linux environment.
 
 ## 2. Context and interpretation
 
@@ -129,7 +129,7 @@ Helper invocations use absolute known-system paths or verified resolution, fixed
 
 ~~~text
                          +----------------------+
-                         |      claudexctl      |
+                         |      claudeyctl      |
                          | install/auth/lifecycle|
                          +----------+-----------+
                                     |
@@ -142,7 +142,7 @@ Helper invocations use absolute known-system paths or verified resolution, fixed
                                |           |
                          Codex OAuth   Antigravity OAuth
 
- claudex ----------------------> Claude Code child
+ claudey / claude-codex -------> Claude Code child
  claude-agy -------------------> Claude Code child
    child-only ANTHROPIC_BASE_URL, ANTHROPIC_AUTH_TOKEN, selected model
 
@@ -155,7 +155,7 @@ Helper invocations use absolute known-system paths or verified resolution, fixed
 
 The Node core owns all state transitions. Bootstrap scripts only locate Node, copy or invoke the project payload, and preserve arguments.
 
-On POSIX, launchers are fixed shell scripts that invoke one absolute Node entry point with quoted static paths and `"$@"`. On Windows, launchers are tiny native `.exe` shims built reproducibly from included source for x64 and ARM64. A single audited forwarding implementation is installed under the names `claudexctl.exe`, `claudex.exe`, and `claude-agy.exe`; it uses its basename to select a fixed profile and a documented Windows quoting algorithm to call the absolute Node executable and manager entry point. No `.cmd`, `.bat`, `%*`, generated PowerShell launcher, or `cmd.exe` is used for user arguments.
+On POSIX, launchers are fixed shell scripts that invoke one absolute Node entry point with quoted static paths and `"$@"`. On Windows, launchers are tiny native `.exe` shims built reproducibly from included source for x64 and ARM64. A single audited forwarding implementation is installed under the names `claudeyctl.exe`, `claudey.exe`, `claude-codex.exe`, `claude-agy.exe`, and `claude-grok.exe`; it uses its basename to select a fixed profile and a documented Windows quoting algorithm to call the absolute Node executable and manager entry point. No `.cmd`, `.bat`, `%*`, generated PowerShell launcher, or `cmd.exe` is used for user arguments.
 
 The Windows shim binaries are distributed in this project's GitHub release, hashed in a project checksum manifest, verified before use, version-matched to the installed manager, and self-tested with a capture child before activation. The PowerShell bootstrap is invoked explicitly and uses array splatting only for its small fixed option schema.
 
@@ -169,26 +169,26 @@ Paths are resolved through one platform adapter and recorded in an installation 
 
 | Purpose | Default |
 |---|---|
-| Manager, release binaries, launchers | `%LOCALAPPDATA%\claudexctl` |
-| User configuration and OAuth root | `%APPDATA%\claudexctl` |
-| Runtime state, locks, logs, staging | `%LOCALAPPDATA%\claudexctl\state` |
-| User command directory | `%LOCALAPPDATA%\claudexctl\bin` |
+| Manager, release binaries, launchers | `%LOCALAPPDATA%\claudeyctl` |
+| User configuration and OAuth root | `%APPDATA%\claudeyctl` |
+| Runtime state, locks, logs, staging | `%LOCALAPPDATA%\claudeyctl\state` |
+| User command directory | `%LOCALAPPDATA%\claudeyctl\bin` |
 
 ### macOS
 
 | Purpose | Default |
 |---|---|
-| Manager, release binaries, configuration, OAuth root | `~/Library/Application Support/claudexctl` |
-| Runtime state and logs | `~/Library/Application Support/claudexctl/state` |
+| Manager, release binaries, configuration, OAuth root | `~/Library/Application Support/claudeyctl` |
+| Runtime state and logs | `~/Library/Application Support/claudeyctl/state` |
 | User command directory | `~/.local/bin` |
 
 ### Linux and WSL
 
 | Purpose | Default |
 |---|---|
-| Manager and release binaries | `$XDG_DATA_HOME/claudexctl`, falling back to `~/.local/share/claudexctl` |
-| Configuration and OAuth root | `$XDG_CONFIG_HOME/claudexctl`, falling back to `~/.config/claudexctl` |
-| Runtime state and logs | `$XDG_STATE_HOME/claudexctl`, falling back to `~/.local/state/claudexctl` |
+| Manager and release binaries | `$XDG_DATA_HOME/claudeyctl`, falling back to `~/.local/share/claudeyctl` |
+| Configuration and OAuth root | `$XDG_CONFIG_HOME/claudeyctl`, falling back to `~/.config/claudeyctl` |
+| Runtime state and logs | `$XDG_STATE_HOME/claudeyctl`, falling back to `~/.local/state/claudeyctl` |
 | User command directory | `~/.local/bin` |
 
 The project records every managed path, its content hash where applicable, its type, and its installation UUID. The manifest has a versioned schema and an HMAC derived from a separate protected installation secret; malformed or unauthenticated manifests are never used for deletion. Even an authenticated entry must remain within a fixed platform-managed root. OAuth artifacts are deliberately excluded from the removable-file manifest.
@@ -204,35 +204,35 @@ POSIX secret directories and files use modes `0700` and `0600`. Executables and 
 .\install.ps1 [-Version VERSION] [-Yes] [-NoPath] [-RollbackManager]
 ~~~
 
-The bootstrap installs the current project payload and then invokes `claudexctl setup`. Re-running the bootstrap is the supported manager self-update path. It never starts OAuth by surprise.
+The bootstrap installs the current project payload and then invokes `claudeyctl setup`. Re-running the bootstrap is the supported manager self-update path. It never starts OAuth by surprise.
 
 ### Management
 
 ~~~text
-claudexctl setup [--version VERSION] [--port PORT] [--with-cursor] [--no-start] [--no-path] [--yes]
-claudexctl install [--version VERSION] [--port PORT] [--yes]
-claudexctl auth codex [--device-code | --no-browser] [--callback-port PORT]
-claudexctl auth antigravity [--no-browser] [--callback-port PORT]
-claudexctl start [--foreground]
-claudexctl stop
-claudexctl restart
-claudexctl status [--json]
-claudexctl update [--check | --version VERSION] [--yes]
-claudexctl rollback [--version VERSION] [--yes]
-claudexctl models [codex | antigravity | cursor | all] [--json]
-claudexctl doctor [--json]
-claudexctl config set port PORT [--yes]
-claudexctl cursor enable [--scope user | local]
-claudexctl cursor disable [--scope user | local]
-claudexctl cursor install [--yes]
-claudexctl cursor login
-claudexctl cursor repo add [PATH]
-claudexctl cursor repo list
-claudexctl cursor repo remove [PATH]
-claudexctl cursor writes enable --yes
-claudexctl cursor writes disable
-claudexctl cursor approve APPROVAL_ID
-claudexctl uninstall [--dry-run] [--purge-auth] [--yes]
+claudeyctl setup [--version VERSION] [--port PORT] [--with-cursor] [--no-start] [--no-path] [--yes]
+claudeyctl install [--version VERSION] [--port PORT] [--yes]
+claudeyctl auth codex [--device-code | --no-browser] [--callback-port PORT]
+claudeyctl auth antigravity [--no-browser] [--callback-port PORT]
+claudeyctl start [--foreground]
+claudeyctl stop
+claudeyctl restart
+claudeyctl status [--json]
+claudeyctl update [--check | --version VERSION] [--yes]
+claudeyctl rollback [--version VERSION] [--yes]
+claudeyctl models [codex | antigravity | cursor | all] [--json]
+claudeyctl doctor [--json]
+claudeyctl config set port PORT [--yes]
+claudeyctl cursor enable [--scope user | local]
+claudeyctl cursor disable [--scope user | local]
+claudeyctl cursor install [--yes]
+claudeyctl cursor login
+claudeyctl cursor repo add [PATH]
+claudeyctl cursor repo list
+claudeyctl cursor repo remove [PATH]
+claudeyctl cursor writes enable --yes
+claudeyctl cursor writes disable
+claudeyctl cursor approve APPROVAL_ID
+claudeyctl uninstall [--dry-run] [--purge-auth] [--yes]
 ~~~
 
 Global management flags are `--json`, `--no-color`, `--verbose`, and `--non-interactive`. `CI=true` implies noninteractive behavior.
@@ -248,8 +248,10 @@ When `setup --with-cursor` cannot find a verified Cursor Agent installation, it 
 ### Launchers
 
 ~~~text
-claudex [--model MODEL | --select] [-- CLAUDE_ARGS...]
-claude-agy [--model MODEL | --select] [-- CLAUDE_ARGS...]
+claudey [--model MODEL | --select | --yolo] [-- CLAUDE_ARGS...]
+claude-codex [--model MODEL | --select | --all | --yolo] [-- CLAUDE_ARGS...]
+claude-agy [--model MODEL | --select | --yolo] [-- CLAUDE_ARGS...]
+claude-grok [--model MODEL | --select | --yolo] [-- CLAUDE_ARGS...]
 ~~~
 
 Everything after the delimiter is forwarded to Claude Code as discrete arguments. A delimiter is required when Claude arguments are present so wrapper and Claude options cannot be confused.
@@ -347,17 +349,17 @@ If a config no longer matches its recorded managed hash, mutation commands stop 
 
 ### Codex
 
-`claudexctl auth codex` invokes the installed CLIProxyAPI binary with its supported Codex OAuth login mode. Browser login is the interactive default. Device-code and no-browser modes are exposed only when the installed upstream version reports support for the corresponding flag.
+`claudeyctl auth codex` invokes the installed CLIProxyAPI binary with its supported Codex OAuth login mode. Browser login is the interactive default. Device-code and no-browser modes are exposed only when the installed upstream version reports support for the corresponding flag.
 
 ### Antigravity
 
-`claudexctl auth antigravity` invokes the supported Antigravity OAuth login mode. The no-browser and callback-port options are validated against the installed upstream help output before invocation.
+`claudeyctl auth antigravity` invokes the supported Antigravity OAuth login mode. The no-browser and callback-port options are validated against the installed upstream help output before invocation.
 
 Default upstream callback ports are not assumed to be free. The command checks for a collision before starting and reports the owning process when the OS permits. It never kills a process that owns a callback port.
 
 All OAuth commands are refused immediately under `--non-interactive` or `CI=true` because browser, device-code, and no-browser URL flows still require a person to authenticate. Those flags select how an interactive user completes login; they are not unattended credential modes. An authentication prompt is never allowed to hang a CI job.
 
-CLIProxyAPI manages provider OAuth files as opaque data in the dedicated protected per-user auth root. Claudexctl does not parse, print, copy, back up, or commit their contents.
+CLIProxyAPI manages provider OAuth files as opaque data in the dedicated protected per-user auth root. Claudeyctl does not parse, print, copy, back up, or commit their contents.
 
 Authentication subprocesses receive an explicit config path, fixed working directory, restrictive file-creation policy, and a minimized environment. Ambient provider tokens and gateway override variables are removed before the upstream login executable is started.
 
@@ -387,7 +389,7 @@ A requested model must appear in the current live list for the selected launcher
 
 The thread's `gpt-5.6-sol` choice may be offered first when it is present in the live Codex list, but it is not assumed to exist and is not an invisible fallback.
 
-`claudexctl models codex` and `claudexctl models antigravity` start an installed, stopped owned gateway and leave it running. An explicitly requested provider without an authenticated catalog returns `AUTH_REQUIRED` and exit 4. `models cursor` never starts the gateway. `models all` reports a status and model array for every provider; it exits 0 when at least one provider succeeds and marks unavailable providers in the result, or returns the highest-priority applicable nonzero exit when none succeeds.
+`claudeyctl models codex` and `claudeyctl models antigravity` start an installed, stopped owned gateway and leave it running. An explicitly requested provider without an authenticated catalog returns `AUTH_REQUIRED` and exit 4. `models cursor` never starts the gateway. `models all` reports a status and model array for every provider; it exits 0 when at least one provider succeeds and marks unavailable providers in the result, or returns the highest-priority applicable nonzero exit when none succeeds.
 
 ## 16. Claude Code launcher behavior
 
@@ -463,7 +465,7 @@ Concurrent install, update, rollback, start, stop, config, and uninstall operati
 
 ## 18. Update and rollback
 
-`claudexctl update` manages CLIProxyAPI within the installed manager version. Re-running the repository bootstrap updates the manager itself.
+`claudeyctl update` manages CLIProxyAPI within the installed manager version. Re-running the repository bootstrap updates the manager itself.
 
 Manager self-update is also transactional. The bootstrap downloads or copies a complete versioned manager payload and, on Windows, its release-matched verified native shim; runs static load, help, version, and launcher-capture self-tests from staging; atomically switches the active-manager pointer; and retains the prior verified manager. If the first post-switch command fails, the bootstrap restores the prior pointer. `install.sh --rollback-manager` and `install.ps1 -RollbackManager` restore only that retained manager version. Bootstrap interruption is recovered from a manager-specific journal that contains no secrets.
 
@@ -492,7 +494,7 @@ plugins/cursor-agent/.mcp.json
 plugins/cursor-agent/server/
 ~~~
 
-`claudexctl cursor enable` registers this repository marketplace and installs the owned plugin at user or local scope by invoking supported Claude Code plugin commands. It does not edit the user's settings JSON directly.
+`claudeyctl cursor enable` registers this repository marketplace and installs the owned plugin at user or local scope by invoking supported Claude Code plugin commands. It does not edit the user's settings JSON directly.
 
 The registration includes an ownership marker containing the repository identity and installation UUID. If an unrelated registration already uses the same name, enable fails with `MCP_OWNERSHIP_COLLISION`.
 
@@ -502,9 +504,9 @@ Cursor absence or authentication failure disables only Cursor tools. Codex and A
 
 ### 19.1 Optional Cursor installation
 
-`claudexctl cursor install` is an explicit trust-boundary operation. Native Windows downloads the official installer from `https://cursor.com/install?win32=true`; macOS, Linux, and WSL download from `https://cursor.com/install`. Redirects are restricted to Cursor-owned HTTPS hosts. The bytes are saved in private staging, capped in size, hashed with SHA-256, and shown with the final URL before execution.
+`claudeyctl cursor install` is an explicit trust-boundary operation. Native Windows downloads the official installer from `https://cursor.com/install?win32=true`; macOS, Linux, and WSL download from `https://cursor.com/install`. Redirects are restricted to Cursor-owned HTTPS hosts. The bytes are saved in private staging, capped in size, hashed with SHA-256, and shown with the final URL before execution.
 
-Cursor does not publish a stable detached checksum for this installer, so transport security and the displayed hash do not provide the same publisher-independent verification as the CLIProxyAPI archive. Interactive confirmation is required after that warning; `--yes` is accepted only when `cursor install` itself was explicitly requested. The fixed installer is then invoked without user interpolation, and the result is accepted only after the expected `cursor-agent` or verified `agent` binary appears and passes identity, version, and capability checks. Failure preserves the rest of Claudex and gives the official manual installation command.
+Cursor does not publish a stable detached checksum for this installer, so transport security and the displayed hash do not provide the same publisher-independent verification as the CLIProxyAPI archive. Interactive confirmation is required after that warning; `--yes` is accepted only when `cursor install` itself was explicitly requested. The fixed installer is then invoked without user interpolation, and the result is accepted only after the expected `cursor-agent` or verified `agent` binary appears and passes identity, version, and capability checks. Failure preserves the rest of Claudey and gives the official manual installation command.
 
 ### 19.2 Default tools
 
@@ -542,7 +544,7 @@ If stdin prompt ingestion, genuine ask mode, or genuine plan mode is missing, th
 Write delegation is absent from the advertised tool list until the user runs:
 
 ~~~text
-claudexctl cursor writes enable --yes
+claudeyctl cursor writes enable --yes
 ~~~
 
 The enabled tool is:
@@ -566,7 +568,7 @@ An optional `baseRef` is either an exact full ref selected from server-enumerate
 A Boolean field is not sufficient proof of human approval. The per-call flow is:
 
 1. An initial tool call validates the exact repository, prompt hash, model, and base reference and returns `APPROVAL_REQUIRED` plus a 256-bit random approval ID that expires after five minutes.
-2. The user runs `claudexctl cursor approve APPROVAL_ID` in an interactive terminal.
+2. The user runs `claudeyctl cursor approve APPROVAL_ID` in an interactive terminal.
 3. The approval command displays the bound repository, model, base reference, a safely escaped bounded prompt preview, and the full prompt digest and requires an explicit confirmation. It refuses non-TTY input and has no `--yes` mode.
 4. A repeated MCP call presents the approval ID.
 5. The server consumes the single-use approval only if every bound field matches and the approval has not expired.
@@ -651,9 +653,9 @@ PATH modification is:
 - Case-insensitively deduplicated on Windows.
 - Marker-owned in POSIX shell profile blocks when a profile change is necessary.
 - Recorded with its previous state for rollback.
-- Limited to the `claudexctl` bin directory.
+- Limited to the `claudeyctl` bin directory.
 
-No file named `claude` is installed. Only `claudex`, `claude-agy`, and `claudexctl` are installed.
+No file named `claude` is installed. Only `claudey`, `claudeyctl`, `claude-codex`, `claude-agy`, and `claude-grok` are installed.
 
 If a current shell cannot see a newly added directory, setup prints the exact safe action needed to start a new shell or invoke the absolute launcher.
 
@@ -682,7 +684,7 @@ Human errors use:
 
 ~~~text
 error[MODEL_NOT_FOUND]: "gpt-x" is not available for provider "codex".
-next: Run claudexctl models codex.
+next: Run claudeyctl models codex.
 ~~~
 
 JSON errors use:
@@ -692,7 +694,7 @@ JSON errors use:
   "ok": false,
   "code": "MODEL_NOT_FOUND",
   "message": "The requested model is not currently available.",
-  "hint": "Run claudexctl models codex.",
+  "hint": "Run claudeyctl models codex.",
   "details": {}
 }
 ~~~
@@ -835,9 +837,11 @@ The planned repository shape is:
 |-- .github/
 |   +-- workflows/
 |-- bin/
-|   |-- claudex
+|   |-- claudey
+|   |-- claude-codex
 |   |-- claude-agy
-|   +-- claudexctl
+|   |-- claude-grok
+|   +-- claudeyctl
 |-- docs/
 |   |-- security.md
 |   |-- troubleshooting.md

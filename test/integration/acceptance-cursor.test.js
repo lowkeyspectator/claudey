@@ -17,7 +17,7 @@ test('wired router sends every public Cursor command and hidden MCP serve to the
   ];
   for (const argv of cases) assert.deepEqual(await main(argv, {}, container), { operation: 'cursor' });
   assert.deepEqual(await main(['cursor', 'mcp-serve', '--installation-id',
-    '11111111-1111-4111-8111-111111111111', '--manager-root', '/home/casey/.local/share/claudexctl'], {}, container),
+    '11111111-1111-4111-8111-111111111111', '--manager-root', '/home/casey/.local/share/claudeyctl'], {}, container),
   { operation: 'mcp' });
   assert.equal(calls.filter(([name]) => name === 'cursor').length, cases.length);
   assert.equal(calls.at(-1)[1].context.owner, 'mcp');

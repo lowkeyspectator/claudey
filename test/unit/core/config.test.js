@@ -7,7 +7,7 @@ import { Secret } from '../../../src/core/secrets.js';
 const TOKEN_TEXT = 'ERERERERERERERERERERERERERERERERERERERERERE';
 const token = () => Secret.fromBytes(Buffer.alloc(32, 0x11));
 
-function exactConfig({ port = 8317, authDir = '/home/casey/.config/claudexctl/auth' } = {}) {
+function exactConfig({ port = 8317, authDir = '/home/casey/.config/claudeyctl/auth' } = {}) {
   const escapedAuthDir = JSON.stringify(authDir);
   return `host: "127.0.0.1"
 port: ${port}
@@ -35,7 +35,7 @@ ws-auth: true
 test('emits the exact restricted default gateway YAML as UTF-8 with one final LF', () => {
   const bytes = buildGatewayConfig({
     port: 8317,
-    authDir: '/home/casey/.config/claudexctl/auth',
+    authDir: '/home/casey/.config/claudeyctl/auth',
     token: token()
   });
   assert.equal(Buffer.isBuffer(bytes), true);
@@ -58,11 +58,11 @@ test('changes only the requested port digits at both accepted boundaries', () =>
 test('escapes Windows paths, quotes, controls, and Unicode exactly once', () => {
   const windows = buildGatewayConfig({
     port: 8317,
-    authDir: 'C:\\Users\\Casey\\AppData\\Roaming\\claudexctl\\auth',
+    authDir: 'C:\\Users\\Casey\\AppData\\Roaming\\claudeyctl\\auth',
     token: token()
   }).toString('utf8');
   assert.equal(windows.split('\n').find((line) => line.startsWith('auth-dir:')),
-    'auth-dir: "C:\\\\Users\\\\Casey\\\\AppData\\\\Roaming\\\\claudexctl\\\\auth"');
+    'auth-dir: "C:\\\\Users\\\\Casey\\\\AppData\\\\Roaming\\\\claudeyctl\\\\auth"');
 
   const custom = buildGatewayConfig({
     port: 8317,

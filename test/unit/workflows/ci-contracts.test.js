@@ -82,7 +82,7 @@ test('six-target CI is a blocking three-lane matrix with complete native, bootst
     'npm.cmd run test:integration', 'node --test test/fixtures', 'npm run check', 'npm run test:unit',
     'npm run test:integration', 'bootstrap-windows.test.js', 'bootstrap-posix.test.js',
     'permissions-native.test.js', 'runner.test.js', 'archive-extraction.test.js', 'windows-shim.test.js',
-    'CLAUDEX_SECRET_CANARY', 'powershell.exe', 'pwsh.exe', 'build-windows-shim.ps1', 'retention-days: 7'
+    'CLAUDEY_SECRET_CANARY', 'powershell.exe', 'pwsh.exe', 'build-windows-shim.ps1', 'retention-days: 7'
   ]) assert.match(source, new RegExp(token.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
   assert.doesNotMatch(source, /continue-on-error\s*:\s*true/u);
   assert.doesNotMatch(source, /(?:secrets\.|pull_request_target|permissions:\s*write-all)/u);
@@ -112,10 +112,10 @@ test('baseline containers run natively on matching Linux architectures and remai
   assert.match(source, /docker run --rm --platform "linux\/\$\{\{ matrix\.arch == 'x64' && 'amd64' \|\| 'arm64' \}\}"/u);
   assert.match(source, /-v "\$node_root:\/opt\/node:ro"/u);
   assert.match(source, /--user "\$\(id -u\):\$\(id -g\)"/u);
-  assert.match(source, /CLDX_EXPECTED_ARCH/u);
+  assert.match(source, /CLDY_EXPECTED_ARCH/u);
   assert.match(source, /uname -m/u);
   assert.match(source, /mkdir -m 700 "\$baseline_home"/u);
-  assert.match(source, /-v "\$baseline_home:\/home\/claudex"/u);
+  assert.match(source, /-v "\$baseline_home:\/home\/claudey"/u);
   for (const token of ['vswhere.exe', 'Launch-VsDevShell.ps1', 'Microsoft.VisualStudio.Component.VC.Tools.x86.x64', 'Microsoft.VisualStudio.Component.VC.Tools.ARM64',
     "Get-Command 'cl.exe'"]) assert.match(source, new RegExp(token.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
   for (const token of ['/opt/node/bin/npm run check', '/opt/node/bin/npm run test:unit',

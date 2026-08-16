@@ -75,11 +75,11 @@ jobs:
       - name: Create an ephemeral secret canary on Windows
         if: matrix.shell == 'windows'
         shell: powershell
-        run: node -e "const c=require('crypto').randomBytes(32).toString('hex');require('fs').appendFileSync(process.env.GITHUB_ENV,'CLAUDEX_SECRET_CANARY='+c+'\n')"
+        run: node -e "const c=require('crypto').randomBytes(32).toString('hex');require('fs').appendFileSync(process.env.GITHUB_ENV,'CLAUDEY_SECRET_CANARY='+c+'\n')"
       - name: Create an ephemeral secret canary on POSIX
         if: matrix.shell == 'posix'
         shell: bash
-        run: node -e "const c=require('crypto').randomBytes(32).toString('hex');require('fs').appendFileSync(process.env.GITHUB_ENV,'CLAUDEX_SECRET_CANARY='+c+'\n')"
+        run: node -e "const c=require('crypto').randomBytes(32).toString('hex');require('fs').appendFileSync(process.env.GITHUB_ENV,'CLAUDEY_SECRET_CANARY='+c+'\n')"
       - name: Verify exact runtime lane and architecture on Windows
         if: matrix.shell == 'windows'
         shell: powershell
@@ -135,13 +135,13 @@ jobs:
           if ($null -eq (Get-Command 'cl.exe' -CommandType Application -ErrorAction SilentlyContinue)) { exit 1 }
           $revision = git rev-parse HEAD
           & .\scripts\build-windows-shim.ps1 -Architecture '${{ matrix.arch }}' -SourceRevision $revision -OutputDirectory (Join-Path $pwd 'native-artifacts')
-          node -e "const fs=require('fs'),p=require('path'),c=Buffer.from(process.env.CLAUDEX_SECRET_CANARY);for(const n of fs.readdirSync('native-artifacts')){const f=p.join('native-artifacts',n);if(fs.statSync(f).isFile()&&fs.readFileSync(f).includes(c))process.exit(1)}"
+          node -e "const fs=require('fs'),p=require('path'),c=Buffer.from(process.env.CLAUDEY_SECRET_CANARY);for(const n of fs.readdirSync('native-artifacts')){const f=p.join('native-artifacts',n);if(fs.statSync(f).isFile()&&fs.readFileSync(f).includes(c))process.exit(1)}"
       - name: Upload immutable native shim proof
         if: matrix.shell == 'windows' && matrix.lane == 'floor'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: windows-shim-${{ matrix.arch }}-${{ github.sha }}
-          path: native-artifacts/claudex-windows-${{ matrix.arch }}.exe*
+          path: native-artifacts/claudey-windows-${{ matrix.arch }}.exe*
           if-no-files-found: error
           retention-days: 7
           compression-level: 0
@@ -171,9 +171,9 @@ jobs:
             mkdir -m 700 "$baseline_home"
             docker pull --platform "$platform" "$image"
             docker run --rm --platform "linux/${{ matrix.arch == 'x64' && 'amd64' || 'arm64' }}" \
-              --user "$(id -u):$(id -g)" -e HOME=/home/claudex -e PATH=/opt/node/bin:/usr/bin:/bin -e CLDX_EXPECTED_ARCH="$expected" \
-              -e CLAUDEX_SECRET_CANARY -v "$GITHUB_WORKSPACE:/work:ro" -v "$node_root:/opt/node:ro" -v "$baseline_home:/home/claudex" -w /work \
-              "$image" /bin/sh -eu -c 'case "$CLDX_EXPECTED_ARCH:$(uname -m)" in x64:x86_64|arm64:aarch64|arm64:arm64) ;; *) exit 1 ;; esac; /opt/node/bin/node -e "if(process.arch!==process.env.CLDX_EXPECTED_ARCH)process.exit(1)"; /opt/node/bin/npm run check && /opt/node/bin/npm run test:unit && /opt/node/bin/npm run test:integration && /opt/node/bin/node --test test/fixtures && /opt/node/bin/node --test test/integration/bootstrap-posix.test.js test/integration/permissions-native.test.js test/integration/archive-extraction.test.js test/unit/core/archive.test.js test/unit/core/fs-safe.test.js test/unit/core/process.test.js test/unit/cursor/runner.test.js && /opt/node/bin/npm run check'
+              --user "$(id -u):$(id -g)" -e HOME=/home/claudey -e PATH=/opt/node/bin:/usr/bin:/bin -e CLDY_EXPECTED_ARCH="$expected" \
+              -e CLAUDEY_SECRET_CANARY -v "$GITHUB_WORKSPACE:/work:ro" -v "$node_root:/opt/node:ro" -v "$baseline_home:/home/claudey" -w /work \
+              "$image" /bin/sh -eu -c 'case "$CLDY_EXPECTED_ARCH:$(uname -m)" in x64:x86_64|arm64:aarch64|arm64:arm64) ;; *) exit 1 ;; esac; /opt/node/bin/node -e "if(process.arch!==process.env.CLDY_EXPECTED_ARCH)process.exit(1)"; /opt/node/bin/npm run check && /opt/node/bin/npm run test:unit && /opt/node/bin/npm run test:integration && /opt/node/bin/node --test test/fixtures && /opt/node/bin/node --test test/integration/bootstrap-posix.test.js test/integration/permissions-native.test.js test/integration/archive-extraction.test.js test/unit/core/archive.test.js test/unit/core/fs-safe.test.js test/unit/core/process.test.js test/unit/cursor/runner.test.js && /opt/node/bin/npm run check'
           done
       - name: Record exact runtime proof on Windows
         if: matrix.shell == 'windows' && always()

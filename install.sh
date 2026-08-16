@@ -100,7 +100,7 @@ case "$node_path" in /*) ;; *)
   exit 69
 ;; esac
 
-cldx_platform=$("$node_path" --input-type=module -e '
+cldy_platform=$("$node_path" --input-type=module -e '
 import fs from "node:fs";
 import { execFileSync } from "node:child_process";
 const atLeast = (actual, required) => {
@@ -139,17 +139,17 @@ if (process.platform === "darwin") {
   process.stdout.write(kernel.includes("microsoft") ? "linux-wsl" : "linux");
 } else process.exit(3);
 ' 2>/dev/null || true)
-case "$cldx_platform" in
-  linux-wsl) cldx_platform='linux'; cldx_is_wsl=1 ;;
-  linux|darwin) cldx_is_wsl=0 ;;
+case "$cldy_platform" in
+  linux-wsl) cldy_platform='linux'; cldy_is_wsl=1 ;;
+  linux|darwin) cldy_is_wsl=0 ;;
   *)
   printf '%s\n' 'error[PLATFORM_UNSUPPORTED]: Only supported native Linux, WSL, and macOS hosts are accepted.' >&2
   exit 69
   ;;
 esac
 
-cldx_arch=$("$node_path" -p 'process.arch' 2>/dev/null || true)
-case "$cldx_arch" in x64|arm64) ;; *)
+cldy_arch=$("$node_path" -p 'process.arch' 2>/dev/null || true)
+case "$cldy_arch" in x64|arm64) ;; *)
   printf '%s\n' 'error[PLATFORM_UNSUPPORTED]: Only x64 and arm64 runtimes are supported.' >&2
   exit 69
 ;; esac
@@ -163,52 +163,52 @@ case "$HOME" in /|*'
   printf '%s\n' 'error[SAFETY_REFUSAL]: HOME cannot be a filesystem root or mounted Windows path.' >&2
   exit 7
 ;; esac
-if [ "$cldx_is_wsl" -eq 1 ]; then
+if [ "$cldy_is_wsl" -eq 1 ]; then
   case "$HOME" in /mnt/[A-Za-z]|/mnt/[A-Za-z]/*)
     printf '%s\n' 'error[SAFETY_REFUSAL]: WSL HOME cannot use a mounted Windows path.' >&2
     exit 7
   ;; esac
 fi
 
-if [ "$cldx_platform" = 'darwin' ]; then
-  cldx_manager_root="$HOME/Library/Application Support/claudexctl"
-  cldx_state_root="$cldx_manager_root/state"
+if [ "$cldy_platform" = 'darwin' ]; then
+  cldy_manager_root="$HOME/Library/Application Support/claudeyctl"
+  cldy_state_root="$cldy_manager_root/state"
 else
-  cldx_data_home=${XDG_DATA_HOME:-"$HOME/.local/share"}
-  cldx_state_home=${XDG_STATE_HOME:-"$HOME/.local/state"}
-  case "$cldx_data_home:$cldx_state_home" in *'
+  cldy_data_home=${XDG_DATA_HOME:-"$HOME/.local/share"}
+  cldy_state_home=${XDG_STATE_HOME:-"$HOME/.local/state"}
+  case "$cldy_data_home:$cldy_state_home" in *'
 '*|*''*|*:/|/:*)
     printf '%s\n' 'error[SAFETY_REFUSAL]: XDG roots must be safe non-root POSIX paths.' >&2
     exit 7
   ;; esac
-  case "$cldx_data_home:$cldx_state_home" in /*:/*) ;; *)
+  case "$cldy_data_home:$cldy_state_home" in /*:/*) ;; *)
     printf '%s\n' 'error[SAFETY_REFUSAL]: XDG roots must be absolute.' >&2
     exit 7
   ;; esac
-  if [ "$cldx_is_wsl" -eq 1 ]; then
-    case "$cldx_data_home:$cldx_state_home" in /mnt/[A-Za-z]:*|/mnt/[A-Za-z]/*|*:/mnt/[A-Za-z]|*:/mnt/[A-Za-z]/*)
+  if [ "$cldy_is_wsl" -eq 1 ]; then
+    case "$cldy_data_home:$cldy_state_home" in /mnt/[A-Za-z]:*|/mnt/[A-Za-z]/*|*:/mnt/[A-Za-z]|*:/mnt/[A-Za-z]/*)
       printf '%s\n' 'error[SAFETY_REFUSAL]: WSL managed roots cannot use mounted Windows paths.' >&2
       exit 7
     ;; esac
   fi
-  cldx_manager_root="$cldx_data_home/claudexctl"
-  cldx_state_root="$cldx_state_home/claudexctl"
+  cldy_manager_root="$cldy_data_home/claudeyctl"
+  cldy_state_root="$cldy_state_home/claudeyctl"
 fi
-cldx_user_bin="$HOME/.local/bin"
-cldx_target="$cldx_platform-$cldx_arch"
-cldx_project_dir=$(cd "$(dirname "$0")" && pwd)
+cldy_user_bin="$HOME/.local/bin"
+cldy_target="$cldy_platform-$cldy_arch"
+cldy_project_dir=$(cd "$(dirname "$0")" && pwd)
 
-export CLDX_PROJECT_ORIGIN="$PROJECT_ORIGIN"
-export CLDX_MANAGER_VERSION="$manager_version"
-export CLDX_ACCEPT_YES="$accept_yes"
-export CLDX_NO_PATH="$no_path"
-export CLDX_ROLLBACK_MANAGER="$rollback_manager"
-export CLDX_PLATFORM="$cldx_platform"
-export CLDX_TARGET="$cldx_target"
-export CLDX_MANAGER_ROOT="$cldx_manager_root"
-export CLDX_STATE_ROOT="$cldx_state_root"
-export CLDX_USER_BIN="$cldx_user_bin"
-export CLDX_PROJECT_DIR="$cldx_project_dir"
+export CLDY_PROJECT_ORIGIN="$PROJECT_ORIGIN"
+export CLDY_MANAGER_VERSION="$manager_version"
+export CLDY_ACCEPT_YES="$accept_yes"
+export CLDY_NO_PATH="$no_path"
+export CLDY_ROLLBACK_MANAGER="$rollback_manager"
+export CLDY_PLATFORM="$cldy_platform"
+export CLDY_TARGET="$cldy_target"
+export CLDY_MANAGER_ROOT="$cldy_manager_root"
+export CLDY_STATE_ROOT="$cldy_state_root"
+export CLDY_USER_BIN="$cldy_user_bin"
+export CLDY_PROJECT_DIR="$cldy_project_dir"
 
 set +e
 "$node_path" --input-type=module - <<'NODE'
@@ -262,14 +262,14 @@ function checkedManifest(value, requestedVersion, target) {
     || !REVISION.test(value.sourceRevision) || !Number.isSafeInteger(value.managerShimCompatibilityVersion)
     || value.managerShimCompatibilityVersion < 1) fail('CHECKSUM_MISMATCH');
   artifact(value.payload); artifact(value.sbom);
-  if (value.payload.name !== `claudex-manager-${value.managerVersion}.tar.gz`
-    || value.sbom.name !== `claudex-manager-${value.managerVersion}.spdx.json`
+  if (value.payload.name !== `claudey-manager-${value.managerVersion}.tar.gz`
+    || value.sbom.name !== `claudey-manager-${value.managerVersion}.spdx.json`
     || !exact(value.shims, ['windows-x64', 'windows-arm64']) || !exact(value.targets, TARGETS)) fail('CHECKSUM_MISMATCH');
   for (const windowsTarget of ['windows-x64', 'windows-arm64']) {
     const shim = value.shims[windowsTarget];
     if (!exact(shim, ['name', 'sha256', 'size', 'compiler'])) fail('CHECKSUM_MISMATCH');
     artifact({ name: shim.name, sha256: shim.sha256, size: shim.size }); compiler(shim.compiler);
-    if (shim.name !== `claudex-${windowsTarget}.exe`) fail('CHECKSUM_MISMATCH');
+    if (shim.name !== `claudey-${windowsTarget}.exe`) fail('CHECKSUM_MISMATCH');
   }
   for (const candidate of TARGETS) {
     const mapping = value.targets[candidate];
@@ -308,7 +308,7 @@ function download(input, maximum, projectOrigin, redirects = 0) {
     try { url = new URL(input); } catch { reject(new BootstrapFailure('NETWORK_FAILURE', 5)); return; }
     if (!allowedDownload(url, projectOrigin) || redirects > 5) { reject(new BootstrapFailure('NETWORK_FAILURE', 5)); return; }
     const transport = url.protocol === 'https:' ? https : http;
-    const request = transport.get(url, { headers: { 'user-agent': 'claudex-bootstrap/1', accept: 'application/octet-stream' } }, (response) => {
+    const request = transport.get(url, { headers: { 'user-agent': 'claudey-bootstrap/1', accept: 'application/octet-stream' } }, (response) => {
       if ([301, 302, 303, 307, 308].includes(response.statusCode)) {
         const location = response.headers.location;
         response.resume();
@@ -399,7 +399,7 @@ function parseArchive(compressed) {
     offset = nextOffset;
   }
   if (entries.length < 1 || data.length - offset < 1024 || !data.subarray(offset).every((byte) => byte === 0)) fail('ARCHIVE_UNSAFE');
-  for (const required of ['LICENSE', 'bin/claude-agy', 'bin/claude-grok', 'bin/claudey', 'bin/claudex', 'bin/claudexctl', 'bin/claudexctl.js', 'package.json']) {
+  for (const required of ['LICENSE', 'bin/claude-agy', 'bin/claude-grok', 'bin/claudey', 'bin/claude-codex', 'bin/claudeyctl', 'bin/claudeyctl.js', 'package.json']) {
     if (!entries.some((entry) => entry.path === required)) fail('ARCHIVE_UNSAFE');
   }
   return entries;
@@ -468,7 +468,7 @@ async function writeExclusiveJson(target, value) {
 
 async function validateRelease(directory, expected = undefined) {
   await inspectDirectory(directory);
-  const markerPath = path.join(directory, '.claudex-release.json');
+  const markerPath = path.join(directory, '.claudey-release.json');
   const markerMetadata = await fs.lstat(markerPath);
   if (!markerMetadata.isFile() || markerMetadata.isSymbolicLink() || markerMetadata.nlink !== 1
     || (markerMetadata.mode & 0o777) !== 0o600 || markerMetadata.uid !== process.getuid()) fail();
@@ -504,7 +504,7 @@ async function validateRelease(directory, expected = undefined) {
     }
   }
   await walk(directory);
-  const expectedFiles = ['.claudex-release.json', ...marker.files.map(({ path: filePath }) => filePath)].sort();
+  const expectedFiles = ['.claudey-release.json', ...marker.files.map(({ path: filePath }) => filePath)].sort();
   if (JSON.stringify(actual.sort()) !== JSON.stringify(expectedFiles)) fail();
   return marker;
 }
@@ -542,21 +542,21 @@ async function captureLaunchers(stage) {
   await ensurePrivateDirectory(capture);
   const captureManager = path.join(capture, 'capture.mjs');
   const captureOutput = path.join(capture, 'capture.jsonl');
-  const source = "import fs from 'node:fs'; fs.appendFileSync(process.env.CLDX_CAPTURE_FILE, JSON.stringify(process.argv.slice(2)) + '\\n');\n";
+  const source = "import fs from 'node:fs'; fs.appendFileSync(process.env.CLDY_CAPTURE_FILE, JSON.stringify(process.argv.slice(2)) + '\\n');\n";
   await fs.writeFile(captureManager, source, { flag: 'wx', mode: 0o600 });
-  const profiles = [['claudexctl', []], ['claudex', ['launcher', 'claudex']], ['claude-agy', ['launcher', 'claude-agy']], ['claude-grok', ['launcher', 'claude-grok']], ['claudey', ['launcher', 'claudey']]];
+  const profiles = [['claudeyctl', []], ['claude-codex', ['launcher', 'claude-codex']], ['claude-agy', ['launcher', 'claude-agy']], ['claude-grok', ['launcher', 'claude-grok']], ['claudey', ['launcher', 'claudey']]];
   const hostile = ['', 'two words', 'quote"value', "single'value", '$()', '%PATH%', '--flag', 'line\nbreak'];
   for (const [name, profile] of profiles) {
     const target = path.join(capture, name);
     await fs.writeFile(target, launcherBytes(process.execPath, captureManager, profile), { flag: 'wx', mode: 0o755 });
     await fs.chmod(target, 0o755);
-    const result = spawnSync(target, hostile, { env: { CLDX_CAPTURE_FILE: captureOutput }, shell: false,
+    const result = spawnSync(target, hostile, { env: { CLDY_CAPTURE_FILE: captureOutput }, shell: false,
       encoding: 'utf8', timeout: 10_000, maxBuffer: 64 * 1024 });
     if (result.error || result.status !== 0 || result.signal !== null || result.stdout !== '' || result.stderr !== '') fail();
   }
   const rows = (await fs.readFile(captureOutput, 'utf8')).trim().split('\n').map(JSON.parse);
   if (rows.length !== 5 || JSON.stringify(rows) !== JSON.stringify([
-    hostile, ['launcher', 'claudex', ...hostile], ['launcher', 'claude-agy', ...hostile], ['launcher', 'claude-grok', ...hostile], ['launcher', 'claudey', ...hostile]
+    hostile, ['launcher', 'claude-codex', ...hostile], ['launcher', 'claude-agy', ...hostile], ['launcher', 'claude-grok', ...hostile], ['launcher', 'claudey', ...hostile]
   ])) fail();
   await fs.rm(capture, { recursive: true });
 }
@@ -572,15 +572,15 @@ function safeEnvironment() {
 
 async function selfTestRelease(directory, version) {
   const packageJson = JSON.parse(await fs.readFile(path.join(directory, 'package.json'), 'utf8'));
-  if (!packageJson || packageJson.name !== 'claudexctl' || packageJson.version !== version || packageJson.type !== 'module'
+  if (!packageJson || packageJson.name !== 'claudeyctl' || packageJson.version !== version || packageJson.type !== 'module'
     || packageJson.dependencies || packageJson.optionalDependencies || packageJson.peerDependencies) fail();
-  const manager = path.join(directory, 'bin', 'claudexctl.js');
+  const manager = path.join(directory, 'bin', 'claudeyctl.js');
   const syntax = spawnSync(process.execPath, ['--check', manager], { encoding: 'utf8', shell: false,
     timeout: 10_000, maxBuffer: 64 * 1024, env: safeEnvironment() });
   if (syntax.error || syntax.status !== 0 || syntax.signal !== null || syntax.stdout !== '' || syntax.stderr !== '') fail();
   const help = spawnSync(process.execPath, [manager, '--help'], { encoding: 'utf8', shell: false,
     timeout: 10_000, maxBuffer: 256 * 1024, env: safeEnvironment() });
-  if (help.error || help.status !== 0 || help.signal !== null || help.stderr !== '' || !help.stdout.includes('claudexctl setup')) fail();
+  if (help.error || help.status !== 0 || help.signal !== null || help.stderr !== '' || !help.stdout.includes('claudeyctl setup')) fail();
 }
 
 async function pointerTarget(root, name, optional = false) {
@@ -707,7 +707,7 @@ async function activate(managerRoot, stateRoot, userBin, target, setupArgs) {
   const current = await pointerTarget(managerRoot, 'current', true);
   const previous = await pointerTarget(managerRoot, 'previous', true);
   if (current === target) {
-    const result = spawnSync(path.join(userBin, 'claudexctl'), setupArgs, { stdio: 'inherit', shell: false,
+    const result = spawnSync(path.join(userBin, 'claudeyctl'), setupArgs, { stdio: 'inherit', shell: false,
       timeout: 120_000, env: safeEnvironment() });
     if (result.error || result.status !== 0 || result.signal !== null) fail();
     return;
@@ -718,7 +718,7 @@ async function activate(managerRoot, stateRoot, userBin, target, setupArgs) {
     if (current === null) await restorePointer(managerRoot, 'previous', null);
     else await setPointer(managerRoot, 'previous', current);
     await setPointer(managerRoot, 'current', target);
-    const result = spawnSync(path.join(userBin, 'claudexctl'), setupArgs, { stdio: 'inherit', shell: false,
+    const result = spawnSync(path.join(userBin, 'claudeyctl'), setupArgs, { stdio: 'inherit', shell: false,
       timeout: 120_000, env: safeEnvironment() });
     if (result.error || result.status !== 0 || result.signal !== null) fail();
     await fs.unlink(path.join(stateRoot, 'manager-journal.json'));
@@ -752,10 +752,10 @@ async function rollback(managerRoot, stateRoot) {
 
 async function installLaunchers(managerRoot, userBin) {
   await ensureDirectory(userBin, 0o755, [0o700, 0o755]);
-  const manager = path.join(managerRoot, 'current', 'bin', 'claudexctl.js');
+  const manager = path.join(managerRoot, 'current', 'bin', 'claudeyctl.js');
   const created = [];
   try {
-    for (const [name, profile] of [['claudexctl', []], ['claudex', ['launcher', 'claudex']],
+    for (const [name, profile] of [['claudeyctl', []], ['claude-codex', ['launcher', 'claude-codex']],
       ['claude-agy', ['launcher', 'claude-agy']], ['claude-grok', ['launcher', 'claude-grok']],
       ['claudey', ['launcher', 'claudey']]]) {
       const target = path.join(userBin, name); const bytes = launcherBytes(process.execPath, manager, profile);
@@ -773,13 +773,13 @@ async function removeCreatedLaunchers(created) {
 }
 
 async function main() {
-  const projectOrigin = new URL(process.env.CLDX_PROJECT_ORIGIN);
+  const projectOrigin = new URL(process.env.CLDY_PROJECT_ORIGIN);
   const releaseBase = projectOrigin.href.endsWith('/') ? projectOrigin.href : `${projectOrigin.href}/`;
-  const requestedVersion = process.env.CLDX_MANAGER_VERSION;
-  const managerRoot = process.env.CLDX_MANAGER_ROOT;
-  const stateRoot = process.env.CLDX_STATE_ROOT;
-  const userBin = process.env.CLDX_USER_BIN;
-  const target = process.env.CLDX_TARGET;
+  const requestedVersion = process.env.CLDY_MANAGER_VERSION;
+  const managerRoot = process.env.CLDY_MANAGER_ROOT;
+  const stateRoot = process.env.CLDY_STATE_ROOT;
+  const userBin = process.env.CLDY_USER_BIN;
+  const target = process.env.CLDY_TARGET;
   if (!['https:', 'http:'].includes(projectOrigin.protocol) || projectOrigin.pathname.includes('..')
     || projectOrigin.username || projectOrigin.password || projectOrigin.search || projectOrigin.hash
     || !path.isAbsolute(managerRoot) || !path.isAbsolute(stateRoot) || !path.isAbsolute(userBin)
@@ -791,7 +791,7 @@ async function main() {
   const releaseLock = await acquireBootstrapLock(stateRoot);
   try {
     await recover(managerRoot, stateRoot);
-    if (process.env.CLDX_ROLLBACK_MANAGER === '1') {
+    if (process.env.CLDY_ROLLBACK_MANAGER === '1') {
       const createdLaunchers = await installLaunchers(managerRoot, userBin);
       try { await rollback(managerRoot, stateRoot); }
       catch (error) { await removeCreatedLaunchers(createdLaunchers); throw error; }
@@ -801,7 +801,7 @@ async function main() {
   const manifestUrl = requestedVersion
     ? `${releaseBase}releases/download/v${requestedVersion}/project-manifest.json`
     : `${releaseBase}releases/latest/download/project-manifest.json`;
-  const projectDir = process.env.CLDX_PROJECT_DIR ? path.resolve(process.env.CLDX_PROJECT_DIR) : process.cwd();
+  const projectDir = process.env.CLDY_PROJECT_DIR ? path.resolve(process.env.CLDY_PROJECT_DIR) : process.cwd();
   let manifestBytes;
   let fromLocal = false;
   try {
@@ -845,7 +845,7 @@ async function main() {
   await fs.chmod(staging, 0o700);
   try {
     await extract(entries, staging);
-    await writeExclusiveJson(path.join(staging, '.claudex-release.json'), markerFor(manifest, entries));
+    await writeExclusiveJson(path.join(staging, '.claudey-release.json'), markerFor(manifest, entries));
     await selfTestRelease(staging, manifest.managerVersion);
     await captureLaunchers(staging);
     try {
@@ -863,8 +863,8 @@ async function main() {
   }
   const createdLaunchers = await installLaunchers(managerRoot, userBin);
   const setupArgs = ['setup'];
-  if (process.env.CLDX_ACCEPT_YES === '1') setupArgs.push('--yes');
-  if (process.env.CLDX_NO_PATH === '1') setupArgs.push('--no-path');
+  if (process.env.CLDY_ACCEPT_YES === '1') setupArgs.push('--yes');
+  if (process.env.CLDY_NO_PATH === '1') setupArgs.push('--no-path');
     try { await activate(managerRoot, stateRoot, userBin, releaseTarget, setupArgs); }
     catch (error) { await removeCreatedLaunchers(createdLaunchers); throw error; }
   } finally { await releaseLock(); }

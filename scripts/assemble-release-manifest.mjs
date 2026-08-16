@@ -78,7 +78,7 @@ function shimDescriptor(value) {
   if (!exact(value, ['schemaVersion', 'target', 'sourceRevision', 'name', 'sha256', 'size',
     'managerShimCompatibilityVersion', 'compiler']) || value.schemaVersion !== 1
     || !WINDOWS_TARGETS.includes(value.target) || !REVISION.test(value.sourceRevision)
-    || value.name !== `claudex-${value.target}.exe` || !Number.isSafeInteger(value.managerShimCompatibilityVersion)
+    || value.name !== `claudey-${value.target}.exe` || !Number.isSafeInteger(value.managerShimCompatibilityVersion)
     || value.managerShimCompatibilityVersion < 1) throw failure();
   artifact({ name: value.name, sha256: value.sha256, size: value.size });
   compiler(value.compiler);
@@ -198,7 +198,7 @@ async function publish(options) {
   const manifest = await assembleReleaseManifest({ payloadDescriptor: payload, sbomDescriptor: sbom,
     shimDescriptors: shims, readArtifact: async (name) => readRegular(path.join(artifactsRoot, name), MAX_ARTIFACT_BYTES) });
   const bytes = Buffer.from(`${JSON.stringify(manifest)}\n`, 'utf8');
-  const temporary = path.join(outputDirectory, `.claudex-manifest-${crypto.randomUUID()}.tmp`);
+  const temporary = path.join(outputDirectory, `.claudey-manifest-${crypto.randomUUID()}.tmp`);
   try {
     await fs.writeFile(temporary, bytes, { flag: 'wx', mode: 0o600 });
     const child = spawnSync(process.execPath, [path.resolve(import.meta.filename), '--validate', temporary], {

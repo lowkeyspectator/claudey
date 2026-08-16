@@ -1,6 +1,6 @@
 # Security model
 
-Claudex is designed to fail closed at executable, filesystem, process, archive, network, and release boundaries. It reduces accidental exposure and confused-deputy behavior; it does not turn all same-user tools into a hard sandbox.
+Claudey is designed to fail closed at executable, filesystem, process, archive, network, and release boundaries. It reduces accidental exposure and confused-deputy behavior; it does not turn all same-user tools into a hard sandbox.
 
 ## Trust boundaries
 
@@ -21,7 +21,7 @@ WSL is a separate installation. Do not place WSL state in `/mnt/c` or reuse Wind
 
 Downloaded archives are bounded, preflighted, safely extracted, re-walked, hashed, and matched to the closed release manifest. A checksum detects changed transfer bytes. A checksum published by the same compromised account does not establish publisher identity. The release SBOM and provenance subjects must match the manifest and checksum set exactly, and the produced attestation must be independently verified.
 
-Provenance describes the Claudex build. It does not attest that CLIProxyAPI, Claude Code, Cursor Agent, Node.js, or provider services are harmless. Upstream drift, dynamic entitlements, and provider behavior remain external risks and are checked again at runtime.
+Provenance describes the Claudey build. It does not attest that CLIProxyAPI, Claude Code, Cursor Agent, Node.js, or provider services are harmless. Upstream drift, dynamic entitlements, and provider behavior remain external risks and are checked again at runtime.
 
 ## Filesystem and process safety
 

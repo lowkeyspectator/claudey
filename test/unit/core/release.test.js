@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { ClaudexError } from '../../../src/core/errors.js';
+import { ClaudeyError } from '../../../src/core/errors.js';
 import {
   fetchOfficialResponse,
   readResponseBytes,
@@ -82,7 +82,7 @@ test('rejects malformed or below-baseline explicit versions before any HTTP requ
     const http = createReleaseHttp();
     await assert.rejects(
       () => resolveRelease({ requestedVersion, platform: { platform: 'win32', arch: 'x64' }, http }),
-      (error) => error instanceof ClaudexError && ['USAGE_ERROR', 'PREREQUISITE_MISSING'].includes(error.code)
+      (error) => error instanceof ClaudeyError && ['USAGE_ERROR', 'PREREQUISITE_MISSING'].includes(error.code)
     );
     assert.equal(http.requests.length, 0, requestedVersion);
   }
@@ -99,7 +99,7 @@ test('rejects draft, prerelease, and malformed explicit release metadata', async
     const http = createReleaseHttp({ routes: new Map([[TAG_URL, { chunks: [JSON.stringify(fixture)] }]]) });
     await assert.rejects(
       () => resolveRelease({ requestedVersion: 'v7.2.130', platform: { platform: 'win32', arch: 'x64' }, http }),
-      (error) => error instanceof ClaudexError && error.code === 'NETWORK_FAILURE'
+      (error) => error instanceof ClaudeyError && error.code === 'NETWORK_FAILURE'
     );
   }
 });
@@ -128,7 +128,7 @@ test('rejects duplicate stable versions and unsafe release assets', async () => 
   const duplicate = createReleaseHttp({ routes: new Map([[LIST_URL, { chunks: [JSON.stringify([stableRelease(), stableRelease()])] }]]) });
   await assert.rejects(
     () => resolveRelease({ platform: { platform: 'win32', arch: 'x64' }, http: duplicate }),
-    (error) => error instanceof ClaudexError && error.code === 'NETWORK_FAILURE'
+    (error) => error instanceof ClaudeyError && error.code === 'NETWORK_FAILURE'
   );
 
   const unsafe = stableRelease({ assets: [
@@ -142,7 +142,7 @@ test('rejects duplicate stable versions and unsafe release assets', async () => 
   const http = createReleaseHttp({ routes: new Map([[TAG_URL, { chunks: [JSON.stringify(unsafe)] }]]) });
   await assert.rejects(
     () => resolveRelease({ requestedVersion: '7.2.130', platform: { platform: 'win32', arch: 'x64' }, http }),
-    (error) => error instanceof ClaudexError && error.code === 'NETWORK_FAILURE'
+    (error) => error instanceof ClaudeyError && error.code === 'NETWORK_FAILURE'
   );
 });
 
@@ -160,7 +160,7 @@ test('rejects a release asset URL that carries a query token', async () => {
 
   await assert.rejects(
     () => resolveRelease({ requestedVersion: '7.2.130', platform: { platform: 'win32', arch: 'x64' }, http }),
-    (error) => error instanceof ClaudexError && error.code === 'NETWORK_FAILURE'
+    (error) => error instanceof ClaudeyError && error.code === 'NETWORK_FAILURE'
   );
 });
 test('rejects a same-target _no-plugin archive even when the exact archive exists', async () => {
@@ -178,7 +178,7 @@ test('rejects a same-target _no-plugin archive even when the exact archive exist
 
   await assert.rejects(
     () => resolveRelease({ requestedVersion: '7.2.130', platform: { platform: 'win32', arch: 'x64' }, http }),
-    (error) => error instanceof ClaudexError && error.code === 'NETWORK_FAILURE'
+    (error) => error instanceof ClaudeyError && error.code === 'NETWORK_FAILURE'
   );
 });
 test('revalidates metadata and download redirects against purpose-specific official hosts', async () => {
@@ -202,7 +202,7 @@ test('revalidates metadata and download redirects against purpose-specific offic
   }]]) });
   await assert.rejects(
     () => fetchOfficialResponse({ http: badRedirectHttp, url: TAG_URL, purpose: 'metadata', deadlineMs: 30_000 }),
-    (error) => error instanceof ClaudexError && error.code === 'NETWORK_FAILURE'
+    (error) => error instanceof ClaudeyError && error.code === 'NETWORK_FAILURE'
   );
 
   const downloadRedirectHttp = createReleaseHttp({ routes: new Map([
@@ -223,17 +223,17 @@ test('rejects a response returned after its request deadline', async () => {
 
   await assert.rejects(
     () => fetchOfficialResponse({ http, url: TAG_URL, purpose: 'metadata', deadlineMs: 20 }),
-    (error) => error instanceof ClaudexError && error.code === 'NETWORK_FAILURE'
+    (error) => error instanceof ClaudeyError && error.code === 'NETWORK_FAILURE'
   );
   assert.deepEqual(http.aborts, [TAG_URL]);
 });
 test('bounds streamed bytes before accepting an oversized response', async () => {
   await assert.rejects(
     () => readResponseBytes({ status: 200, headers: { 'content-length': '6' }, body: (async function* () { yield Buffer.from('hello!'); })() }, { limit: 5 }),
-    (error) => error instanceof ClaudexError && error.code === 'NETWORK_FAILURE'
+    (error) => error instanceof ClaudeyError && error.code === 'NETWORK_FAILURE'
   );
   await assert.rejects(
     () => readResponseBytes({ status: 200, headers: {}, body: (async function* () { yield Buffer.from('hello'); yield Buffer.from('!'); })() }, { limit: 5 }),
-    (error) => error instanceof ClaudexError && error.code === 'NETWORK_FAILURE'
+    (error) => error instanceof ClaudeyError && error.code === 'NETWORK_FAILURE'
   );
 });

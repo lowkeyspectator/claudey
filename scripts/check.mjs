@@ -27,7 +27,7 @@ for (const file of allFiles.filter((item) => path.dirname(item) === path.join(ro
 }
 const packageJson = JSON.parse(await fs.readFile(path.join(root, 'package.json'), 'utf8'));
 if (packageJson.dependencies || packageJson.optionalDependencies || packageJson.peerDependencies) throw new Error('Runtime dependencies are forbidden.');
-const canary = process.env.CLAUDEX_SECRET_CANARY;
+const canary = process.env.CLAUDEY_SECRET_CANARY;
 if (canary) {
   for (const file of allFiles) {
     if ((await fs.readFile(file)).includes(Buffer.from(canary))) throw new Error(`Secret canary found in ${path.relative(root, file)}.`);

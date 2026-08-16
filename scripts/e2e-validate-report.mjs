@@ -158,7 +158,7 @@ export function validateValidationReport(value) {
     if (value.release.shim !== null) artifact(value.release.shim);
     target(value.target);
     if (value.target.platform === 'win32') {
-      const expectedName = `claudex-windows-${value.target.runtimeArch}.exe`;
+      const expectedName = `claudey-windows-${value.target.runtimeArch}.exe`;
       if (value.release.shim === null || value.release.shim.name !== expectedName) throw failure();
     } else if (value.release.shim !== null) throw failure();
     canonicalTimestamp(value.observedAt);
@@ -176,7 +176,7 @@ export function validateValidationReport(value) {
     }
     outcomeMap(value.operations, OPERATION_KEYS);
     outcomeMap(value.auth, AUTH_KEYS);
-    outcomeMap(value.inference, ['claudex', 'claudeAgy']);
+    outcomeMap(value.inference, ['claudey', 'claudeAgy']);
     outcomeMap(value.cursor, CURSOR_KEYS);
     if (!exact(value.checkout, ['before', 'after'])) throw failure();
     checkoutState(value.checkout.before); checkoutState(value.checkout.after);
@@ -224,7 +224,7 @@ export function validateReleaseReports({ manifest, manifestSha256, reports, now 
         const expected = report.capabilities[key].supported ? 'passed' : 'not-applicable';
         if (report.auth[key].outcome !== expected) throw failure();
       }
-      requirePassed(report.inference, ['claudex', 'claudeAgy']);
+      requirePassed(report.inference, ['claudey', 'claudeAgy']);
       requirePassed(report.cursor, CURSOR_KEYS);
       requirePassed(report.security, SECURITY_KEYS);
     }

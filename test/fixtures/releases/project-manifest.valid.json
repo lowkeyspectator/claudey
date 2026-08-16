@@ -4,13 +4,13 @@
   "sourceRevision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
   "managerShimCompatibilityVersion": 1,
   "payload": {
-    "name": "claudex-manager-1.0.0.tar.gz",
+    "name": "claudey-manager-1.0.0.tar.gz",
     "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
     "size": 123456
   },
   "shims": {
     "windows-x64": {
-      "name": "claudex-windows-x64.exe",
+      "name": "claudey-windows-x64.exe",
       "sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
       "size": 45678,
       "compiler": {
@@ -20,7 +20,7 @@
       }
     },
     "windows-arm64": {
-      "name": "claudex-windows-arm64.exe",
+      "name": "claudey-windows-arm64.exe",
       "sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
       "size": 44567,
       "compiler": {
@@ -31,22 +31,22 @@
     }
   },
   "targets": {
-    "windows-x64": { "payload": "claudex-manager-1.0.0.tar.gz", "shim": "claudex-windows-x64.exe" },
-    "windows-arm64": { "payload": "claudex-manager-1.0.0.tar.gz", "shim": "claudex-windows-arm64.exe" },
-    "darwin-x64": { "payload": "claudex-manager-1.0.0.tar.gz", "shim": null },
-    "darwin-arm64": { "payload": "claudex-manager-1.0.0.tar.gz", "shim": null },
-    "linux-x64": { "payload": "claudex-manager-1.0.0.tar.gz", "shim": null },
-    "linux-arm64": { "payload": "claudex-manager-1.0.0.tar.gz", "shim": null }
+    "windows-x64": { "payload": "claudey-manager-1.0.0.tar.gz", "shim": "claudey-windows-x64.exe" },
+    "windows-arm64": { "payload": "claudey-manager-1.0.0.tar.gz", "shim": "claudey-windows-arm64.exe" },
+    "darwin-x64": { "payload": "claudey-manager-1.0.0.tar.gz", "shim": null },
+    "darwin-arm64": { "payload": "claudey-manager-1.0.0.tar.gz", "shim": null },
+    "linux-x64": { "payload": "claudey-manager-1.0.0.tar.gz", "shim": null },
+    "linux-arm64": { "payload": "claudey-manager-1.0.0.tar.gz", "shim": null }
   },
   "sbom": {
-    "name": "claudex-manager-1.0.0.spdx.json",
+    "name": "claudey-manager-1.0.0.spdx.json",
     "sha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
     "size": 98765
   },
   "provenanceSubjects": [
-    { "name": "claudex-manager-1.0.0.spdx.json", "sha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee" },
-    { "name": "claudex-manager-1.0.0.tar.gz", "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" },
-    { "name": "claudex-windows-arm64.exe", "sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd" },
-    { "name": "claudex-windows-x64.exe", "sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc" }
+    { "name": "claudey-manager-1.0.0.spdx.json", "sha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee" },
+    { "name": "claudey-manager-1.0.0.tar.gz", "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" },
+    { "name": "claudey-windows-arm64.exe", "sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd" },
+    { "name": "claudey-windows-x64.exe", "sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc" }
   ]
 }

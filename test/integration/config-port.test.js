@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { ClaudexError } from '../../src/core/errors.js';
+import { ClaudeyError } from '../../src/core/errors.js';
 import { runConfigCommand } from '../../src/cli/commands/config.js';
 import { runLifecycleCommand } from '../../src/cli/commands/lifecycle.js';
 
@@ -119,7 +119,7 @@ test('lifecycle commands lock every mutation, preserve exact idempotent states, 
 
   await assert.rejects(runLifecycleCommand(['start'], {}, {
     ...context,
-    startGateway: async () => { throw new ClaudexError('PORT_IN_USE', 'listener secret-canary'); }
+    startGateway: async () => { throw new ClaudeyError('PORT_IN_USE', 'listener secret-canary'); }
   }), (error) => error.code === 'PORT_IN_USE' && !error.message.includes('secret-canary'));
   assert.equal(events.at(-1), 'release');
 });

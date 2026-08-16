@@ -8,7 +8,7 @@ import {
   restorePathMutation
 } from '../../../src/core/path-mutation.js';
 
-const BIN = 'C:\\Users\\Casey\\AppData\\Local\\claudexctl\\bin';
+const BIN = 'C:\\Users\\Casey\\AppData\\Local\\claudeyctl\\bin';
 
 test('Windows user PATH mutation deduplicates case-insensitively and never targets the system PATH', async () => {
   const writes = [];

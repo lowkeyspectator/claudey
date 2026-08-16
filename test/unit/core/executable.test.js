@@ -29,7 +29,7 @@ function fsAdapter(overrides = {}) {
 }
 
 async function makeWindowsInstall(t) {
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'claudex-executable-'));
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'claudey-executable-'));
   t.after(() => fs.rm(root, { recursive: true, force: true }));
   const nativeDir = path.join(root, 'native');
   const npmDir = path.join(root, 'npm');

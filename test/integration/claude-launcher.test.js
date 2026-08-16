@@ -10,7 +10,7 @@ import { fileURLToPath } from 'node:url';
 
 import { runClaudeAgy } from '../../src/cli/launchers/claude-agy.js';
 import { runClaudeGrok } from '../../src/cli/launchers/claude-grok.js';
-import { runClaudex, stageLaunchers } from '../../src/cli/launchers/claudex.js';
+import { runClaudeCodex, stageLaunchers } from '../../src/cli/launchers/claude-codex.js';
 import { resolveVerifiedExecutable } from '../../src/core/executable.js';
 import { requestGatewayModels } from '../../src/core/gateway-client.js';
 import { Secret } from '../../src/core/secrets.js';
@@ -37,7 +37,7 @@ function executableAdapter() {
 }
 
 async function fixture(t) {
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'claudex-launcher-integration-'));
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'claudey-launcher-integration-'));
   t.after(() => fs.rm(root, { recursive: true, force: true }));
   const entryDirectory = path.join(root, 'node_modules', '@anthropic-ai', 'claude-code');
   await fs.mkdir(entryDirectory, { recursive: true });
@@ -87,7 +87,7 @@ test('real launcher routes exact args/stdin through a verified Claude child and 
       return child;
     }
   });
-  const result = await runClaudex(['--model', 'gpt-live', '--', '--print', 'hello world', ';', '%VAR%'], {}, { ...f.context, runChild });
+  const result = await runClaudeCodex(['--model', 'gpt-live', '--', '--print', 'hello world', ';', '%VAR%'], {}, { ...f.context, runChild });
   assert.deepEqual(result, { provider: 'codex', model: 'gpt-live', exitCode: 0, signal: null });
   assert.equal(JSON.stringify(process.env), parentBefore);
   let captured = await captures(f.capturePath);
@@ -145,7 +145,7 @@ test('real Claude child receives a relayed terminal signal and the launcher repo
     void signalAfterCapture();
     return operation;
   };
-  const result = await runClaudex(['--model', 'gpt-live', '--', '--fixture-wait'], {}, { ...f.context, runChild });
+  const result = await runClaudeCodex(['--model', 'gpt-live', '--', '--fixture-wait'], {}, { ...f.context, runChild });
   assert.deepEqual(result, { provider: 'codex', model: 'gpt-live', exitCode: null, signal: 'SIGTERM' });
   assert.equal(parent.listenerCount('SIGINT'), 0);
   assert.equal(parent.listenerCount('SIGTERM'), 0);
@@ -155,7 +155,7 @@ test('staged launcher artifacts are deterministic, port/token-free, and preserve
   const f = await fixture(t);
   const staged = [];
   const files = await stageLaunchers({
-    platform: 'linux', nodePath: '/opt/claudex/node', managerPath: '/opt/claudex/bin/claudexctl.js',
+    platform: 'linux', nodePath: '/opt/claudey/node', managerPath: '/opt/claudey/bin/claudeyctl.js',
     stageFile: async (file) => staged.push({ ...file, bytes: Buffer.from(file.bytes) })
   });
   assert.equal(files.length, 5);

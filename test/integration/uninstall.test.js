@@ -6,15 +6,15 @@ import { runUninstallCommand } from '../../src/cli/commands/uninstall.js';
 import { canonicalManifestBytes, verifyManifest } from '../../src/core/manifest.js';
 import { Secret } from '../../src/core/secrets.js';
 
-const ROOT = 'C:\\Users\\Casey\\AppData\\Local\\claudexctl';
+const ROOT = 'C:\\Users\\Casey\\AppData\\Local\\claudeyctl';
 const PATHS = Object.freeze({
   managerRoot: ROOT,
   stateRoot: `${ROOT}\\state`,
   userBinRoot: `${ROOT}\\bin`,
   ownedPluginRoots: [`${ROOT}\\plugins\\owned`],
-  authRoot: 'C:\\Users\\Casey\\AppData\\Roaming\\claudexctl\\auth',
+  authRoot: 'C:\\Users\\Casey\\AppData\\Roaming\\claudeyctl\\auth',
   homeRoot: 'C:\\Users\\Casey',
-  repositoryRoot: 'C:\\src\\claudex'
+  repositoryRoot: 'C:\\src\\claudey'
 });
 const FILE = Object.freeze({
   relativePath: 'releases/7.2.130/CLIProxyAPI.exe', type: 'file', sha256: 'a'.repeat(64)

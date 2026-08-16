@@ -12,7 +12,7 @@ const SHA256 = /^[0-9a-f]{64}$/u;
 const NAME = /^[A-Za-z0-9][A-Za-z0-9._-]{0,255}$/u;
 const TARGETS = Object.freeze(['windows-x64', 'windows-arm64', 'darwin-x64', 'darwin-arm64', 'linux-x64', 'linux-arm64']);
 const ROOT_FILES = new Set(['LICENSE', 'package.json']);
-const BIN_FILES = new Set(['bin/claudex', 'bin/claude-agy', 'bin/claude-grok', 'bin/claudey', 'bin/claudexctl', 'bin/claudexctl.js', 'bin/claudeyctl', 'bin/claudeyctl.js', 'bin/claude-codex']);
+const BIN_FILES = new Set(['bin/claude-agy', 'bin/claude-grok', 'bin/claudey', 'bin/claudeyctl', 'bin/claudeyctl.js', 'bin/claude-codex']);
 const WINDOWS_HELPERS = new Set([
   'scripts/windows/archive-helper.ps1', 'scripts/windows/process-helper.ps1',
   'scripts/windows/request-dacl-helper.ps1', 'scripts/windows/security-helper.ps1'
@@ -26,7 +26,7 @@ const RUNTIME_SOURCE_FILES = new Set([
   'src/cli/commands/doctor.js', 'src/cli/commands/install.js', 'src/cli/commands/lifecycle.js',
   'src/cli/commands/models.js', 'src/cli/commands/onboard.js', 'src/cli/commands/rollback.js', 'src/cli/commands/setup.js',
   'src/cli/commands/status.js', 'src/cli/commands/uninstall.js', 'src/cli/commands/update.js',
-  'src/cli/launchers/claude-agy.js', 'src/cli/launchers/claude-grok.js', 'src/cli/launchers/claudey.js', 'src/cli/launchers/claude-codex.js', 'src/cli/launchers/claudex.js',
+  'src/cli/launchers/claude-agy.js', 'src/cli/launchers/claude-grok.js', 'src/cli/launchers/claudey.js', 'src/cli/launchers/claude-codex.js',
   'src/cli/first-run.js',
   'src/cli/main.js', 'src/cli/output.js', 'src/cli/parse.js', 'src/cli/runtime.js', 'src/core/activation.js',
   'src/core/archive.js', 'src/core/http.js',
@@ -123,8 +123,8 @@ async function inventory(root, managerVersion, secretCanary) {
   if (new Set(candidates).size !== candidates.length || REQUIRED.some((required) => !candidates.includes(required))) throw failure();
   const sourcePackage = JSON.parse((await readRegular(path.join(root, 'package.json'))).toString('utf8'));
   if (sourcePackage.dependencies || sourcePackage.optionalDependencies || sourcePackage.peerDependencies) throw failure();
-  const runtimePackage = Buffer.from(`${JSON.stringify({ name: 'claudexctl', version: managerVersion, private: true,
-    type: 'module', engines: { node: '>=22.20.0' }, bin: { claudexctl: 'bin/claudexctl.js' } })}\n`, 'utf8');
+  const runtimePackage = Buffer.from(`${JSON.stringify({ name: 'claudeyctl', version: managerVersion, private: true,
+    type: 'module', engines: { node: '>=22.20.0' }, bin: { claudeyctl: 'bin/claudeyctl.js' } })}\n`, 'utf8');
   const result = [];
   let total = 0;
   for (const relative of candidates) {
@@ -207,7 +207,7 @@ export function validateProjectReleaseManifest(value) {
       const shim = value.shims[target];
       if (!exact(shim, ['name', 'sha256', 'size', 'compiler'])) throw failure('MANIFEST_INVALID');
       artifact({ name: shim.name, sha256: shim.sha256, size: shim.size }); compiler(shim.compiler);
-      if (shim.name !== `claudex-${target}.exe`) throw failure('MANIFEST_INVALID');
+      if (shim.name !== `claudey-${target}.exe`) throw failure('MANIFEST_INVALID');
     }
     if (value.shims['windows-x64'].name === value.shims['windows-arm64'].name || !exact(value.targets, TARGETS)) throw failure('MANIFEST_INVALID');
     for (const target of TARGETS) {
@@ -239,7 +239,7 @@ export async function buildManagerPackage({ root, managerVersion, sourceRevision
     const entries = await inventory(root, managerVersion, secretCanary);
     const archiveBytes = deterministicGzip(buildTar(entries));
     const publicInventory = entries.map(({ path: filePath, sha256, size, mode }) => freeze({ path: filePath, sha256, size, mode }));
-    const artifactName = `claudex-manager-${managerVersion}.tar.gz`;
+    const artifactName = `claudey-manager-${managerVersion}.tar.gz`;
     const payloadDescriptor = freeze({ schemaVersion: 1, kind: 'manager-payload', managerVersion, sourceRevision,
       artifact: { name: artifactName, sha256: hash(archiveBytes), size: archiveBytes.length },
       inventorySha256: hash(Buffer.from(`${JSON.stringify(publicInventory)}\n`, 'utf8')) });
@@ -262,7 +262,7 @@ async function cli(argv) {
   const root = path.resolve(options['--root'] ?? path.resolve(import.meta.dirname, '..'));
   const out = path.resolve(options['--out'] ?? path.join(root, 'dist'));
   const built = await buildManagerPackage({ root, managerVersion: options['--version'], sourceRevision: options['--source-revision'],
-    secretCanary: process.env.CLAUDEX_SECRET_CANARY });
+    secretCanary: process.env.CLAUDEY_SECRET_CANARY });
   await fs.mkdir(out, { recursive: true, mode: 0o700 });
   await fs.writeFile(path.join(out, built.payloadDescriptor.artifact.name), built.archiveBytes, { mode: 0o600 });
   await fs.writeFile(path.join(out, `${built.payloadDescriptor.artifact.name}.json`), `${JSON.stringify(built.payloadDescriptor)}\n`, { mode: 0o600 });

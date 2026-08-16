@@ -32,7 +32,7 @@ function executableAdapter() {
   };
 }
 
-const fixtureRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'claudex-capabilities-'));
+const fixtureRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'claudey-capabilities-'));
 after(() => fs.rm(fixtureRoot, { recursive: true, force: true }));
 
 async function makeTarget(command, fixtureName, suffix = '') {
@@ -308,7 +308,7 @@ test('Cursor identity or version failure disables every Cursor probe/tool and a 
 });
 
 test('executes the owned Cursor capture fixture with exact argv/env/stdin boundaries', async (t) => {
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'claudex-cursor-capture-'));
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'claudey-cursor-capture-'));
   t.after(() => fs.rm(root, { recursive: true, force: true }));
   const previousCanary = process.env.ANTHROPIC_API_KEY;
   process.env.ANTHROPIC_API_KEY = 'TASK7_ENV_CANARY';
@@ -464,7 +464,7 @@ test('injected cleanup denial reaches an independent terminal deadline and repor
 
 test('parent exit does not skip hard cleanup of a SIGTERM-resistant descendant', async (t) => {
   const fixture = fileURLToPath(new URL('../../fixtures/bin/fake-process-tree.js', import.meta.url));
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'claudex-tree-check-'));
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'claudey-tree-check-'));
   t.after(() => fs.rm(root, { recursive: true, force: true }));
   const pidFile = path.join(root, 'descendant.pid');
   const actions = [];

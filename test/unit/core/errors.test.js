@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { ClaudeyError, ClaudexError, exitCodeFor } from '../../../src/core/errors.js';
+import { ClaudeyError, exitCodeFor } from '../../../src/core/errors.js';
 import { Secret } from '../../../src/core/secrets.js';
 
 test('maps every documented public error class to its stable exit code', () => {
@@ -32,7 +32,6 @@ test('maps every documented public error class to its stable exit code', () => {
   };
   for (const [code, exitCode] of Object.entries(cases)) {
     assert.equal(exitCodeFor(new ClaudeyError(code, 'message')), exitCode, code);
-    assert.equal(exitCodeFor(new ClaudexError(code, 'message')), exitCode, code);
   }
 });
 

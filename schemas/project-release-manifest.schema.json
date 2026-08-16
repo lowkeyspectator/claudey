@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/ramsaijanapana/claude_code_cliProxy/schemas/project-release-manifest.schema.json",
-  "title": "Claudex project release manifest",
+  "title": "Claudey project release manifest",
   "type": "object",
   "additionalProperties": false,
   "required": ["schemaVersion", "managerVersion", "sourceRevision", "managerShimCompatibilityVersion", "payload", "shims", "targets", "sbom", "provenanceSubjects"],

@@ -115,7 +115,7 @@ async function readRegular(target, maximum = MAX_INDEX_BYTES) {
 function downloadIndex(url) {
   return new Promise((resolve, reject) => {
     if (!(url instanceof URL) || url.href !== 'https://nodejs.org/dist/index.json') { reject(failure()); return; }
-    const request = https.get(url, { headers: { accept: 'application/json', 'user-agent': 'claudex-node-lane-check/1' } }, (response) => {
+    const request = https.get(url, { headers: { accept: 'application/json', 'user-agent': 'claudey-node-lane-check/1' } }, (response) => {
       if (response.statusCode !== 200 || response.headers.location) { response.resume(); reject(failure()); return; }
       const declared = response.headers['content-length'];
       if (declared !== undefined && (!/^\d+$/u.test(declared) || Number(declared) > MAX_INDEX_BYTES)) {

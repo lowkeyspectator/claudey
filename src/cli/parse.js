@@ -106,7 +106,7 @@ export function parseManagementArgs(argv, environment = process.env) {
 
   const consume = (count, allowed) => parseOptionList(tokens.slice(count), options, allowed);
   if (first === 'launcher') {
-    if (!second || !['claudey', 'claudeyctl', 'claude-codex', 'claudex', 'claude-agy', 'claude-grok'].includes(second)) throw usage('launcher requires claudey, claude-codex, claude-agy, or claude-grok.');
+    if (!second || !['claudey', 'claudeyctl', 'claude-codex', 'claude-agy', 'claude-grok'].includes(second)) throw usage('launcher requires claudey, claude-codex, claude-agy, or claude-grok.');
     return { command: ['launcher', second], options: { rawArgv: tokens.slice(2) } };
   }
   if (first === 'onboard') consume(1, optionSets.setup);

@@ -8,7 +8,7 @@ import test, { after } from 'node:test';
 
 import { resolveVerifiedExecutable } from '../../../src/core/executable.js';
 import { Secret } from '../../../src/core/secrets.js';
-import { ClaudexError } from '../../../src/core/errors.js';
+import { ClaudeyError } from '../../../src/core/errors.js';
 import { visibleModelId } from '../../../src/providers/catalog.js';
 import * as claudeProvider from '../../../src/providers/claude.js';
 
@@ -29,7 +29,7 @@ function executableAdapter() {
   };
 }
 
-const fixtureRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'claudex-claude-unit-'));
+const fixtureRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'claudey-claude-unit-'));
 after(() => fs.rm(fixtureRoot, { recursive: true, force: true }));
 const CLAUDE = await resolveVerifiedExecutable({ command: 'claude', platform: 'win32', candidates: [{ path: process.execPath }], adapter: executableAdapter() });
 const TOKEN_BYTES = Buffer.alloc(32, 17);
@@ -265,10 +265,10 @@ test('mixed --all session accepts a cloaked Anthropic id and keeps Claude-writte
 
 test('sanitizes lifecycle and model-service diagnostics while preserving only stable public error classes', async () => {
   for (const overrides of [
-    { ensureGateway: async () => { throw new ClaudexError('GATEWAY_UNHEALTHY', 'lifecycle secret-canary'); } },
-    { ensureGateway: async () => { throw new ClaudexError('PORT_IN_USE', 'listener secret-canary', { details: { private: 'secret-canary' } }); } },
-    { listModels: async () => { throw new ClaudexError('AUTH_REQUIRED', 'catalog secret-canary'); } },
-    { listModels: async () => { throw new ClaudexError('PROCESS_IDENTITY_MISMATCH', 'identity secret-canary'); } }
+    { ensureGateway: async () => { throw new ClaudeyError('GATEWAY_UNHEALTHY', 'lifecycle secret-canary'); } },
+    { ensureGateway: async () => { throw new ClaudeyError('PORT_IN_USE', 'listener secret-canary', { details: { private: 'secret-canary' } }); } },
+    { listModels: async () => { throw new ClaudeyError('AUTH_REQUIRED', 'catalog secret-canary'); } },
+    { listModels: async () => { throw new ClaudeyError('PROCESS_IDENTITY_MISMATCH', 'identity secret-canary'); } }
   ]) {
     const f = fixture(overrides);
     await assert.rejects(launchClaudeProvider(f.value), (error) => ['GATEWAY_UNHEALTHY', 'PORT_IN_USE', 'AUTH_REQUIRED', 'PROCESS_IDENTITY_MISMATCH'].includes(error.code)
@@ -278,7 +278,7 @@ test('sanitizes lifecycle and model-service diagnostics while preserving only st
 
 test('preserves the stable not-installed remediation and fails closed on hostile diagnostic accessors', async () => {
   const missing = fixture({
-    ensureGateway: async () => { throw new ClaudexError('NOT_INSTALLED', 'install path secret-canary'); }
+    ensureGateway: async () => { throw new ClaudeyError('NOT_INSTALLED', 'install path secret-canary'); }
   });
   await assert.rejects(launchClaudeProvider(missing.value), (error) => error.code === 'NOT_INSTALLED'
     && error.hint === 'Run claudey setup.' && !error.message.includes('secret-canary'));

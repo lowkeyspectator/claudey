@@ -29,7 +29,7 @@ function executableAdapter() {
   };
 }
 
-const fixtureRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'claudex-auth-unit-'));
+const fixtureRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'claudey-auth-unit-'));
 after(() => fs.rm(fixtureRoot, { recursive: true, force: true }));
 const CLI = await resolveVerifiedExecutable({
   command: 'cliproxyapi', platform: 'win32', candidates: [{ path: process.execPath }], adapter: executableAdapter()
@@ -54,8 +54,8 @@ function authOptions(descriptor, overrides = {}) {
     nonInteractive: false,
     ci: false,
     isTTY: true,
-    configPath: 'C:\\Users\\person\\claudex\\config.yaml',
-    cwd: 'C:\\Users\\person\\claudex',
+    configPath: 'C:\\Users\\person\\claudey\\config.yaml',
+    cwd: 'C:\\Users\\person\\claudey',
     environment: { PATH: 'safe-path', SystemRoot: 'C:\\Windows', OPENAI_API_KEY: 'secret-canary', ANTHROPIC_BASE_URL: 'http://hostile' },
     capabilities: descriptor,
     inspectCallbackPort: async ({ port }) => ({ state: 'free', port }),
@@ -148,7 +148,7 @@ test('constructs only fixed supported provider argv and checks effective callbac
     assert.equal(result.authenticated, true);
     assert.deepEqual(Object.keys(result), ['authenticated', 'provider', 'mode']);
     assert.deepEqual(invocation.args.slice(-item.suffix.length), item.suffix);
-    assert.deepEqual(invocation.args.slice(0, 2), ['--config', 'C:\\Users\\person\\claudex\\config.yaml']);
+    assert.deepEqual(invocation.args.slice(0, 2), ['--config', 'C:\\Users\\person\\claudey\\config.yaml']);
     assert.deepEqual(inspected, item.port === null ? [] : [{ host: '127.0.0.1', port: item.port, provider: item.provider }]);
   }
 });
@@ -177,10 +177,10 @@ test('refuses relative, UNC, alternate-stream, ambiguous, and out-of-working-dir
   const cases = [
     { configPath: 'config.yaml' },
     { configPath: '\\\\server\\share\\config.yaml', cwd: '\\\\server\\share' },
-    { configPath: 'C:\\Users\\person\\claudex\\config.yaml:secret' },
-    { configPath: 'C:\\Users\\person\\claudex\\sub\\..\\config.yaml' },
+    { configPath: 'C:\\Users\\person\\claudey\\config.yaml:secret' },
+    { configPath: 'C:\\Users\\person\\claudey\\sub\\..\\config.yaml' },
     { configPath: 'C:\\Users\\person\\elsewhere\\config.yaml' },
-    { configPath: 'C:\\Users\\person\\claudex\\other.yaml' }
+    { configPath: 'C:\\Users\\person\\claudey\\other.yaml' }
   ];
   for (const item of cases) {
     let touched = false;

@@ -32,7 +32,7 @@ function rawStatus({ port, authorization }) {
 }
 
 test('real fake gateway starts twice and stops twice only through authenticated owned lifecycle', async (t) => {
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'claudex-lifecycle-'));
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'claudey-lifecycle-'));
   t.after(() => fs.rm(root, { recursive: true, force: true }));
   const runtimeRoot = path.join(root, 'runtime');
   await fs.mkdir(runtimeRoot, { mode: 0o700 });

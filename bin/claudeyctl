@@ -1,2 +1,2 @@
 #!/bin/sh
-exec '__CLAUDEX_NODE__' '__CLAUDEX_MANAGER__' "$@"
+exec '__CLAUDEY_NODE__' '__CLAUDEY_MANAGER__' "$@"

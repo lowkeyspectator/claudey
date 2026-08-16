@@ -25,7 +25,7 @@ function executableAdapter() {
 }
 
 async function fixture(t, exitCode = 0) {
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'claudex-auth-integration-'));
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'claudey-auth-integration-'));
   t.after(() => fs.rm(root, { recursive: true, force: true }));
   const capturePath = path.join(root, 'capture.json');
   const entryDirectory = path.join(root, 'node_modules', 'cliproxyapi');

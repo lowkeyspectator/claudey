@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { PassThrough, Writable } from 'node:stream';
 import test from 'node:test';
 
-import { ClaudexError } from '../../../src/core/errors.js';
+import { ClaudeyError } from '../../../src/core/errors.js';
 import { probeCursorCapabilities } from '../../../src/cursor/capabilities.js';
 import { resolveCursorAgentExecutable } from '../../../src/cursor/executable.js';
 import {
@@ -102,7 +102,7 @@ test('implements initialized JSON-RPC lifecycle and revalidates startup identity
 test('validates exact advertised tool calls and returns content plus structuredContent with stable sanitized project errors', async () => {
   const f = await fixture({ executeTool: async ({ name, arguments: args, signal }) => {
     f.calls.push(['tool', name, args, signal]);
-    if (args.prompt === 'fail') throw new ClaudexError('MODEL_NOT_FOUND', 'private diagnostic canary');
+    if (args.prompt === 'fail') throw new ClaudeyError('MODEL_NOT_FOUND', 'private diagnostic canary');
     return { tool: name, value: args.prompt ?? 'models' };
   } });
   await f.server.handle(initialize());

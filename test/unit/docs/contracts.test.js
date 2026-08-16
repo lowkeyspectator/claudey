@@ -40,10 +40,10 @@ function artifact(name, sha256, size = 123) { return { name, sha256, size }; }
 function outcome(value = 'passed') { return { outcome: value, evidenceSha256: SHA_D }; }
 
 function manifest() {
-  const payload = artifact('claudex-manager-1.2.3.tar.gz', SHA_A, 500);
-  const x64 = { ...artifact('claudex-windows-x64.exe', SHA_B, 600), compiler: { name: 'MSVC', version: '19.44', flags: ['/O2'] } };
-  const arm64 = { ...artifact('claudex-windows-arm64.exe', SHA_C, 700), compiler: { name: 'MSVC', version: '19.44', flags: ['/O2'] } };
-  const sbom = artifact('claudex-manager-1.2.3.spdx.json', 'e'.repeat(64), 400);
+  const payload = artifact('claudey-manager-1.2.3.tar.gz', SHA_A, 500);
+  const x64 = { ...artifact('claudey-windows-x64.exe', SHA_B, 600), compiler: { name: 'MSVC', version: '19.44', flags: ['/O2'] } };
+  const arm64 = { ...artifact('claudey-windows-arm64.exe', SHA_C, 700), compiler: { name: 'MSVC', version: '19.44', flags: ['/O2'] } };
+  const sbom = artifact('claudey-manager-1.2.3.spdx.json', 'e'.repeat(64), 400);
   return {
     schemaVersion: 1, managerVersion: '1.2.3', sourceRevision: REVISION, managerShimCompatibilityVersion: 1,
     payload, shims: { 'windows-x64': x64, 'windows-arm64': arm64 },
@@ -64,7 +64,7 @@ function manifest() {
 function report(targetId, manifestSha256) {
   const [osName, osVersion, platform, runtimeArch, nativeArch, wslVersion] = targetFacts[targetId];
   const shim = platform === 'win32'
-    ? (runtimeArch === 'x64' ? artifact('claudex-windows-x64.exe', SHA_B, 600) : artifact('claudex-windows-arm64.exe', SHA_C, 700))
+    ? (runtimeArch === 'x64' ? artifact('claudey-windows-x64.exe', SHA_B, 600) : artifact('claudey-windows-arm64.exe', SHA_C, 700))
     : null;
   const required = ['cleanBootstrap', 'repeatBootstrap', 'update', 'rollback', 'dryRunUninstall', 'uninstall', 'repeatUninstall'];
   const auth = ['codexBrowser', 'codexDeviceCode', 'codexNoBrowser', 'antigravityBrowser', 'antigravityNoBrowser'];
@@ -73,7 +73,7 @@ function report(targetId, manifestSha256) {
     schemaVersion: 1,
     release: {
       tag: 'v1.2.3', version: '1.2.3', sourceRevision: REVISION, projectManifestSha256: manifestSha256,
-      managerPayload: artifact('claudex-manager-1.2.3.tar.gz', SHA_A, 500), shim
+      managerPayload: artifact('claudey-manager-1.2.3.tar.gz', SHA_A, 500), shim
     },
     target: { id: targetId, osName, osVersion, platform, runtimeArch, nativeArch, wslVersion },
     observedAt: '2026-08-13T10:00:00.000Z',
@@ -91,7 +91,7 @@ function report(targetId, manifestSha256) {
     },
     operations: Object.fromEntries(required.map((name) => [name, outcome()])),
     auth: Object.fromEntries(auth.map((name) => [name, outcome()])),
-    inference: { claudex: outcome(), claudeAgy: outcome() },
+    inference: { claudey: outcome(), claudeAgy: outcome() },
     cursor: { login: outcome(), models: outcome(), ask: outcome(), plan: outcome(), approvedWorktree: outcome() },
     checkout: {
       before: { sourceSha256: '9'.repeat(64), indexSha256: '0'.repeat(64), headRevision: REVISION },
@@ -168,7 +168,7 @@ test('validation report schema is closed and the validator deeply freezes exact 
     (candidate) => { candidate.extra = true; },
     (candidate) => { candidate.release.extra = true; },
     (candidate) => { candidate.target.platform = 'linux'; },
-    (candidate) => { candidate.release.shim.name = 'claudex-windows-arm64.exe'; },
+    (candidate) => { candidate.release.shim.name = 'claudey-windows-arm64.exe'; },
     (candidate) => { candidate.maxAgeHours = 169; },
     (candidate) => { candidate.tools.node.version = '22.19.0'; },
     (candidate) => { candidate.tools.claude.version = '2.1.228'; },
@@ -228,7 +228,7 @@ test('not-applicable is accepted only for an optional auth mode disproved by its
 });
 
 test('CLI validates only bounded regular report files and emits a sanitized result', async (t) => {
-  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'claudex-validation-report-'));
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'claudey-validation-report-'));
   t.after(() => fs.rm(directory, { recursive: true, force: true }));
   const project = manifest();
   const manifestBytes = Buffer.from(`${JSON.stringify(project)}\n`);

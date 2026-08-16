@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { ClaudexError } from '../../../src/core/errors.js';
+import { ClaudeyError } from '../../../src/core/errors.js';
 import { Secret } from '../../../src/core/secrets.js';
 import {
   listAllGatewayModels,
@@ -155,8 +155,8 @@ test('models all returns the highest-priority public error when no gateway provi
 
 test('sanitizes lifecycle and transport diagnostics before returning public model errors', async () => {
   for (const overrides of [
-    { ensureHealthy: async () => { throw new ClaudexError('GATEWAY_UNHEALTHY', 'lifecycle secret-canary'); } },
-    { requestModels: async () => { throw new ClaudexError('GATEWAY_UNHEALTHY', 'transport secret-canary'); } }
+    { ensureHealthy: async () => { throw new ClaudeyError('GATEWAY_UNHEALTHY', 'lifecycle secret-canary'); } },
+    { requestModels: async () => { throw new ClaudeyError('GATEWAY_UNHEALTHY', 'transport secret-canary'); } }
   ]) {
     const fixture = context(overrides);
     await assert.rejects(listProviderModels('codex', fixture.value), (error) => error.code === 'GATEWAY_UNHEALTHY'

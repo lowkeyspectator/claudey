@@ -1,8 +1,8 @@
-# Claudex Cross-Platform Gateway and Cursor Bridge Implementation Plan
+# Claudey Cross-Platform Gateway and Cursor Bridge Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Deliver a zero-runtime-dependency, per-user `claudexctl` manager that safely installs and operates CLIProxyAPI for Codex and Antigravity, launches Claude Code through live-selected models, and optionally exposes Cursor Agent through constrained Claude Code MCP tools on six native OS/architecture targets.
+**Goal:** Deliver a zero-runtime-dependency, per-user `claudeyctl` manager that safely installs and operates CLIProxyAPI for Codex and Antigravity, launches Claude Code through live-selected models, and optionally exposes Cursor Agent through constrained Claude Code MCP tools on six native OS/architecture targets.
 
 **Architecture:** A dependency-injected ESM Node.js core owns contracts, secure state, verified releases, lifecycle, provider discovery, and launch orchestration. Platform adapters exclusively own OS-specific paths, permissions, archives, processes, and PATH mutation. Cursor is a separately gated bridge using authenticated manager identity, read-only snapshots by default, and approval-bound Git worktrees for writes. Thin POSIX scripts and reproducibly built Windows native shims forward arguments without reconstructing shell commands.
 
@@ -10,8 +10,8 @@
 
 ## Global Constraints
 
-- Preserve every invariant and acceptance criterion in `docs/superpowers/specs/2026-08-12-claudex-cross-platform-design.md`; stop and revise the spec when an upstream capability contradicts it.
-- Do not install or replace a command named `claude`. Install only `claudexctl`, `claudex`, and `claude-agy`; proxy variables exist only in the launched Claude child.
+- Preserve every invariant and acceptance criterion in `docs/superpowers/specs/2026-08-12-claudey-cross-platform-design.md`; stop and revise the spec when an upstream capability contradicts it.
+- Do not install or replace a command named `claude`. Install only `claudey`, `claudeyctl`, `claude-codex`, `claude-agy`, and `claude-grok`; proxy variables exist only in the launched Claude child.
 - Use no npm runtime dependencies. All subprocess calls use an absolute verified executable, discrete argument array, `shell: false`, bounded I/O, and a timeout.
 - Bind CLIProxyAPI exactly to `127.0.0.1`; require a generated 256-bit bearer token; use a different 256-bit secret for manifest HMAC and approval-key derivation.
 - Never log, serialize, back up outside the protected root, or forward gateway tokens, manifest secrets, OAuth content, or credential canaries.
@@ -32,7 +32,7 @@
 
 ```js
 // src/core/errors.js
-export class ClaudexError extends Error {
+export class ClaudeyError extends Error {
   constructor(code, message, { hint, details = {}, cause } = {})
 }
 export function exitCodeFor(error) {}
@@ -149,7 +149,7 @@ Task 1 parser fixtures enumerate these exact forms; later command tasks bind beh
 | `cursor writes disable` | no command-specific options |
 | `cursor approve` | required `APPROVAL_ID`; interactive TTY confirmation only |
 | `uninstall` | `--dry-run`, `--purge-auth`, `--yes` |
-| `claudex`, `claude-agy` | mutually exclusive `--model MODEL` / `--select`; Claude args only after `--` |
+| `claudey`, `claude-codex`, `claude-agy`, `claude-grok` | mutually exclusive `--model MODEL` / `--select` / `--yolo`; Claude args only after `--` |
 
 ## Windows helper protocol contract
 
@@ -165,9 +165,9 @@ Each helper accepts a single versioned JSON request file path and writes exactly
 
 | Source artifact | Installed name | Platform | Ownership/hash/version rule |
 |---|---|---|---|
-| `bin/claudexctl.js` | manager entry under versioned manager payload | all | manifest-owned, payload SHA-256 and manager version |
-| `bin/claudexctl`, `bin/claudex`, `bin/claude-agy` templates | same basenames in user bin | macOS/Linux/WSL | rendered only with fixed absolute Node/manager paths; manifest-owned and hashed |
-| one native shim binary from `native/windows-shim` | `claudexctl.exe`, `claudex.exe`, `claude-agy.exe` | Windows x64/ARM64 | identical target-specific bytes copied under three names; project-release hash, capture self-test, manager compatibility version |
+| `bin/claudeyctl.js` | manager entry under versioned manager payload | all | manifest-owned, payload SHA-256 and manager version |
+| `bin/claudeyctl`, `bin/claudey`, `bin/claude-codex`, `bin/claude-agy`, `bin/claude-grok` templates | same basenames in user bin | macOS/Linux/WSL | rendered only with fixed absolute Node/manager paths; manifest-owned and hashed |
+| one native shim binary from `native/windows-shim` | `claudeyctl.exe`, `claudey.exe`, `claude-codex.exe`, `claude-agy.exe`, `claude-grok.exe` | Windows x64/ARM64 | identical target-specific bytes copied under five names; project-release hash, capture self-test, manager compatibility version |
 
 Launchers read current managed config/port at runtime through the manager entry. No launcher bakes in port `8317` or a bearer token.
 
@@ -182,7 +182,7 @@ The integration controller owns changes to `package.json`, `src/core/schema.js`,
 **Files:**
 
 - Create: `package.json`, `.gitignore`, `LICENSE`
-- Create: `bin/claudexctl.js`
+- Create: `bin/claudeyctl.js`
 - Create: `src/core/errors.js`, `src/core/result.js`, `src/core/secrets.js`, `src/core/schema.js`, `src/core/limits.js`
 - Create: `src/cli/parse.js`, `src/cli/output.js`, `src/cli/main.js`
 - Create: `scripts/check.mjs`
@@ -215,7 +215,7 @@ test('launcher requires a delimiter before Claude arguments', () => {
 - [ ] Run `node --test test/unit/core/errors.test.js test/unit/core/secrets.test.js test/unit/cli/output.test.js`; record RED as missing-module failures.
 - [ ] Implement the remaining contracts above. `Secret` stores bytes in a private field, exposes only callback-scoped access, wipes owned buffers when disposed, and throws stable safety errors for serialization/coercion/inspection.
 - [ ] Add `package.json` with `"type": "module"`, `"engines": { "node": ">=22.20.0" }`, no `dependencies`, and scripts `check`, `test`, `test:unit`, `test:integration`, `test:e2e:fixtures`, and `test:e2e:live`. `scripts/check.mjs` verifies syntax/imports, executable headers, JSON files, forbidden runtime dependencies, forbidden launcher names, and secret canary absence without rewriting files.
-- [ ] Re-run the focused command, then `npm.cmd run check` and `npm.cmd test`; record GREEN and commit `feat: establish claudex contracts and test harness`.
+- [ ] Re-run the focused command, then `npm.cmd run check` and `npm.cmd test`; record GREEN and commit `feat: establish claudey contracts and test harness`.
 
 ### Task 2: Platform support detection, managed paths, and asset mapping
 
@@ -229,7 +229,7 @@ test('launcher requires a delimiter before Claude arguments', () => {
 
 - [ ] Add and RED-run `asset-map.test.js` for the exact names `CLIProxyAPI_7.2.130_windows_amd64.zip`, `CLIProxyAPI_7.2.130_windows_aarch64.zip`, `CLIProxyAPI_7.2.130_darwin_amd64.tar.gz`, `CLIProxyAPI_7.2.130_darwin_aarch64.tar.gz`, `CLIProxyAPI_7.2.130_linux_amd64.tar.gz`, and `CLIProxyAPI_7.2.130_linux_aarch64.tar.gz`, leading-`v` normalization, `_no-plugin` exclusion, and unsupported combinations. Implement only `resolveReleaseAsset`; re-run GREEN.
 - [ ] Add and RED-run `detect.test.js` for runtime/native mismatch reporting, Windows 10 1809+, macOS 13+, Ubuntu 20.04+/Debian 10+ glibc, musl/unknown distro refusal, WSL identity, and runtime-architecture selection. Implement only pure platform detection; re-run GREEN.
-- [ ] Add and RED-run `paths.test.js` with exact roots: Windows `%LOCALAPPDATA%\\claudexctl` manager/state/bin and `%APPDATA%\\claudexctl` config/auth; macOS `~/Library/Application Support/claudexctl` manager/config/auth/state and `~/.local/bin`; Linux/WSL XDG data/config/state fallbacks plus `~/.local/bin`. Assert WSL never selects mounted Windows state. Implement only path derivation; re-run GREEN.
+- [ ] Add and RED-run `paths.test.js` with exact roots: Windows `%LOCALAPPDATA%\\claudeyctl` manager/state/bin and `%APPDATA%\\claudeyctl` config/auth; macOS `~/Library/Application Support/claudeyctl` manager/config/auth/state and `~/.local/bin`; Linux/WSL XDG data/config/state fallbacks plus `~/.local/bin`. Assert WSL never selects mounted Windows state. Implement only path derivation; re-run GREEN.
 - [ ] Re-run focused tests and `npm.cmd test`; commit `feat: detect supported platforms and release assets`.
 
 ### Task 3: Canonical filesystem, permissions, lock, and mutation primitives
@@ -422,8 +422,8 @@ ws-auth: true
 
 **Files:**
 
-- Create: `src/providers/claude.js`, `src/cli/launchers/claudex.js`, `src/cli/launchers/claude-agy.js`
-- Create: `bin/claudex`, `bin/claude-agy`, `bin/claudexctl`
+- Create: `src/providers/claude.js`, `src/cli/launchers/claudey.js`, `src/cli/launchers/claude-codex.js`, `src/cli/launchers/claude-agy.js`, `src/cli/launchers/claude-grok.js`
+- Create: `bin/claudey`, `bin/claude-codex`, `bin/claude-agy`, `bin/claude-grok`, `bin/claudeyctl`
 - Create: `test/unit/providers/claude.test.js`, `test/unit/cli/launchers.test.js`, `test/integration/claude-launcher.test.js`
 - Extend: `test/fixtures/bin/fake-claude.js`
 
@@ -511,7 +511,7 @@ ENABLE_TOOL_SEARCH=false
 - [ ] The `cursor_worktree_run` descriptor must mark write/destructive behavior and required user interaction using the protocol-version-supported MCP annotations/meta. Assert the emitted descriptor exactly and keep out-of-band approval authoritative even after Claude permission.
 - [ ] At server startup require `CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=1`, explicit absence of `ANTHROPIC_BASE_URL`, `ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GOOGLE_API_KEY`, `GOOGLE_APPLICATION_CREDENTIALS`, `GITHUB_TOKEN`, `GH_TOKEN`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AZURE_CLIENT_SECRET`, Claude session variables, CLIProxyAPI credential/path variables, and `CURSOR_API_KEY`; also require authenticated manager manifest/installation UUID and non-link manager/plugin paths. These gates apply to all tools. Canonical current-project/registered-root validation applies per ask/plan/worktree call, not to `cursor_models`.
 - [ ] Test the plugin wrapper attempts a no-follow, link-free canonicalization of startup `process.cwd()` without accepting MCP caller input. On success it passes optional `--source-root <canonical-candidate>`; on missing/non-Git/unregistered/link/reparse CWD it omits the candidate but still starts so `cursor_models` works. The manager rejects absent, changed, non-Git, unsafe, or unregistered candidates only when ask/plan/worktree is called. Cover models plus rejected repository tools in the same non-Git session.
-- [ ] The wrapper spawns `<absolute-node> <absolute-manager> cursor mcp-serve [--source-root <canonical-candidate>] --installation-id <uuid> --manager-root <verified-manager-root>` with inherited stdio and `shell: false`. Before `tools/list`, the hidden command requires `installationId === verifiedManifest.installationId` and no-follow `canonical(managerRoot) === verifiedManifest.managerRoot`, revalidates the root immediately before use, and rejects a forged UUID, foreign root, link swap, or mismatched manifest. The wrapper never resolves `claudexctl` through PATH or puts prompt/model in argv.
+- [ ] The wrapper spawns `<absolute-node> <absolute-manager> cursor mcp-serve [--source-root <canonical-candidate>] --installation-id <uuid> --manager-root <verified-manager-root>` with inherited stdio and `shell: false`. Before `tools/list`, the hidden command requires `installationId === verifiedManifest.installationId` and no-follow `canonical(managerRoot) === verifiedManifest.managerRoot`, revalidates the root immediately before use, and rejects a forged UUID, foreign root, link swap, or mismatched manifest. The wrapper never resolves `claudeyctl` through PATH or puts prompt/model in argv.
 - [ ] Test manager commands `cursor enable/disable/install/login/repo add|list|remove/writes enable|disable/approve`, plugin UUID ownership collision, user/local idempotency, repeated disable exit-0 behavior, missing prerequisite behavior, explicit Cursor installer warning/confirmation, `models cursor` without gateway start, and use of Claude plugin commands rather than hand-editing Claude settings.
 - [ ] RED-run MCP schema/server unit tests for framing, methods, errors, dynamic descriptors, annotations, scrub/identity gates, and repository-independent models. Implement protocol server only; re-run GREEN.
 - [ ] RED-run `cursor-plugin.test.js` for wrapper source-root/manifest/path behavior and ownership-safe plugin enable/disable. Implement manifests/forwarder only; re-run GREEN.
@@ -525,7 +525,7 @@ ENABLE_TOOL_SEARCH=false
 **Files:**
 
 - Create: `src/cli/commands/status.js`, `src/cli/commands/doctor.js`
-- Modify: `src/cli/main.js`, `bin/claudexctl.js`
+- Modify: `src/cli/main.js`, `bin/claudeyctl.js`
 - Create: `test/integration/doctor.test.js`, `test/integration/status.test.js`, `test/integration/acceptance-core.test.js`, `test/integration/acceptance-cursor.test.js`
 
 - [ ] Re-run the complete Task 1 command-contract matrix through the wired router and test help text, exact exit classes, JSON single-envelope output, stderr progress, idempotent no-ops, and unknown command/option schemas.
@@ -558,7 +558,7 @@ ENABLE_TOOL_SEARCH=false
 - Create: `test/integration/bootstrap-posix.test.js`
 
 - [ ] RED-run the POSIX bootstrap test for fixed `--version`, `--yes`, `--no-path`, and `--rollback-manager` parsing; Node floor/supported-line validation; no root; HTTPS project payload/manifest/hash verification; private staging; capture self-test; atomic manager pointer; one previous manager; exact `setup` argv; no OAuth; and no `npm install`.
-- [ ] Fix version semantics in tests: bootstrap `--version` selects the manager payload release; after activation, `claudexctl setup --version` selects the CLIProxyAPI release. Bootstrap never forwards its manager version as the gateway version.
+- [ ] Fix version semantics in tests: bootstrap `--version` selects the manager payload release; after activation, `claudeyctl setup --version` selects the CLIProxyAPI release. Bootstrap never forwards its manager version as the gateway version.
 - [ ] Test actual POSIX launcher argument preservation and ShellCheck when available. Implement `install.sh` and rendered launchers with static absolute paths and `"$@"`; re-run GREEN and commit `feat: bootstrap verified POSIX payloads`.
 
 ### Task 20: Windows native quoting, launcher shim, and architecture builds
@@ -594,7 +594,7 @@ ENABLE_TOOL_SEARCH=false
 - Create: `install.ps1`, `test/integration/bootstrap-windows.test.js`
 
 - [ ] RED-run PowerShell bootstrap tests for the fixed `-Version`, `-Yes`, `-NoPath`, and `-RollbackManager` schema; Node/PowerShell prerequisites; non-admin operation; project manifest/payload/target-shim verification; private staging; manager/shim compatibility; capture self-test; atomic pointer; exact setup argv array splatting; no OAuth; and interrupted-update restoration.
-- [ ] Fix version semantics exactly as Task 19: `-Version` is manager payload version, while a later `claudexctl setup --version` is CLIProxyAPI version. `-RollbackManager` consumes the retained manager pointer without touching gateway rollback.
+- [ ] Fix version semantics exactly as Task 19: `-Version` is manager payload version, while a later `claudeyctl setup --version` is CLIProxyAPI version. `-RollbackManager` consumes the retained manager pointer without touching gateway rollback.
 - [ ] Implement, exercise under Windows PowerShell 5.1 and current PowerShell in CI, re-run GREEN, and commit `feat: bootstrap and roll back Windows manager payloads`.
 
 ### Task 23: Six-target native CI and upstream compatibility workflow
@@ -621,7 +621,7 @@ ENABLE_TOOL_SEARCH=false
 - Create: `test/unit/docs/contracts.test.js`
 
 - [ ] RED-run doc/report tests requiring every public command/support row/asset suffix and all warnings: normal `claude` isolation, explicit OAuth/Cursor installs, provider terms, third-party trust, loopback/auth, integrity/provenance limits, Cursor same-user non-sandbox, WSL separation/ports, execution policy, upstream drift, dynamic entitlements, redaction, recovery, rollback, and uninstall.
-- [ ] Require one structured report per Windows 10 1809 x64, Windows 11 ARM64, macOS 13 Intel, macOS 13 Apple silicon, WSL, and each current native target. Each binds to report-schema version, release tag/version, manager payload digest, relevant shim digest, CLIProxyAPI version/hash, UTC timestamp/max-age policy, OS/version/architectures, Node/Claude/Cursor versions+hashes, clean bootstrap/repeat/update/rollback/uninstall, supported Codex browser/device/no-browser flows, supported Antigravity browser/no-browser flows, bounded inference through `claudex` and `claude-agy`, Cursor login/models/ask/plan/approved disposable-worktree, loopback/auth, permissions, source/index/HEAD hashes, cleanup, and canary result.
+- [ ] Require one structured report per Windows 10 1809 x64, Windows 11 ARM64, macOS 13 Intel, macOS 13 Apple silicon, WSL, and each current native target. Each binds to report-schema version, release tag/version, manager payload digest, relevant shim digest, CLIProxyAPI version/hash, UTC timestamp/max-age policy, OS/version/architectures, Node/Claude/Cursor versions+hashes, clean bootstrap/repeat/update/rollback/uninstall, supported Codex browser/device/no-browser flows, supported Antigravity browser/no-browser flows, bounded inference through `claudey` and `claude-agy`, Cursor login/models/ask/plan/approved disposable-worktree, loopback/auth, permissions, source/index/HEAD hashes, cleanup, and canary result.
 - [ ] Report outcomes are `passed`, `failed`, `unavailable`, `not-run`, or `not-applicable`. `not-applicable` is accepted only when the recorded installed-capability probe proves that optional auth mode absent; `unavailable`/`not-run` never count as pass. The validator rejects stale or different-release digests/tags. Missing required baseline/auth evidence blocks release or requires narrowing support. Verify GitHub private vulnerability reporting is enabled/linkable before using it in `SECURITY.md`; otherwise publication is blocked.
 - [ ] Implement docs/schema/validator, re-run GREEN, and commit `docs: define safe operations and release evidence`.
 
@@ -672,7 +672,7 @@ npm run test:e2e:live -- --cursor-plan --model <live-id> --confirm-metered
 npm run test:e2e:live -- --all-models --confirm-metered --max-models N --max-seconds N
 ```
 
-- [ ] Provider metered modes must spawn packaged `claudex --model <id> -- --print <bounded-prompt>` or `claude-agy --model <id> -- --print <bounded-prompt>` and capture the launcher/Claude outcome; direct gateway inference does not satisfy the test. Metered modes require TTY confirmation distinct from `--yes`, concurrency 1, bounded prompt/output/time, and a request-count warning that cost is unknown/account-dependent. `--all-models` fails before inference when discovered count exceeds `N`; it never truncates while claiming all. Cursor write smoke still uses normal approval and a disposable repo. Missing login/capability is `AUTH_REQUIRED`/`CAPABILITY_UNSUPPORTED`, never pass or simulation.
+- [ ] Provider metered modes must spawn packaged `claudey --model <id> -- --print <bounded-prompt>`, `claude-codex --model <id> -- --print <bounded-prompt>`, or `claude-agy --model <id> -- --print <bounded-prompt>` and capture the launcher/Claude outcome; direct gateway inference does not satisfy the test. Metered modes require TTY confirmation distinct from `--yes`, concurrency 1, bounded prompt/output/time, and a request-count warning that cost is unknown/account-dependent. `--all-models` fails before inference when discovered count exceeds `N`; it never truncates while claiming all. Cursor write smoke still uses normal approval and a disposable repo. Missing login/capability is `AUTH_REQUIRED`/`CAPABILITY_UNSUPPORTED`, never pass or simulation.
 - [ ] Generate/validate/canary-scan redacted JSON and Markdown evidence without prompts, headers, environments, browser screens, tokens, or OAuth. Re-run GREEN and commit `test: add truthful opt-in live model validation`.
 
 ### Task 28: Acceptance traceability and final local/remote validation
@@ -738,7 +738,7 @@ Use maximum available workers without sharing mutable branches. Some packets are
 | G | Task 26; then Task 27 | Complete packaged product and docs/report schema |
 | Final | Task 28 | Complete reviewed branch |
 
-For each packet, record in `.superpowers/sdd/2026-08-12-claudex-implementation/ledger.md`: task number, worktree, base SHA, implementer, RED command/evidence, GREEN command/evidence, head SHA, report path, review package, review verdict, fixes, re-review verdict, integration SHA, and follow-up concerns. Reviewers are read-only and do not trust implementer claims. Critical/Important findings or spec gaps block integration.
+For each packet, record in `.superpowers/sdd/2026-08-12-claudey-implementation/ledger.md`: task number, worktree, base SHA, implementer, RED command/evidence, GREEN command/evidence, head SHA, report path, review package, review verdict, fixes, re-review verdict, integration SHA, and follow-up concerns. Reviewers are read-only and do not trust implementer claims. Critical/Important findings or spec gaps block integration.
 
 ## Final merge gates
 
