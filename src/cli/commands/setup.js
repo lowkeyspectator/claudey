@@ -1,4 +1,5 @@
 import { runGatewayInstallation } from '../../core/activation.js';
+import { runProductionSetup } from '../runtime.js';
 import { Secret } from '../../core/secrets.js';
 
 function createDefaultSetupContext(options) {
@@ -42,8 +43,11 @@ function createDefaultSetupContext(options) {
 }
 
 export async function runSetupCommand(options = {}, context = {}) {
-  const effectiveContext = typeof context?.acquireLock === 'function'
-    ? context
-    : createDefaultSetupContext(options);
-  return runGatewayInstallation({ kind: 'setup', options, setup: true }, effectiveContext);
+  if (typeof context?.acquireLock === 'function') {
+    return runGatewayInstallation({ kind: 'setup', options, setup: true }, context);
+  }
+  if (context?.production === true || Object.keys(context).length === 0) {
+    return runProductionSetup(options);
+  }
+  return runGatewayInstallation({ kind: 'setup', options, setup: true }, createDefaultSetupContext(options));
 }

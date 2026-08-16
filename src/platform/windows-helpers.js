@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { ClaudexError } from '../core/errors.js';
+import { ClaudeyError } from '../core/errors.js';
 
 const systemSid = 'S-1-5-18';
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -19,7 +19,7 @@ const defaultTerminationGraceMs = 250;
 const defaultTerminationDeadlineMs = 2_000;
 
 function fail(code, message, cause, details) {
-  return new ClaudexError(code, message, { ...(cause ? { cause } : {}), ...(details ? { details } : {}) });
+  return new ClaudeyError(code, message, { ...(cause ? { cause } : {}), ...(details ? { details } : {}) });
 }
 
 function safetyRefusal(message, cause) {
@@ -147,7 +147,7 @@ async function verifyTrustedPath(exactPath, { type, fsApi }) {
     }
     return path.win32.normalize(exactPath);
   } catch (error) {
-    if (error instanceof ClaudexError) throw error;
+    if (error instanceof ClaudeyError) throw error;
     if (error?.code === 'ENOENT') throw prerequisiteMissing('A required fixed Windows helper executable is missing.', error);
     throw capabilityUnsupported('A trusted Windows path could not be verified.', error);
   }
@@ -306,7 +306,7 @@ async function createProtectedRequest(input, { currentUserSid, icaclsPath, power
   const storage = {};
   let handle;
   try {
-    storage.directoryPath = await fsApi.mkdtemp(path.join(os.tmpdir(), 'claudexctl-security-'));
+    storage.directoryPath = await fsApi.mkdtemp(path.join(os.tmpdir(), 'claudeyctl-security-'));
     storage.directoryIdentity = identityOf(await fsApi.lstat(storage.directoryPath));
     await walkNoReparse(storage.directoryPath, fsApi);
     const canonicalDirectory = await fsApi.realpath(storage.directoryPath);
@@ -369,7 +369,7 @@ export async function runWindowsSecurityHelper({
     ], limits, deps);
     response = parseSecurityHelperResponse(result.stdout, { requestId: request.requestId });
     if (result.code !== 0 || response.ok === false) {
-      throw new ClaudexError(response.code ?? 'SAFETY_REFUSAL', response.message ?? 'Windows helper refused the operation.');
+      throw new ClaudeyError(response.code ?? 'SAFETY_REFUSAL', response.message ?? 'Windows helper refused the operation.');
     }
   } catch (error) {
     operationError = error;

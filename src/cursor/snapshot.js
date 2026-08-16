@@ -1,6 +1,6 @@
 import path from 'node:path';
 
-import { ClaudexError } from '../core/errors.js';
+import { ClaudeyError } from '../core/errors.js';
 import { createCursorRunScope } from './runner.js';
 import { isRegisteredCursorRepository } from './registry.js';
 
@@ -9,7 +9,7 @@ const SECRET_NAMES = new Set(['.env', '.npmrc', '.pypirc', '.netrc', 'id_rsa', '
 const SECRET_DIRECTORIES = new Set(['.ssh', '.aws', '.gnupg', '.azure']);
 
 function safety() {
-  return new ClaudexError('SAFETY_REFUSAL', 'The Cursor source snapshot could not be created safely.');
+  return new ClaudeyError('SAFETY_REFUSAL', 'The Cursor source snapshot could not be created safely.');
 }
 
 function exact(value, keys) {

@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
 import test from 'node:test';
 
-import { ClaudexError } from '../../../src/core/errors.js';
+import { ClaudeyError, ClaudexError } from '../../../src/core/errors.js';
 import { Secret } from '../../../src/core/secrets.js';
 import {
   createRuntimeStore,
@@ -18,7 +18,7 @@ const EXECUTABLE = Object.freeze({ kind: 'verified-fixture' });
 const EXECUTABLE_PATH = 'C:\\Program Files\\Claudex\\CLIProxyAPI.exe';
 const CONFIG_PATH = 'C:\\Users\\fixture\\Claudex\\config.yaml';
 const TOKEN = () => Secret.fromBytes(Buffer.alloc(32, 7));
-const READINESS_DOMAIN = 'claudexctl-gateway-readiness-v1\0';
+const READINESS_DOMAIN = 'claudeyctl-gateway-readiness-v1\0';
 
 function authenticatedReadinessIdentity(record) {
   const binding = {};

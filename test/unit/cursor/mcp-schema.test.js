@@ -61,8 +61,8 @@ test('advertises exact typed descriptors from verified live capabilities and per
     },
     annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
     _meta: {
-      'claudex/requiresUserInteraction': true,
-      'claudex/requiresOutOfBandApproval': true,
+      'claudey/requiresUserInteraction': true,
+      'claudey/requiresOutOfBandApproval': true,
       'anthropic/maxResultSizeChars': 1048576
     }
   });

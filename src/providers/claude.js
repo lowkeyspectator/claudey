@@ -1,33 +1,26 @@
 import { spawn } from 'node:child_process';
+import fs from 'node:fs/promises';
 import path from 'node:path';
 
-import { ClaudexError } from '../core/errors.js';
+import { ClaudeyError } from '../core/errors.js';
 import { getVerifiedInvocation, isVerifiedExecutableForCommand, revalidateExecutable } from '../core/executable.js';
-import { isSecret, Secret } from '../core/secrets.js';
+import { isSecret } from '../core/secrets.js';
+import { GATEWAY_PROVIDERS, sameModelId, visibleModelId } from './catalog.js';
 import { listProviderModels } from './models.js';
 import { requestGatewayModels } from '../core/gateway-client.js';
+import { startPickerGateway } from './picker-gateway.js';
+import { attachUsage, collectProviderUsage, formatUsageLine } from './usage.js';
 
 async function defaultEnsureGateway() {
-  return {
-    host: '127.0.0.1',
-    port: 8317,
-    token: Secret.fromBytes(Buffer.alloc(32, 0x31))
-  };
+  throw failure('NOT_INSTALLED', 'Claudey is not installed.', { hint: 'Run claudey setup.' });
 }
 
 async function defaultListModels(provider, gateway) {
-  try {
-    return await listProviderModels(provider, {
-      ...gateway,
-      ensureHealthy: async () => ({ state: 'healthy' }),
-      requestModels: requestGatewayModels
-    });
-  } catch {
-    const models = provider === 'codex'
-      ? [{ id: 'gpt-5.6-sol', object: 'model', created: Date.now(), owned_by: 'codex' }]
-      : [{ id: 'gemini-3.0-flash', object: 'model', created: Date.now(), owned_by: 'antigravity' }];
-    return { provider, status: 'available', models };
-  }
+  return listProviderModels(provider, {
+    ...gateway,
+    ensureHealthy: async () => ({ state: 'healthy' }),
+    requestModels: requestGatewayModels
+  });
 }
 
 const PREFERRED_CODEX_MODEL = 'gpt-5.6-sol';
@@ -40,7 +33,7 @@ const SAFE_ENVIRONMENT = new Map([
 ]);
 
 function failure(code, message, options) {
-  return new ClaudexError(code, message, options);
+  return new ClaudeyError(code, message, options);
 }
 
 function prerequisite() {
@@ -61,10 +54,10 @@ function publicServiceFailure(error, provider) {
   catch { return unhealthy(); }
   if (code === 'AUTH_REQUIRED') {
     return failure('AUTH_REQUIRED', `Provider "${provider}" is not authenticated.`, {
-      hint: `Run claudexctl auth ${provider}.`, details: { provider }
+      hint: `Run claudey auth ${provider}.`, details: { provider }
     });
   }
-  if (code === 'NOT_INSTALLED') return failure('NOT_INSTALLED', 'Claudex is not installed.', { hint: 'Run claudexctl setup.' });
+  if (code === 'NOT_INSTALLED') return failure('NOT_INSTALLED', 'Claudey is not installed.', { hint: 'Run claudey setup.' });
   if (code === 'PORT_IN_USE') return failure('PORT_IN_USE', 'The managed gateway port is occupied by an unrelated listener.');
   if (code === 'PROCESS_IDENTITY_MISMATCH') return failure('PROCESS_IDENTITY_MISMATCH', 'The managed gateway process identity could not be verified.');
   return unhealthy();
@@ -89,7 +82,7 @@ function assertCatalog(result, provider) {
   if (!result || typeof result !== 'object' || result.provider !== provider || result.status !== 'available' || !Array.isArray(result.models)) throw unhealthy();
   const seen = new Set();
   const models = result.models.map((model) => {
-    if (!model || typeof model !== 'object' || Object.keys(model).length !== 4 || !safeModel(model.id)
+    if (!model || typeof model !== 'object' || !safeModel(model.id)
       || model.object !== 'model' || !Number.isSafeInteger(model.created) || model.created < 0
       || model.owned_by !== provider || seen.has(model.id)) throw unhealthy();
     seen.add(model.id);
@@ -101,7 +94,7 @@ function assertCatalog(result, provider) {
 
 function modelNotFound(provider, model) {
   return failure('MODEL_NOT_FOUND', `"${model}" is not available for provider "${provider}".`, {
-    hint: `Run claudexctl models ${provider}.`, details: { provider, model }
+    hint: `Run claudey models ${provider}.`, details: { provider, model }
   });
 }
 
@@ -124,7 +117,65 @@ function copySafeEnvironment(environment) {
   return result;
 }
 
-function buildClaudeChildEnvironment({ environment, host, port, token, model } = {}) {
+const UTILITY_MODEL = /auto-review|embedding|whisper|tts|dall-e|moderation|transcribe|image|realtime|search/i;
+const START_RANK = [
+  /grok-4\.5/, /grok-4(?!.*mini)/, /gpt-5\.6-sol/, /gpt-5\.6/, /gpt-5(?!.*mini)/,
+  /gemini-3\.(?:5|1).*pro/, /gemini-3.*pro/, /gemini-3.*flash/, /composer/
+];
+
+function isUtilityModel(id) {
+  return UTILITY_MODEL.test(id);
+}
+
+function pickerModels(catalog) {
+  const coding = catalog.filter((model) => !isUtilityModel(model.id));
+  return coding.length > 0 ? coding : [...catalog];
+}
+
+function rankPickerModels(catalog) {
+  return [...pickerModels(catalog)].sort((left, right) => {
+    const leftRank = START_RANK.findIndex((pattern) => pattern.test(left.id));
+    const rightRank = START_RANK.findIndex((pattern) => pattern.test(right.id));
+    const leftScore = leftRank === -1 ? START_RANK.length : leftRank;
+    const rightScore = rightRank === -1 ? START_RANK.length : rightRank;
+    if (leftScore !== rightScore) return leftScore - rightScore;
+    return left.id < right.id ? -1 : left.id > right.id ? 1 : 0;
+  });
+}
+
+function resolveCatalogModel(catalog, requested) {
+  return catalog.find((model) => sameModelId(model.id, requested)) ?? null;
+}
+
+function routedVisibleId(model) {
+  return visibleModelId(model.owned_by, model.id);
+}
+
+async function writePickerSettings(directory, { selected }) {
+  if (typeof directory !== 'string' || directory.length < 2 || /[\u0000-\u001f\u007f]/.test(directory)) throw safety();
+  const model = routedVisibleId(selected);
+  if (!safeModel(model)) throw safety();
+  const settingsPath = path.join(directory, 'settings.json');
+  let theme;
+  try {
+    const parsed = JSON.parse(await fs.readFile(settingsPath, 'utf8'));
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed) && typeof parsed.theme === 'string' && parsed.theme.length > 0) {
+      theme = parsed.theme;
+    }
+  } catch { /* missing or invalid session settings are replaced */ }
+  const payload = `${JSON.stringify({
+    model,
+    env: {
+      CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY: '1'
+    },
+    ...(theme ? { theme } : {})
+  }, null, 2)}\n`;
+  await fs.mkdir(directory, { recursive: true, mode: 0o700 });
+  await fs.writeFile(settingsPath, payload, { mode: 0o600 });
+  await fs.rm(path.join(directory, 'cache', 'gateway-models.json'), { force: true });
+}
+
+function buildClaudeChildEnvironment({ environment, host, port, token, model, aliases, pinSubagent = true, pickerMode = false } = {}) {
   if (host !== '127.0.0.1' || !Number.isSafeInteger(port) || port < 1024 || port > 65535 || !isSecret(token) || !safeModel(model)) throw safety();
   const result = copySafeEnvironment(environment);
   let bearer;
@@ -134,15 +185,33 @@ function buildClaudeChildEnvironment({ environment, host, port, token, model } =
       return Buffer.from(bytes).toString('base64url');
     });
   } catch (error) {
-    if (error instanceof ClaudexError) throw error;
+    if (error instanceof ClaudeyError) throw error;
     throw safety();
   }
   result.ANTHROPIC_BASE_URL = `http://127.0.0.1:${port}`;
   result.ANTHROPIC_AUTH_TOKEN = bearer;
-  result.CLAUDE_CODE_SUBAGENT_MODEL = model;
+  result.ANTHROPIC_MODEL = model;
+  if (!pickerMode) {
+    const pinned = aliases ?? { haiku: model, sonnet: model, opus: model, fable: model };
+    if (![pinned.haiku, pinned.sonnet, pinned.opus, pinned.fable].every(safeModel)) throw safety();
+    result.ANTHROPIC_DEFAULT_HAIKU_MODEL = pinned.haiku;
+    result.ANTHROPIC_DEFAULT_SONNET_MODEL = pinned.sonnet;
+    result.ANTHROPIC_DEFAULT_OPUS_MODEL = pinned.opus;
+    result.ANTHROPIC_DEFAULT_FABLE_MODEL = pinned.fable;
+    result.ANTHROPIC_DEFAULT_HAIKU_MODEL_NAME = pinned.haikuName ?? pinned.haiku;
+    result.ANTHROPIC_DEFAULT_SONNET_MODEL_NAME = pinned.sonnetName ?? pinned.sonnet;
+    result.ANTHROPIC_DEFAULT_OPUS_MODEL_NAME = pinned.opusName ?? pinned.opus;
+    result.ANTHROPIC_DEFAULT_FABLE_MODEL_NAME = pinned.fableName ?? pinned.fable;
+    result.ANTHROPIC_CUSTOM_MODEL_OPTION = model;
+    result.ANTHROPIC_CUSTOM_MODEL_OPTION_NAME = pinned.customName ?? model;
+    if (pinSubagent) result.CLAUDE_CODE_SUBAGENT_MODEL = model;
+  }
+  if (typeof aliases?.configDir === 'string' && aliases.configDir.length > 0) result.CLAUDE_CONFIG_DIR = aliases.configDir;
   result.CLAUDE_CODE_ALWAYS_ENABLE_EFFORT = '1';
   result.CLAUDE_CODE_MAX_TOOL_USE_CONCURRENCY = '3';
   result.CLAUDE_CODE_SUBPROCESS_ENV_SCRUB = '1';
+  if (pickerMode) result.CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY = '1';
+  else result.CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC = '1';
   result.ENABLE_TOOL_SEARCH = 'false';
   return result;
 }
@@ -158,13 +227,19 @@ export async function launchClaudeProvider({
   listModels = defaultListModels,
   selectModel,
   runChild = runClaudeProcess,
+  announce,
+  sessionSettingsDir,
+  sessionAuthDir,
+  startPicker = startPickerGateway,
   signal
 } = {}) {
-  if (!['codex', 'antigravity'].includes(provider) || !parsed || typeof parsed !== 'object'
-    || typeof parsed.select !== 'boolean' || typeof parsed.nonInteractive !== 'boolean' || !Array.isArray(parsed.claudeArgs)) throw safety();
+  const mixed = parsed?.all === true;
+  if (!['codex', 'antigravity', 'grok'].includes(provider) || !parsed || typeof parsed !== 'object'
+    || typeof parsed.select !== 'boolean' || typeof parsed.nonInteractive !== 'boolean' || !Array.isArray(parsed.claudeArgs)
+    || (parsed.all !== undefined && typeof parsed.all !== 'boolean')) throw safety();
   if (hasModelOverride(parsed.claudeArgs)) throw failure('USAGE_ERROR', 'Claude model overrides are not allowed after the launcher delimiter.');
   if (parsed.select && parsed.nonInteractive) throw failure('INTERACTION_REQUIRED', 'Live model selection requires an interactive terminal.');
-  if (parsed.model === undefined && parsed.nonInteractive) throw failure('MODEL_REQUIRED', 'A current live model is required in noninteractive mode.', { hint: `Run claudexctl models ${provider}.` });
+  if (parsed.model === undefined && parsed.nonInteractive) throw failure('MODEL_REQUIRED', 'A current live model is required in noninteractive mode.', { hint: mixed ? 'Run claudey models all.' : `Run claudey models ${provider}.` });
   if (parsed.model !== undefined && !safeModel(parsed.model)) throw failure('USAGE_ERROR', 'Model identifier is invalid.');
   if (parsed.model === undefined && isTTY !== true) throw failure('INTERACTION_REQUIRED', 'Live model selection requires an interactive terminal.');
   if (!safeCwd(cwd) || typeof ensureGateway !== 'function' || typeof listModels !== 'function'
@@ -173,30 +248,108 @@ export async function launchClaudeProvider({
 
   let gateway;
   try { gateway = checkedGateway(await ensureGateway()); } catch (error) { throw publicServiceFailure(error, provider); }
+  const byProvider = new Map();
   let catalog;
-  try { catalog = assertCatalog(await listModels(provider, gateway), provider); } catch (error) { throw publicServiceFailure(error, provider); }
+  if (mixed) {
+    const merged = [];
+    const seen = new Set();
+    for (const name of GATEWAY_PROVIDERS) {
+      try {
+        const models = assertCatalog(await listModels(name, gateway), name);
+        byProvider.set(name, models);
+        for (const model of models) {
+          if (seen.has(model.id)) continue;
+          seen.add(model.id);
+          merged.push(model);
+        }
+      } catch (error) {
+        if (error?.code !== 'AUTH_REQUIRED') throw publicServiceFailure(error, name);
+      }
+    }
+    if (merged.length === 0) {
+      throw failure('AUTH_REQUIRED', 'No requested provider is authenticated.', { hint: 'Run claudey auth codex, claudey auth antigravity, or claudey auth grok.' });
+    }
+    catalog = merged;
+  } else {
+    try { catalog = assertCatalog(await listModels(provider, gateway), provider); }
+    catch (error) { throw publicServiceFailure(error, provider); }
+    byProvider.set(provider, catalog);
+  }
 
   let selected = parsed.model;
   if (selected === undefined) {
-    const offered = provider === 'codex' && catalog.some(({ id }) => id === PREFERRED_CODEX_MODEL)
-      ? [catalog.find(({ id }) => id === PREFERRED_CODEX_MODEL), ...catalog.filter(({ id }) => id !== PREFERRED_CODEX_MODEL)]
-      : [...catalog];
-    try { selected = await selectModel(Object.freeze({ provider, models: Object.freeze(offered) })); }
+    const preferred = mixed
+      ? rankPickerModels(catalog)
+      : provider === 'codex' && catalog.some(({ id }) => id === PREFERRED_CODEX_MODEL)
+        ? [catalog.find(({ id }) => id === PREFERRED_CODEX_MODEL), ...catalog.filter(({ id }) => id !== PREFERRED_CODEX_MODEL)]
+        : [...catalog];
+    try { selected = await selectModel(Object.freeze({ provider: mixed ? 'all' : provider, models: Object.freeze(preferred) })); }
     catch { throw safety(); }
   }
-  if (!safeModel(selected) || !catalog.some(({ id }) => id === selected)) throw modelNotFound(provider, typeof selected === 'string' ? selected : 'invalid');
+  const matched = typeof selected === 'string' ? resolveCatalogModel(catalog, selected) : null;
+  if (!safeModel(selected) || !matched) {
+    throw modelNotFound(mixed ? 'all' : provider, typeof selected === 'string' ? selected : 'invalid');
+  }
+  selected = matched.id;
   if (await revalidateExecutable(claude) !== true) throw prerequisite();
   const trusted = getVerifiedInvocation(claude);
   if (!trusted) throw prerequisite();
+  let decorated = catalog;
+  if (mixed) {
+    try {
+      const collected = await collectProviderUsage({ authDir: sessionAuthDir });
+      decorated = attachUsage({ models: catalog }, collected).models;
+    } catch { decorated = catalog; }
+  }
+  let picker;
+  let aliases;
+  const routed = mixed ? routedVisibleId(matched) : selected;
+  if (mixed) {
+    if (typeof startPicker !== 'function') throw safety();
+    try { picker = await startPicker({ ...gateway, models: pickerModels(decorated) }); }
+    catch { throw safety(); }
+    const configDir = typeof sessionSettingsDir === 'string' ? sessionSettingsDir : undefined;
+    if (configDir) {
+      try { await writePickerSettings(configDir, { selected: matched }); }
+      catch {
+        try { await picker.close(); } catch { /* picker close cannot own launch */ }
+        throw safety();
+      }
+    }
+    aliases = Object.freeze({ configDir });
+  }
   let env;
-  try { env = buildClaudeChildEnvironment({ environment: baseEnvironment, ...gateway, model: selected }); }
-  catch { throw safety(); }
+  try {
+    env = buildClaudeChildEnvironment({
+      environment: baseEnvironment,
+      host: gateway.host,
+      port: picker?.port ?? gateway.port,
+      token: gateway.token,
+      model: routed,
+      aliases,
+      pinSubagent: !mixed,
+      pickerMode: mixed
+    });
+  } catch {
+    try { await picker?.close(); } catch { /* picker close cannot own launch */ }
+    throw safety();
+  }
+  if (mixed && typeof announce === 'function') {
+    const lines = ['All live models. Open /model to switch.'];
+    for (const name of GATEWAY_PROVIDERS) {
+      const models = decorated.filter((model) => model.owned_by === name);
+      if (models.length === 0) continue;
+      lines.push(`${name}:`);
+      for (const model of models) lines.push(`  ${formatUsageLine(model)}`);
+    }
+    try { announce(lines.join('\n')); } catch { /* announcement cannot own launch */ }
+  }
   const invocation = Object.freeze({
     executablePath: trusted.executablePath,
     args: Object.freeze([
       ...trusted.argsPrefix,
-      '--model', selected,
-      '--fallback-model', selected,
+      '--model', routed,
+      '--fallback-model', routed,
       ...parsed.claudeArgs
     ]),
     cwd,
@@ -213,9 +366,13 @@ export async function launchClaudeProvider({
     exited = childResult && Number.isSafeInteger(childResult.code) && childResult.code >= 0 && childResult.code <= 255 && childResult.signal === null;
     signaled = childResult && childResult.code === null && typeof childResult.signal === 'string' && /^SIG[A-Z0-9]+$/.test(childResult.signal);
   } catch { throw safety(); }
-  finally { delete env.ANTHROPIC_AUTH_TOKEN; }
+  finally {
+    delete env.ANTHROPIC_AUTH_TOKEN;
+    try { await picker?.close(); } catch { /* picker lifetime cannot own the child result */ }
+  }
   if (!exited && !signaled) throw safety();
-  return Object.freeze({ provider, model: selected, exitCode: childResult.code, signal: childResult.signal });
+  const owner = catalog.find(({ id }) => id === selected)?.owned_by ?? provider;
+  return Object.freeze({ provider: mixed ? owner : provider, model: selected, exitCode: childResult.code, signal: childResult.signal });
 }
 
 export function runClaudeProcess(invocation, { spawnProcess = spawn, parent = process } = {}) {

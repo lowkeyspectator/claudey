@@ -1,4 +1,5 @@
-import { ClaudexError } from '../../core/errors.js';
+import { ClaudeyError } from '../../core/errors.js';
+import { runProductionLifecycle } from '../runtime.js';
 
 const STATES = Object.freeze({
   start: new Set(['started', 'already-running', 'foreground']),
@@ -8,8 +9,8 @@ const STATES = Object.freeze({
 });
 
 const MESSAGES = new Map([
-  ['NOT_INSTALLED', 'Claudex is not installed.'],
-  ['LOCK_BUSY', 'Another Claudex operation owns the installation lock.'],
+  ['NOT_INSTALLED', 'Claudey is not installed.'],
+  ['LOCK_BUSY', 'Another Claudey operation owns the installation lock.'],
   ['PORT_IN_USE', 'The configured loopback port is occupied by an unrelated listener.'],
   ['GATEWAY_UNHEALTHY', 'The managed gateway did not become healthy.'],
   ['PROCESS_IDENTITY_MISMATCH', 'The managed gateway process identity could not be verified.'],
@@ -17,14 +18,14 @@ const MESSAGES = new Map([
 ]);
 
 function safety() {
-  return new ClaudexError('SAFETY_REFUSAL', MESSAGES.get('SAFETY_REFUSAL'));
+  return new ClaudeyError('SAFETY_REFUSAL', MESSAGES.get('SAFETY_REFUSAL'));
 }
 
 function publicFailure(error) {
   let code;
   try { code = error && typeof error === 'object' ? error.code : undefined; }
   catch { return safety(); }
-  return MESSAGES.has(code) ? new ClaudexError(code, MESSAGES.get(code)) : safety();
+  return MESSAGES.has(code) ? new ClaudeyError(code, MESSAGES.get(code)) : safety();
 }
 
 function requireFunction(context, name) {
@@ -52,9 +53,13 @@ function createDefaultLifecycleContext() {
 }
 
 export async function runLifecycleCommand(command, options = {}, context = {}) {
-  const effectiveContext = typeof context?.acquireLock === 'function' ? context : createDefaultLifecycleContext();
   const name = Array.isArray(command) && command.length === 1 ? command[0] : undefined;
-  if (!Object.hasOwn(STATES, name)) throw new ClaudexError('USAGE_ERROR', 'A valid lifecycle command is required.');
+  if ((context?.production === true || Object.keys(context).length === 0) && typeof context?.acquireLock !== 'function') {
+    if (!Object.hasOwn(STATES, name)) throw new ClaudeyError('USAGE_ERROR', 'A valid lifecycle command is required.');
+    return runProductionLifecycle(name, options);
+  }
+  const effectiveContext = typeof context?.acquireLock === 'function' ? context : createDefaultLifecycleContext();
+  if (!Object.hasOwn(STATES, name)) throw new ClaudeyError('USAGE_ERROR', 'A valid lifecycle command is required.');
   if (name === 'status') {
     try { return checkedState(name, await requireFunction(effectiveContext, 'statusGateway')()); }
     catch (error) { throw publicFailure(error); }

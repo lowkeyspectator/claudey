@@ -1,9 +1,9 @@
 {
-  "name": "claudex",
+  "name": "claudey",
   "owner": {
-    "name": "Claudex"
+    "name": "Claudey"
   },
-  "description": "Constrained local Claudex integrations.",
+  "description": "Constrained local Claudey integrations.",
   "plugins": [
     {
       "name": "cursor-agent",

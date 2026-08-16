@@ -1,11 +1,11 @@
-import { ClaudexError } from '../core/errors.js';
+import { ClaudeyError } from '../core/errors.js';
 import { isRegisteredCursorRepository } from './registry.js';
 
 const FINGERPRINT_KEYS = ['branch', 'files', 'head', 'index', 'refs', 'untracked'];
 const PUBLIC_CODES = new Set(['SAFETY_REFUSAL', 'CAPABILITY_UNSUPPORTED', 'AUTH_REQUIRED', 'MODEL_NOT_FOUND']);
 
 function safety() {
-  return new ClaudexError('SAFETY_REFUSAL', 'The Cursor read-only delegation could not be completed safely.');
+  return new ClaudeyError('SAFETY_REFUSAL', 'The Cursor read-only delegation could not be completed safely.');
 }
 
 function exact(value, keys) {
@@ -55,7 +55,7 @@ function publicFailure(error) {
   let code;
   try { code = error?.code; } catch { return safety(); }
   if (!PUBLIC_CODES.has(code)) return safety();
-  return new ClaudexError(code, code === 'MODEL_NOT_FOUND' ? 'The requested Cursor model is unavailable.'
+  return new ClaudeyError(code, code === 'MODEL_NOT_FOUND' ? 'The requested Cursor model is unavailable.'
     : code === 'AUTH_REQUIRED' ? 'Cursor Agent authentication is required.'
       : code === 'CAPABILITY_UNSUPPORTED' ? 'Cursor Agent cannot perform this delegated operation.'
         : 'The Cursor read-only delegation could not be completed safely.');

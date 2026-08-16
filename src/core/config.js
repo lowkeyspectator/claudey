@@ -1,15 +1,15 @@
-import { ClaudexError } from './errors.js';
+import { ClaudeyError } from './errors.js';
 import { atomicReplace } from './permissions.js';
 import { isSecret } from './secrets.js';
 
 export const GATEWAY_CONFIG_CHILD = 'config.yaml';
 
 function usage(message) {
-  return new ClaudexError('USAGE_ERROR', message);
+  return new ClaudeyError('USAGE_ERROR', message);
 }
 
 function safety(message) {
-  return new ClaudexError('SAFETY_REFUSAL', message);
+  return new ClaudeyError('SAFETY_REFUSAL', message);
 }
 
 function assertPort(port) {

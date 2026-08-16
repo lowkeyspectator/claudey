@@ -1,11 +1,10 @@
-import { ClaudexError, exitCodeFor } from '../core/errors.js';
+import { ClaudeyError, exitCodeFor } from '../core/errors.js';
 import { isSecret } from '../core/secrets.js';
 import { validateAuthenticatedModelCatalog } from './capabilities.js';
-
-const GATEWAY_PROVIDERS = Object.freeze(['codex', 'antigravity']);
+import { GATEWAY_PROVIDERS, isGatewayProvider, providerOwns } from './catalog.js';
 
 function failure(code, message, options) {
-  return new ClaudexError(code, message, options);
+  return new ClaudeyError(code, message, options);
 }
 
 function unhealthy() {
@@ -14,12 +13,12 @@ function unhealthy() {
 
 function authRequired(provider) {
   return failure('AUTH_REQUIRED', `Provider "${provider}" is not authenticated.`, {
-    hint: `Run claudexctl auth ${provider}.`, details: { provider }
+    hint: `Run claudey auth ${provider}.`, details: { provider }
   });
 }
 
 function checkedProvider(provider) {
-  if (!GATEWAY_PROVIDERS.includes(provider)) throw failure('USAGE_ERROR', 'Model provider must be codex or antigravity.');
+  if (!isGatewayProvider(provider)) throw failure('USAGE_ERROR', 'Model provider must be codex, antigravity, or grok.');
   return provider;
 }
 
@@ -31,33 +30,48 @@ function checkedContext(context) {
 }
 
 function publicCode(error) {
-  return typeof error?.code === 'string' && ['AUTH_REQUIRED', 'GATEWAY_UNHEALTHY', 'PORT_IN_USE', 'PROCESS_IDENTITY_MISMATCH'].includes(error.code)
+  return typeof error?.code === 'string' && ['AUTH_REQUIRED', 'GATEWAY_UNHEALTHY', 'PORT_IN_USE', 'PROCESS_IDENTITY_MISMATCH', 'NOT_INSTALLED'].includes(error.code)
     ? error.code : 'GATEWAY_UNHEALTHY';
 }
 
 function lifecycleFailure(error) {
+  if (error?.code === 'NOT_INSTALLED') return failure('NOT_INSTALLED', 'Claudey is not installed.', { hint: 'Run claudey setup.' });
   if (error?.code === 'PORT_IN_USE') return failure('PORT_IN_USE', 'The managed gateway port is already in use.');
   if (error?.code === 'PROCESS_IDENTITY_MISMATCH') return failure('PROCESS_IDENTITY_MISMATCH', 'The managed gateway process identity could not be verified.');
   return unhealthy();
+}
+
+function sleepMs(ms, sleep) {
+  if (!Number.isSafeInteger(ms) || ms <= 0) return Promise.resolve();
+  if (typeof sleep === 'function') return sleep(ms);
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 export async function listProviderModels(provider, context = {}) {
   checkedProvider(provider);
   const ctx = checkedContext(context);
   try { await ctx.ensureHealthy(ctx); } catch (error) { throw lifecycleFailure(error); }
-  let catalog;
-  try {
-    catalog = await ctx.requestModels({
-      host: ctx.host, port: ctx.port, token: ctx.token, allowPreAuthEmpty: true, signal: ctx.signal
-    });
-  } catch { throw unhealthy(); }
-  if (!validateAuthenticatedModelCatalog(catalog, { allowPreAuthEmpty: true })) throw unhealthy();
-  const models = catalog.data
-    .filter((model) => model.owned_by === provider)
-    .map((model) => Object.freeze({ id: model.id, object: model.object, created: model.created, owned_by: model.owned_by }))
-    .sort((left, right) => left.id < right.id ? -1 : left.id > right.id ? 1 : 0);
-  if (models.length === 0) throw authRequired(provider);
-  return Object.freeze({ provider, status: 'available', models: Object.freeze(models) });
+  const waitMs = Number.isSafeInteger(ctx.modelReadyWaitMs) && ctx.modelReadyWaitMs > 0
+    ? Math.min(ctx.modelReadyWaitMs, 15_000) : 0;
+  const deadline = Date.now() + waitMs;
+  while (true) {
+    let catalog;
+    try {
+      catalog = await ctx.requestModels({
+        host: ctx.host, port: ctx.port, token: ctx.token, allowPreAuthEmpty: true, signal: ctx.signal
+      });
+    } catch { throw unhealthy(); }
+    if (!validateAuthenticatedModelCatalog(catalog, { allowPreAuthEmpty: true })) throw unhealthy();
+    const models = catalog.data
+      .filter((model) => providerOwns(provider, model.owned_by))
+      .map((model) => Object.freeze({
+        id: model.id, object: model.object, created: Number.isSafeInteger(model.created) ? model.created : 0, owned_by: provider
+      }))
+      .sort((left, right) => left.id < right.id ? -1 : left.id > right.id ? 1 : 0);
+    if (models.length > 0) return Object.freeze({ provider, status: 'available', models: Object.freeze(models) });
+    if (Date.now() >= deadline) throw authRequired(provider);
+    await sleepMs(250, ctx.sleep);
+  }
 }
 
 export async function requireProviderModel(provider, model, context = {}) {
@@ -69,7 +83,7 @@ export async function requireProviderModel(provider, model, context = {}) {
   const match = result.models.find((candidate) => candidate.id === model);
   if (!match) {
     throw failure('MODEL_NOT_FOUND', `"${model}" is not available for provider "${provider}".`, {
-      hint: `Run claudexctl models ${provider}.`, details: { provider, model }
+      hint: `Run claudey models ${provider}.`, details: { provider, model }
     });
   }
   return match;

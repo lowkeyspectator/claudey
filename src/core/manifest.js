@@ -2,7 +2,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 
-import { ClaudexError } from './errors.js';
+import { ClaudeyError } from './errors.js';
 import { assertContainedNoLinks, assertRelativeManagedChild, resolveManagedChild } from './fs-safe.js';
 import { atomicReplace } from './permissions.js';
 import { Secret, isSecret } from './secrets.js';
@@ -14,7 +14,7 @@ const BASE64URL = /^[A-Za-z0-9_-]+$/u;
 const VERIFIED = new WeakSet();
 
 function safety(message) {
-  return new ClaudexError('SAFETY_REFUSAL', message);
+  return new ClaudeyError('SAFETY_REFUSAL', message);
 }
 
 function exactKeys(value, keys) {
@@ -118,7 +118,7 @@ export async function loadOrCreateInstallationSecrets({ readExisting, persistCre
 
 export function deriveApprovalKey(manifestKey, { cryptoApi = crypto } = {}) {
   return secretBytes(manifestKey, 'Manifest key', (bytes) => Secret.fromBytes(
-    cryptoApi.createHmac('sha256', bytes).update('claudexctl/approval/v1', 'utf8').digest()
+    cryptoApi.createHmac('sha256', bytes).update('claudeyctl/approval/v1', 'utf8').digest()
   ));
 }
 

@@ -13,15 +13,15 @@ test('marketplace, plugin, and MCP manifests are exact local static definitions 
   const plugin = JSON.parse(await fs.readFile(path.join(ROOT, 'plugins', 'cursor-agent', '.claude-plugin', 'plugin.json'), 'utf8'));
   const mcp = JSON.parse(await fs.readFile(path.join(ROOT, 'plugins', 'cursor-agent', '.mcp.json'), 'utf8'));
   assert.deepEqual(marketplace, {
-    name: 'claudex', owner: { name: 'Claudex' }, description: 'Constrained local Claudex integrations.',
+    name: 'claudey', owner: { name: 'Claudey' }, description: 'Constrained local Claudey integrations.',
     plugins: [{ name: 'cursor-agent', source: './plugins/cursor-agent', version: '1.0.0',
       description: 'Delegates bounded model, ask, plan, and explicitly approved worktree operations to Cursor Agent.' }]
   });
   assert.deepEqual(plugin, {
-    name: 'cursor-agent', version: '1.0.0', description: 'Constrained Cursor Agent tools managed by Claudex.',
-    author: { name: 'Claudex' }
+    name: 'cursor-agent', version: '1.0.0', description: 'Constrained Cursor Agent tools managed by Claudey.',
+    author: { name: 'Claudey' }
   });
-  assert.deepEqual(mcp, { mcpServers: { 'claudex-cursor': {
+  assert.deepEqual(mcp, { mcpServers: { 'claudey-cursor': {
     type: 'stdio', command: 'node', args: ['${CLAUDE_PLUGIN_ROOT}/server/index.mjs'],
     env: { CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: '1' }
   } } });

@@ -1,20 +1,20 @@
 import path from 'node:path';
 
-import { ClaudexError } from '../../core/errors.js';
+import { ClaudeyError } from '../../core/errors.js';
 import { planOwnedRemoval } from '../../core/manifest.js';
 
 const OPTION_KEYS = new Set(['dryRun', 'purgeAuth', 'yes', 'nonInteractive']);
 const ACTIONS = new Set(['remove', 'restore', 'preserve']);
 const CATEGORIES = new Set(['managed-file', 'runtime', 'launcher', 'plugin', 'path', 'auth', 'unlisted', 'worktree']);
 const MESSAGES = new Map([
-  ['LOCK_BUSY', 'Another Claudex operation owns the installation lock.'],
+  ['LOCK_BUSY', 'Another Claudey operation owns the installation lock.'],
   ['INTERACTION_REQUIRED', 'Explicit confirmation is required to remove authentication data.'],
   ['PROCESS_IDENTITY_MISMATCH', 'The managed gateway process identity could not be verified.'],
   ['SAFETY_REFUSAL', 'Uninstall could not be completed safely.']
 ]);
 
 function error(code = 'SAFETY_REFUSAL') {
-  return new ClaudexError(code, MESSAGES.get(code) ?? MESSAGES.get('SAFETY_REFUSAL'));
+  return new ClaudeyError(code, MESSAGES.get(code) ?? MESSAGES.get('SAFETY_REFUSAL'));
 }
 
 function publicFailure(value) {

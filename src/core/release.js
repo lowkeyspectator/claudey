@@ -3,7 +3,7 @@ import * as nodeFs from 'node:fs/promises';
 import * as nodePath from 'node:path';
 
 import { createSha256Verifier, parseChecksumManifest } from './checksum.js';
-import { ClaudexError } from './errors.js';
+import { ClaudeyError } from './errors.js';
 import { LIMITS } from './limits.js';
 import { resolveReleaseAsset as resolvePlatformAsset } from '../platform/asset-map.js';
 
@@ -25,7 +25,7 @@ export const RELEASE_LIMITS = Object.freeze({
 const BASELINE = Object.freeze([7, 2, 130]);
 
 function error(code, message, details = {}) {
-  return new ClaudexError(code, message, { details });
+  return new ClaudeyError(code, message, { details });
 }
 
 function safeUrl(url) {
@@ -41,8 +41,8 @@ function networkFailure(message, url) {
   return error('NETWORK_FAILURE', message, url ? { url: safeUrl(url) } : {});
 }
 
-function isClaudexError(value) {
-  return value instanceof ClaudexError;
+function isClaudeyError(value) {
+  return value instanceof ClaudeyError;
 }
 
 function parseVersion(value, { code = 'USAGE_ERROR' } = {}) {
@@ -135,19 +135,19 @@ function createRequestContext(parentSignal, deadlineMs) {
 
 function attachRequestContext(response, context) {
   Object.defineProperties(response, {
-    __claudexAbort: { value: context.abort, enumerable: false },
-    __claudexFinish: { value: context.finish, enumerable: false },
-    __claudexSignal: { value: context.signal, enumerable: false }
+    __claudeyAbort: { value: context.abort, enumerable: false },
+    __claudeyFinish: { value: context.finish, enumerable: false },
+    __claudeySignal: { value: context.signal, enumerable: false }
   });
   return response;
 }
 
 function finishResponse(response) {
-  response?.__claudexFinish?.();
+  response?.__claudeyFinish?.();
 }
 
 function abortResponse(response) {
-  response?.__claudexAbort?.();
+  response?.__claudeyAbort?.();
   finishResponse(response);
 }
 
@@ -230,7 +230,7 @@ export async function readResponseBytes(response, { limit, signal } = {}) {
   let total = 0;
   try {
     for await (const value of chunksFrom(response.body)) {
-      if (signal?.aborted || response.__claudexSignal?.aborted) throw networkFailure('Release request was aborted.');
+      if (signal?.aborted || response.__claudeySignal?.aborted) throw networkFailure('Release request was aborted.');
       const chunk = Buffer.isBuffer(value) ? value : Buffer.from(value);
       if (total > limit - chunk.length) throw networkFailure('Release response exceeded the allowed byte limit.');
       total += chunk.length;
@@ -240,7 +240,7 @@ export async function readResponseBytes(response, { limit, signal } = {}) {
     return Buffer.concat(buffers, total);
   } catch (cause) {
     abortResponse(response);
-    if (isClaudexError(cause)) throw cause;
+    if (isClaudeyError(cause)) throw cause;
     throw networkFailure('Release response stream failed.');
   } finally {
     finishResponse(response);
@@ -305,15 +305,19 @@ function expectedAssetUrl(tag, name) {
   return `${RELEASE_ORIGIN}/${tag}/${name}`;
 }
 
-function allowedContentType(kind, contentType) {
+function mediaType(contentType) {
   const value = typeof contentType === 'string' ? contentType.toLowerCase() : '';
+  return value.split(';')[0].trim();
+}
+
+function allowedContentType(kind, contentType) {
+  const value = mediaType(contentType);
   if (kind === 'zip') return ['application/zip', 'application/x-zip-compressed', 'application/octet-stream'].includes(value);
   return ['application/gzip', 'application/x-gzip', 'application/octet-stream'].includes(value);
 }
 
 function allowedChecksumContentType(contentType) {
-  const value = typeof contentType === 'string' ? contentType.toLowerCase() : '';
-  return ['text/plain', 'text/x-shellscript', 'application/octet-stream'].includes(value);
+  return ['text/plain', 'text/x-shellscript', 'application/octet-stream'].includes(mediaType(contentType));
 }
 
 function validateAsset(asset, { tag, expectedName, kind, checksum = false }) {
@@ -563,7 +567,7 @@ async function streamVerifiedArchive(response, { handle, expectedDigest, asset, 
   let total = 0;
   try {
     for await (const value of chunksFrom(response.body)) {
-      if (signal?.aborted || response.__claudexSignal?.aborted) {
+      if (signal?.aborted || response.__claudeySignal?.aborted) {
         throw networkFailure('Release archive download was aborted.');
       }
       const chunk = Buffer.isBuffer(value) ? value : Buffer.from(value);
@@ -580,7 +584,7 @@ async function streamVerifiedArchive(response, { handle, expectedDigest, asset, 
     return verifier.finish();
   } catch (cause) {
     abortResponse(response);
-    if (isClaudexError(cause)) throw cause;
+    if (isClaudeyError(cause)) throw cause;
     throw networkFailure('Release archive stream failed.');
   } finally {
     finishResponse(response);
@@ -666,7 +670,7 @@ export async function downloadVerifiedRelease(release, asset, stagingRoot, deps 
     });
   } catch (cause) {
     if (response) abortResponse(response);
-    if (isClaudexError(cause)) throw cause;
+    if (isClaudeyError(cause)) throw cause;
     throw networkFailure('Release archive download failed.');
   } finally {
     if (handle) {

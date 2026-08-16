@@ -1,6 +1,6 @@
 import path from 'node:path';
 
-import { ClaudexError } from '../core/errors.js';
+import { ClaudeyError } from '../core/errors.js';
 import { cursorCapabilitiesMatchBinding, isCursorCapabilitySet } from './capabilities.js';
 import { isCursorEnvironment } from './env.js';
 import { isCursorExecutableBinding, revalidateCursorExecutableBinding } from './executable.js';
@@ -16,11 +16,11 @@ const MAX_CONCURRENT = 3;
 let activeRuns = 0;
 
 function safety() {
-  return new ClaudexError('SAFETY_REFUSAL', 'The Cursor run could not be constructed safely.');
+  return new ClaudeyError('SAFETY_REFUSAL', 'The Cursor run could not be constructed safely.');
 }
 
 function unsupported() {
-  return new ClaudexError('CAPABILITY_UNSUPPORTED', 'Cursor Agent could not complete the delegated run safely.');
+  return new ClaudeyError('CAPABILITY_UNSUPPORTED', 'Cursor Agent could not complete the delegated run safely.');
 }
 
 function exact(value, keys) {
@@ -104,7 +104,7 @@ export function createCursorRunner({ invoke, revalidateScope, revalidateModel, r
       activeRuns += 1;
       try {
         if (await revalidateModel(request.catalog, model) !== true) {
-          throw new ClaudexError('MODEL_NOT_FOUND', 'The requested model is not available from Cursor Agent.');
+          throw new ClaudeyError('MODEL_NOT_FOUND', 'The requested model is not available from Cursor Agent.');
         }
         if (await revalidateCursorExecutableBinding(request.binding) !== true
           || await revalidateBinding(request.binding) !== true || await revalidateScope(request.scope) !== true) throw safety();

@@ -90,7 +90,7 @@ test('canonical manifest bytes are recursively sorted and HMAC verifies only wit
     (error) => error?.code === 'SAFETY_REFUSAL');
   const approval = deriveApprovalKey(key());
   assert.equal(approval.withValue((bytes) => Buffer.from(bytes).toString('base64url')),
-    '0-L37cfQKSzwHdpRm7hC1h2DwX8qhAmB2cy5v4GEuCE');
+    'pWeNpmY61IFYy39qZfUZjEHONcDmtT-n6gPoTqdaCMw');
   assert.notEqual(approval.withValue((bytes) => Buffer.from(bytes).toString('hex')), Buffer.alloc(32, 0x22).toString('hex'));
 });
 

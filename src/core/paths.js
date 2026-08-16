@@ -1,13 +1,13 @@
 import path from 'node:path';
 
-import { ClaudexError } from './errors.js';
+import { ClaudeyError } from './errors.js';
 
 function safetyRefusal(message) {
-  return new ClaudexError('SAFETY_REFUSAL', message);
+  return new ClaudeyError('SAFETY_REFUSAL', message);
 }
 
 function unsupported(message) {
-  return new ClaudexError('PLATFORM_UNSUPPORTED', message);
+  return new ClaudeyError('PLATFORM_UNSUPPORTED', message);
 }
 
 function flag(inspection, name) {
@@ -76,8 +76,8 @@ function familyOf(platform) {
 function windowsPaths(env, safety) {
   const localAppData = canonicalRoot(env.LOCALAPPDATA, path.win32, 'LOCALAPPDATA', safety);
   const appData = canonicalRoot(env.APPDATA, path.win32, 'APPDATA', safety);
-  const managerRoot = path.win32.join(localAppData, 'claudexctl');
-  const configRoot = path.win32.join(appData, 'claudexctl');
+  const managerRoot = path.win32.join(localAppData, 'claudey');
+  const configRoot = path.win32.join(appData, 'claudey');
   return {
     managerRoot,
     releaseRoot: path.win32.join(managerRoot, 'releases'),
@@ -95,7 +95,7 @@ function posixHome(env, safety, wsl) {
 
 function macosPaths(env, safety) {
   const home = posixHome(env, safety, false);
-  const managerRoot = path.posix.join(home, 'Library', 'Application Support', 'claudexctl');
+  const managerRoot = path.posix.join(home, 'Library', 'Application Support', 'claudey');
   return {
     managerRoot,
     releaseRoot: path.posix.join(managerRoot, 'releases'),
@@ -119,15 +119,15 @@ function linuxPaths(platform, env, safety) {
   const dataRoot = xdgRoot(env, 'XDG_DATA_HOME', path.posix.join(home, '.local', 'share'), safety, wsl);
   const configBase = xdgRoot(env, 'XDG_CONFIG_HOME', path.posix.join(home, '.config'), safety, wsl);
   const stateBase = xdgRoot(env, 'XDG_STATE_HOME', path.posix.join(home, '.local', 'state'), safety, wsl);
-  const managerRoot = path.posix.join(dataRoot, 'claudexctl');
-  const configRoot = path.posix.join(configBase, 'claudexctl');
+  const managerRoot = path.posix.join(dataRoot, 'claudey');
+  const configRoot = path.posix.join(configBase, 'claudey');
   return {
     managerRoot,
     releaseRoot: path.posix.join(managerRoot, 'releases'),
     launcherRoot: path.posix.join(managerRoot, 'launchers'),
     configRoot,
     authRoot: path.posix.join(configRoot, 'auth'),
-    stateRoot: path.posix.join(stateBase, 'claudexctl'),
+    stateRoot: path.posix.join(stateBase, 'claudey'),
     userBinRoot: path.posix.join(home, '.local', 'bin')
   };
 }

@@ -1,10 +1,10 @@
-import { ClaudexError } from '../core/errors.js';
+import { ClaudeyError } from '../core/errors.js';
 import { detectLinux } from './linux.js';
 import { detectMacos } from './macos.js';
 import { detectWindows } from './windows.js';
 
 function unsupported(message) {
-  return new ClaudexError('PLATFORM_UNSUPPORTED', message);
+  return new ClaudeyError('PLATFORM_UNSUPPORTED', message);
 }
 
 const detectors = Object.freeze({

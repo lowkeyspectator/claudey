@@ -79,7 +79,7 @@ test('implements initialized JSON-RPC lifecycle and revalidates startup identity
   assert.deepEqual(await f.server.handle(initialize()), {
     jsonrpc: '2.0', id: 1, result: {
       protocolVersion: '2025-11-25', capabilities: { tools: { listChanged: false } },
-      serverInfo: { name: 'claudex-cursor', version: '1.0.0' }
+      serverInfo: { name: 'claudey-cursor', version: '1.0.0' }
     }
   });
   assert.equal(await f.server.handle(initialized), null);

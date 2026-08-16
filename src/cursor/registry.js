@@ -1,17 +1,17 @@
 import path from 'node:path';
 
-import { ClaudexError } from '../core/errors.js';
+import { ClaudeyError } from '../core/errors.js';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
 const SCOPES = new Set(['local', 'user']);
 const REGISTERED = new WeakSet();
 
 function safety() {
-  return new ClaudexError('SAFETY_REFUSAL', 'The Cursor repository registry could not be used safely.');
+  return new ClaudeyError('SAFETY_REFUSAL', 'The Cursor repository registry could not be used safely.');
 }
 
 function interaction() {
-  return new ClaudexError('INTERACTION_REQUIRED', 'Explicit confirmation is required to change this Cursor repository registration.');
+  return new ClaudeyError('INTERACTION_REQUIRED', 'Explicit confirmation is required to change this Cursor repository registration.');
 }
 
 function exact(value, keys) {

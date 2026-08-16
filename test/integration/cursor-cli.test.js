@@ -68,7 +68,7 @@ test('enable uses only owned Claude marketplace/plugin commands, is scope-idempo
     { action: 'enabled', scope: 'local' });
   assert.deepEqual(f.events.slice(0, 4), [
     ['claude-plugin', ['plugin', 'marketplace', 'add', MARKETPLACE, '--scope', 'local']],
-    ['claude-plugin', ['plugin', 'install', 'cursor-agent@claudex', '--scope', 'local']],
+    ['claude-plugin', ['plugin', 'install', 'cursor-agent@claudey', '--scope', 'local']],
     ['write-plugin-owner', 'local'],
     ['repo-add', { path: PROJECT, scope: 'local', currentProject: PROJECT, confirmed: true }]
   ]);
@@ -90,8 +90,8 @@ test('disable removes only exact owned scope through Claude commands, clears app
   assert.deepEqual(await runCursorCommand(['cursor', 'disable'], { scope: 'user' }, f.context),
     { action: 'disabled', scope: 'user' });
   assert.deepEqual(f.events, [
-    ['claude-plugin', ['plugin', 'uninstall', 'cursor-agent@claudex', '--scope', 'user', '--yes']],
-    ['claude-plugin', ['plugin', 'marketplace', 'remove', 'claudex', '--scope', 'user']],
+    ['claude-plugin', ['plugin', 'uninstall', 'cursor-agent@claudey', '--scope', 'user', '--yes']],
+    ['claude-plugin', ['plugin', 'marketplace', 'remove', 'claudey', '--scope', 'user']],
     ['remove-plugin-owner', 'user'], ['write-writes', { schemaVersion: 1, installationId: UUID, enabled: false }],
     ['approval-cleanup', undefined]
   ]);

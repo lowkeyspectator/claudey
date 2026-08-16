@@ -259,7 +259,7 @@ const SHA256 = /^[0-9a-f]{64}$/u;
 const NAME = /^[A-Za-z0-9][A-Za-z0-9._-]{0,255}$/u;
 const RELEASE_TARGET = /^releases\/[A-Za-z0-9][A-Za-z0-9._-]{0,255}$/u;
 const TARGETS = ['windows-x64', 'windows-arm64', 'darwin-x64', 'darwin-arm64', 'linux-x64', 'linux-arm64'];
-const LAUNCHERS = ['claudexctl.exe', 'claudex.exe', 'claude-agy.exe'];
+const LAUNCHERS = ['claudexctl.exe', 'claudex.exe', 'claude-agy.exe', 'claude-grok.exe', 'claudey.exe'];
 const MAX_MANIFEST = 1024 * 1024;
 const MAX_PAYLOAD = 32 * 1024 * 1024;
 const MAX_SHIM = 8 * 1024 * 1024;
@@ -431,7 +431,7 @@ function parseArchive(compressed) {
     offset = nextOffset;
   }
   if (entries.length < 1 || data.length - offset < 1024 || !data.subarray(offset).every((byte) => byte === 0)) fail('ARCHIVE_UNSAFE');
-  for (const required of ['LICENSE', 'bin/claude-agy', 'bin/claudex', 'bin/claudexctl', 'bin/claudexctl.js', 'package.json']) {
+  for (const required of ['LICENSE', 'bin/claude-agy', 'bin/claude-grok', 'bin/claudey', 'bin/claudex', 'bin/claudexctl', 'bin/claudexctl.js', 'package.json']) {
     if (!entries.some((entry) => entry.path === required)) fail('ARCHIVE_UNSAFE');
   }
   return entries;
@@ -619,7 +619,7 @@ async function captureShim(shimBytes, compatibility, stagingRoot) {
       if (result.error || result.status !== 0 || result.signal !== null || result.stdout !== '' || result.stderr !== '') fail();
     }
     const rows = (await fs.readFile(output, 'utf8')).trim().split(/\r?\n/u).map(JSON.parse);
-    const expected = [hostile, ['launcher', 'claudex', ...hostile], ['launcher', 'claude-agy', ...hostile]];
+    const expected = [hostile, ['launcher', 'claudex', ...hostile], ['launcher', 'claude-agy', ...hostile], ['launcher', 'claude-grok', ...hostile], ['launcher', 'claudey', ...hostile]];
     if (JSON.stringify(rows) !== JSON.stringify(expected)) fail();
   } finally {
     const metadata = await fs.lstat(capture).catch((error) => error?.code === 'ENOENT' ? null : Promise.reject(error));
@@ -892,7 +892,9 @@ catch (error) {
   }
   $PrepareStatus = Invoke-EmbeddedNode 'prepare'
   if ($PrepareStatus -ne 0) { exit $PrepareStatus }
-  $launcherPath = Join-Path $UserBin 'claudexctl.exe'
+  $launcherPath = if (Test-Path (Join-Path $UserBin 'claudeyctl.exe')) { Join-Path $UserBin 'claudeyctl.exe' }
+                  elseif (Test-Path (Join-Path $UserBin 'claudexctl.exe')) { Join-Path $UserBin 'claudexctl.exe' }
+                  else { Join-Path $UserBin 'claudey.exe' }
   $setupArgs = @('setup')
   if ($AcceptYes) { $setupArgs += '--yes' }
   if ($DisablePath) { $setupArgs += '--no-path' }

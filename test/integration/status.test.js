@@ -13,7 +13,7 @@ function context(overrides = {}) {
     }),
     inspectGateway: async () => (calls.push('gateway'), overrides.gateway ?? { state: 'healthy', port: 8317 }),
     inspectProviders: async () => (calls.push('providers'), overrides.providers ?? {
-      codex: 'authenticated', antigravity: 'missing'
+      codex: 'authenticated', antigravity: 'missing', grok: 'missing'
     }),
     inspectCursor: async () => (calls.push('cursor'), overrides.cursor ?? {
       registration: 'disabled', login: 'unavailable', writes: 'disabled', pendingWorktrees: 0
@@ -47,7 +47,7 @@ test('nonhealthy and hostile status states return a mapped nonzero error with bo
   const absent = context({ installation: { state: 'not-installed', version: null, installationId: null },
     gateway: { state: 'not-installed', port: null } });
   await assert.rejects(runStatusCommand(absent.value), (error) => error.code === 'NOT_INSTALLED');
-  const hostile = context({ providers: { codex: 'authenticated', antigravity: 'missing', token: 'private-canary' } });
+  const hostile = context({ providers: { codex: 'authenticated', antigravity: 'missing', grok: 'missing', token: 'private-canary' } });
   await assert.rejects(runStatusCommand(hostile.value), (error) => error.code === 'SAFETY_REFUSAL'
     && !JSON.stringify(error).includes('private-canary'));
   const thrown = context();

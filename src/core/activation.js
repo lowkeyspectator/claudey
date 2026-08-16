@@ -1,4 +1,4 @@
-import { ClaudexError } from './errors.js';
+import { ClaudeyError } from './errors.js';
 import { assertRelativeManagedChild } from './fs-safe.js';
 import { isSecret } from './secrets.js';
 
@@ -15,21 +15,21 @@ const PUBLIC_MESSAGES = new Map([
   ['PLATFORM_UNSUPPORTED', 'This platform is not supported.'],
   ['PREREQUISITE_MISSING', 'A required verified prerequisite is unavailable.'],
   ['CAPABILITY_UNSUPPORTED', 'The installed upstream version lacks a required capability.'],
-  ['NOT_INSTALLED', 'Claudex is not installed.'],
+  ['NOT_INSTALLED', 'Claudey is not installed.'],
   ['NETWORK_FAILURE', 'The verified release could not be downloaded.'],
   ['CHECKSUM_MISMATCH', 'The downloaded release failed checksum verification.'],
   ['ARCHIVE_UNSAFE', 'The downloaded release archive is unsafe.'],
-  ['LOCK_BUSY', 'Another Claudex operation owns the installation lock.'],
+  ['LOCK_BUSY', 'Another Claudey operation owns the installation lock.'],
   ['PORT_IN_USE', 'The configured loopback port is occupied by an unrelated listener.'],
   ['GATEWAY_UNHEALTHY', 'The managed gateway did not become healthy.'],
   ['PROCESS_IDENTITY_MISMATCH', 'The managed gateway process identity could not be verified.'],
-  ['CONFIG_MODIFIED', 'The managed configuration was modified outside Claudex.'],
+  ['CONFIG_MODIFIED', 'The managed configuration was modified outside Claudey.'],
   ['SAFETY_REFUSAL', 'The gateway transaction could not be completed safely.'],
   ['ROLLBACK_UNAVAILABLE', 'No verified rollback release is available.']
 ]);
 
 function failure(code, message, options) {
-  return new ClaudexError(code, message, options);
+  return new ClaudeyError(code, message, options);
 }
 
 function safety() {

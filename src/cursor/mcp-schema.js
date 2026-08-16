@@ -1,4 +1,4 @@
-import { ClaudexError } from '../core/errors.js';
+import { ClaudeyError } from '../core/errors.js';
 import { isCursorCapabilitySet } from './capabilities.js';
 
 export const MCP_PROTOCOL_VERSION = '2025-11-25';
@@ -8,7 +8,7 @@ const REF_OR_OID = /^(?:refs\/(?:heads|tags)\/[A-Za-z0-9][A-Za-z0-9._/-]{0,1023}
 const APPROVAL = /^[A-Za-z0-9_-]{43}$/u;
 
 function safety() {
-  return new ClaudexError('SAFETY_REFUSAL', 'The Cursor MCP schema or input is unsafe.');
+  return new ClaudeyError('SAFETY_REFUSAL', 'The Cursor MCP schema or input is unsafe.');
 }
 
 function freeze(value) {
@@ -82,8 +82,8 @@ const WORKTREE = freeze({
   }, ['repo', 'prompt']),
   annotations: WORKTREE_ANNOTATIONS,
   _meta: {
-    'claudex/requiresUserInteraction': true,
-    'claudex/requiresOutOfBandApproval': true,
+    'claudey/requiresUserInteraction': true,
+    'claudey/requiresOutOfBandApproval': true,
     'anthropic/maxResultSizeChars': 1_048_576
   }
 });

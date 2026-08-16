@@ -1,6 +1,6 @@
 import path from 'node:path';
 
-import { ClaudexError } from './errors.js';
+import { ClaudeyError } from './errors.js';
 
 const RUNTIME_KEYS = Object.freeze([
   'schemaVersion', 'installationId', 'instanceId', 'pid', 'processGroupId', 'processStartTime',
@@ -21,7 +21,7 @@ const runtimePlatforms = new WeakMap();
 const ownershipState = new WeakMap();
 
 function mismatch() {
-  return new ClaudexError('PROCESS_IDENTITY_MISMATCH', 'Managed process identity could not be verified.');
+  return new ClaudeyError('PROCESS_IDENTITY_MISMATCH', 'Managed process identity could not be verified.');
 }
 
 function exactKeys(value, keys) {
@@ -30,7 +30,7 @@ function exactKeys(value, keys) {
 }
 
 function unhealthy() {
-  return new ClaudexError('GATEWAY_UNHEALTHY', 'Owned process-tree cleanup could not be confirmed.');
+  return new ClaudeyError('GATEWAY_UNHEALTHY', 'Owned process-tree cleanup could not be confirmed.');
 }
 
 function safeInteger(value, minimum = 1) {

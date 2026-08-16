@@ -67,6 +67,8 @@ else if (args[0] !== 'setup' && args[0] !== 'launcher') process.exitCode = 2;
     { name: 'bin/claudexctl', mode: 0o755, bytes: '#!/bin/sh\nexit 99\n' },
     { name: 'bin/claudex', mode: 0o755, bytes: '#!/bin/sh\nexit 99\n' },
     { name: 'bin/claude-agy', mode: 0o755, bytes: '#!/bin/sh\nexit 99\n' },
+    { name: 'bin/claude-grok', mode: 0o755, bytes: '#!/bin/sh\nexit 99\n' },
+    { name: 'bin/claudey', mode: 0o755, bytes: '#!/bin/sh\nexit 99\n' },
     { name: 'package.json', mode: 0o644, bytes: `${JSON.stringify({ name: 'claudexctl', version, type: 'module' })}\n` },
     { name: 'LICENSE', mode: 0o644, bytes: 'test license\n' }
   ]);
@@ -177,7 +179,9 @@ test('actual checked-in POSIX launchers preserve every hostile argument as a dis
   const expected = {
     claudexctl: hostile,
     claudex: ['launcher', 'claudex', ...hostile],
-    'claude-agy': ['launcher', 'claude-agy', ...hostile]
+    'claude-agy': ['launcher', 'claude-agy', ...hostile],
+    'claude-grok': ['launcher', 'claude-grok', ...hostile],
+    claudey: ['launcher', 'claudey', ...hostile]
   };
   for (const name of Object.keys(expected)) {
     const template = await fs.readFile(path.join(root, 'bin', name), 'utf8');

@@ -1,8 +1,8 @@
-import { ClaudexError } from './errors.js';
+import { ClaudeyError } from './errors.js';
 import { verifyProcessIdentity } from './process.js';
 
 function occupied() {
-  return new ClaudexError('PORT_IN_USE', 'The configured loopback port is occupied by an unrelated listener.');
+  return new ClaudeyError('PORT_IN_USE', 'The configured loopback port is occupied by an unrelated listener.');
 }
 
 function exactKeys(value, keys) {

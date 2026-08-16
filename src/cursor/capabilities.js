@@ -1,4 +1,4 @@
-import { ClaudexError } from '../core/errors.js';
+import { ClaudeyError } from '../core/errors.js';
 import { isCursorExecutableBinding, revalidateCursorExecutableBinding } from './executable.js';
 
 const MAX_OUTPUT_BYTES = 16_384;
@@ -15,7 +15,7 @@ function available(details = {}) {
 }
 
 function failure() {
-  return new ClaudexError('CAPABILITY_UNSUPPORTED', 'Cursor Agent capabilities could not be verified.');
+  return new ClaudeyError('CAPABILITY_UNSUPPORTED', 'Cursor Agent capabilities could not be verified.');
 }
 
 function exact(value, keys) {

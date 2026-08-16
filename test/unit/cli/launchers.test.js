@@ -5,37 +5,47 @@ import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 
 import { runClaudeAgy } from '../../../src/cli/launchers/claude-agy.js';
-import { runClaudex, stageLaunchers } from '../../../src/cli/launchers/claudex.js';
+import { runClaudeGrok } from '../../../src/cli/launchers/claude-grok.js';
+import { runClaudey } from '../../../src/cli/launchers/claudey.js';
+import { runClaudeCodex, runClaudex, stageLaunchers } from '../../../src/cli/launchers/claude-codex.js';
 
 test('launcher profiles bind only their fixed provider and parser result', async () => {
   const calls = [];
   const launch = async (request) => { calls.push(request); return { provider: request.provider, model: request.parsed.model }; };
+  assert.deepEqual(await runClaudeCodex(['--model', 'gpt-live', '--', '--print', 'x'], {}, { launch }), { provider: 'codex', model: 'gpt-live' });
   assert.deepEqual(await runClaudex(['--model', 'gpt-live', '--', '--print', 'x'], {}, { launch }), { provider: 'codex', model: 'gpt-live' });
   assert.deepEqual(await runClaudeAgy(['--model', 'agy-live'], {}, { launch }), { provider: 'antigravity', model: 'agy-live' });
+  assert.deepEqual(await runClaudeGrok(['--model', 'grok-live'], {}, { launch }), { provider: 'grok', model: 'grok-live' });
+  assert.deepEqual(await runClaudey(['--yolo'], {}, { launch }), { provider: 'codex', model: undefined });
   assert.deepEqual(calls.map(({ provider, parsed }) => ({ provider, parsed })), [
-    { provider: 'codex', parsed: { model: 'gpt-live', select: false, claudeArgs: ['--print', 'x'], nonInteractive: false } },
-    { provider: 'antigravity', parsed: { model: 'agy-live', select: false, claudeArgs: [], nonInteractive: false } }
+    { provider: 'codex', parsed: { model: 'gpt-live', select: false, all: false, claudeArgs: ['--print', 'x'], nonInteractive: false } },
+    { provider: 'codex', parsed: { model: 'gpt-live', select: false, all: false, claudeArgs: ['--print', 'x'], nonInteractive: false } },
+    { provider: 'antigravity', parsed: { model: 'agy-live', select: false, all: false, claudeArgs: [], nonInteractive: false } },
+    { provider: 'grok', parsed: { model: 'grok-live', select: false, all: false, claudeArgs: [], nonInteractive: false } },
+    { provider: 'codex', parsed: { model: undefined, select: false, all: true, claudeArgs: ['--dangerously-skip-permissions'], nonInteractive: false } }
   ]);
 });
 
 test('launcher parser errors and CI noninteractive state reach no provider orchestration', async () => {
   let called = false;
   const launch = async () => { called = true; };
-  await assert.rejects(runClaudex(['--model', 'x', '--select'], {}, { launch }), (error) => error.code === 'USAGE_ERROR');
+  await assert.rejects(runClaudeCodex(['--model', 'x', '--select'], {}, { launch }), (error) => error.code === 'USAGE_ERROR');
   assert.equal(called, false);
-  await runClaudex(['--model', 'x'], { CI: 'true' }, { launch: async ({ parsed }) => { assert.equal(parsed.nonInteractive, true); } });
+  await runClaudeCodex(['--model', 'x'], { CI: 'true' }, { launch: async ({ parsed }) => { assert.equal(parsed.nonInteractive, true); } });
 });
 
 test('stages three exact POSIX launchers with fixed absolute paths, profiles, modes, and argument forwarding', async () => {
   const staged = [];
   const result = await stageLaunchers({
     platform: 'linux',
-    nodePath: "/opt/Claudex Runtime/node's bin/node",
-    managerPath: '/opt/Claudex Runtime/current/bin/claudexctl.js',
+    nodePath: "/opt/Claudey Runtime/node's bin/node",
+    managerPath: '/opt/Claudey Runtime/current/bin/claudeyctl.js',
     stageFile: async (file) => staged.push(file)
   });
   assert.deepEqual(result.map(({ child, mode }) => ({ child, mode })), [
-    { child: 'claudexctl', mode: 0o755 }, { child: 'claudex', mode: 0o755 }, { child: 'claude-agy', mode: 0o755 }
+    { child: 'claudeyctl', mode: 0o755 }, { child: 'claudey', mode: 0o755 },
+    { child: 'claude-codex', mode: 0o755 }, { child: 'claude-agy', mode: 0o755 },
+    { child: 'claude-grok', mode: 0o755 }
   ]);
   assert.deepEqual(staged, result);
   for (const item of result) {
@@ -47,9 +57,11 @@ test('stages three exact POSIX launchers with fixed absolute paths, profiles, mo
     assert.equal(text.includes('__CLAUDEX_'), false);
     assert.equal(path.posix.basename(item.child), item.child);
   }
-  assert.match(result[0].bytes.toString(), /claudexctl\.js' "\$@"\n$/);
-  assert.match(result[1].bytes.toString(), /claudexctl\.js' 'launcher' 'claudex' "\$@"\n$/);
-  assert.match(result[2].bytes.toString(), /claudexctl\.js' 'launcher' 'claude-agy' "\$@"\n$/);
+  assert.match(result[0].bytes.toString(), /claudeyctl\.js' "\$@"\n$/);
+  assert.match(result[1].bytes.toString(), /claudeyctl\.js' 'launcher' 'claudey' "\$@"\n$/);
+  assert.match(result[2].bytes.toString(), /claudeyctl\.js' 'launcher' 'claude-codex' "\$@"\n$/);
+  assert.match(result[3].bytes.toString(), /claudeyctl\.js' 'launcher' 'claude-agy' "\$@"\n$/);
+  assert.match(result[4].bytes.toString(), /claudeyctl\.js' 'launcher' 'claude-grok' "\$@"\n$/);
 });
 
 test('launcher staging rejects Windows, unsafe paths, unknown profiles, and partial writes', async () => {
@@ -77,9 +89,11 @@ test('launcher staging rejects Windows, unsafe paths, unknown profiles, and part
 test('checked-in POSIX templates contain only fixed placeholders, profiles, and exact argument forwarding', async () => {
   const bin = fileURLToPath(new URL('../../../bin/', import.meta.url));
   const expected = {
-    claudexctl: '#!/bin/sh\nexec \'__CLAUDEX_NODE__\' \'__CLAUDEX_MANAGER__\' "$@"\n',
-    claudex: '#!/bin/sh\nexec \'__CLAUDEX_NODE__\' \'__CLAUDEX_MANAGER__\' \'launcher\' \'claudex\' "$@"\n',
-    'claude-agy': '#!/bin/sh\nexec \'__CLAUDEX_NODE__\' \'__CLAUDEX_MANAGER__\' \'launcher\' \'claude-agy\' "$@"\n'
+    claudeyctl: '#!/bin/sh\nexec \'__CLAUDEX_NODE__\' \'__CLAUDEX_MANAGER__\' "$@"\n',
+    claudey: '#!/bin/sh\nexec \'__CLAUDEX_NODE__\' \'__CLAUDEX_MANAGER__\' \'launcher\' \'claudey\' "$@"\n',
+    'claude-codex': '#!/bin/sh\nexec \'__CLAUDEX_NODE__\' \'__CLAUDEX_MANAGER__\' \'launcher\' \'claude-codex\' "$@"\n',
+    'claude-agy': '#!/bin/sh\nexec \'__CLAUDEX_NODE__\' \'__CLAUDEX_MANAGER__\' \'launcher\' \'claude-agy\' "$@"\n',
+    'claude-grok': '#!/bin/sh\nexec \'__CLAUDEX_NODE__\' \'__CLAUDEX_MANAGER__\' \'launcher\' \'claude-grok\' "$@"\n'
   };
   for (const [name, contents] of Object.entries(expected)) {
     const actual = await fs.readFile(path.join(bin, name), 'utf8');

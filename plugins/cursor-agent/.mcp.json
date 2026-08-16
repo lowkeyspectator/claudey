@@ -1,6 +1,6 @@
 {
   "mcpServers": {
-    "claudex-cursor": {
+    "claudey-cursor": {
       "type": "stdio",
       "command": "node",
       "args": [

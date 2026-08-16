@@ -1,6 +1,6 @@
 import path from 'node:path';
 
-import { ClaudexError } from '../core/errors.js';
+import { ClaudeyError } from '../core/errors.js';
 import { isRegisteredCursorRepository } from './registry.js';
 import { createCursorRunScope } from './runner.js';
 
@@ -15,7 +15,7 @@ function failure(code = 'SAFETY_REFUSAL', details = {}) {
     APPROVAL_INVALID: 'The Cursor worktree approval is invalid, expired, or already consumed.',
     SAFETY_REFUSAL: 'The Cursor worktree delegation could not be completed safely.'
   };
-  return new ClaudexError(code, messages[code] ?? messages.SAFETY_REFUSAL, { details });
+  return new ClaudeyError(code, messages[code] ?? messages.SAFETY_REFUSAL, { details });
 }
 
 function freeze(value) {
@@ -103,7 +103,7 @@ export function createCursorWorktreeService({
       let id;
       try { id = randomId(); } catch { throw failure(); }
       if (typeof id !== 'string' || !/^[a-z0-9][a-z0-9-]{2,63}$/u.test(id)) throw failure();
-      const branch = `claudex/cursor-${id}`;
+      const branch = `claudey/cursor-${id}`;
       const worktreePath = pathApi.join(worktreeRoot, id);
       const retainedDetails = freeze({ retained: true, path: worktreePath, branch, baseCommit });
       try { checkedConsumed(await approvalService.consume(input.approvalId, binding), input.approvalId); } catch (error) {

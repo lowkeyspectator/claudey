@@ -83,13 +83,13 @@ test('second request consumes exact approval immediately before fixed worktree c
     'resolve-base', 'consume-approval', 'add-worktree', 'scan-links', 'run-cursor', 'collect-result'
   ]);
   assert.deepEqual(f.events[2][1], {
-    branch: 'claudex/cursor-abc123', path: '/home/casey/.local/state/claudexctl/worktrees/abc123', commit: COMMIT
+    branch: 'claudey/cursor-abc123', path: '/home/casey/.local/state/claudexctl/worktrees/abc123', commit: COMMIT
   });
   assert.equal(f.events[4][1].scope.kind, 'worktree');
   assert.equal(f.events[4][1].signal, controller.signal);
   assert.equal(Object.hasOwn(f.events[4][1], 'repository'), false);
   assert.equal(result.state, 'retained');
-  assert.equal(result.branch, 'claudex/cursor-abc123');
+  assert.equal(result.branch, 'claudey/cursor-abc123');
   assert.equal(result.baseCommit, COMMIT);
   assert.equal(result.status, ' M src/a.js');
   assert.deepEqual(result.diff, { files: 1, insertions: 2, deletions: 0 });
@@ -155,7 +155,7 @@ test('reports the retained recovery identity when creation or result collection 
       assert.equal(error.code, 'SAFETY_REFUSAL');
       assert.deepEqual(error.details, {
         retained: true, path: '/home/casey/.local/state/claudexctl/worktrees/abc123',
-        branch: 'claudex/cursor-abc123', baseCommit: COMMIT
+        branch: 'claudey/cursor-abc123', baseCommit: COMMIT
       });
       assert.equal(JSON.stringify(error).includes('private'), false);
       return true;

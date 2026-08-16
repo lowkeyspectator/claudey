@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url';
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
 
 function runCli(args) {
-  return spawnSync(process.execPath, ['bin/claudexctl.js', ...args], {
+  return spawnSync(process.execPath, ['bin/claudeyctl.js', ...args], {
     cwd: root,
     encoding: 'utf8'
   });
@@ -31,8 +31,8 @@ test('CLI emits one human success document for the dependency-free help invocati
   const child = runCli(['--help']);
   assert.equal(child.status, 0);
   assert.equal(child.stderr, '');
-  assert.match(child.stdout, /claudexctl setup/);
-  assert.match(child.stdout, /claudexctl cursor/);
+  assert.match(child.stdout, /claudey setup/);
+  assert.match(child.stdout, /claudey cursor/);
 });
 
 test('CLI emits a human error envelope and usage exit without a Node stack', () => {

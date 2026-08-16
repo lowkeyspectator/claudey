@@ -9,6 +9,7 @@ import test, { after } from 'node:test';
 import { resolveVerifiedExecutable } from '../../../src/core/executable.js';
 import { Secret } from '../../../src/core/secrets.js';
 import { ClaudexError } from '../../../src/core/errors.js';
+import { visibleModelId } from '../../../src/providers/catalog.js';
 import * as claudeProvider from '../../../src/providers/claude.js';
 
 const { launchClaudeProvider, runClaudeProcess } = claudeProvider;
@@ -147,19 +148,119 @@ test('constructs only an internal child-scoped routing environment and leaves th
     PATH: 'safe-path', SystemRoot: 'C:\\Windows', HOME: 'C:\\Users\\person', TERM: 'xterm',
     ANTHROPIC_BASE_URL: 'http://127.0.0.1:8317',
     ANTHROPIC_AUTH_TOKEN: TOKEN_TEXT,
+    ANTHROPIC_MODEL: 'gpt-5.6-sol',
+    ANTHROPIC_DEFAULT_HAIKU_MODEL: 'gpt-5.6-sol',
+    ANTHROPIC_DEFAULT_SONNET_MODEL: 'gpt-5.6-sol',
+    ANTHROPIC_DEFAULT_OPUS_MODEL: 'gpt-5.6-sol',
+    ANTHROPIC_DEFAULT_FABLE_MODEL: 'gpt-5.6-sol',
+    ANTHROPIC_DEFAULT_HAIKU_MODEL_NAME: 'gpt-5.6-sol',
+    ANTHROPIC_DEFAULT_SONNET_MODEL_NAME: 'gpt-5.6-sol',
+    ANTHROPIC_DEFAULT_OPUS_MODEL_NAME: 'gpt-5.6-sol',
+    ANTHROPIC_DEFAULT_FABLE_MODEL_NAME: 'gpt-5.6-sol',
+    ANTHROPIC_CUSTOM_MODEL_OPTION: 'gpt-5.6-sol',
+    ANTHROPIC_CUSTOM_MODEL_OPTION_NAME: 'gpt-5.6-sol',
     CLAUDE_CODE_SUBAGENT_MODEL: 'gpt-5.6-sol',
     CLAUDE_CODE_ALWAYS_ENABLE_EFFORT: '1',
     CLAUDE_CODE_MAX_TOOL_USE_CONCURRENCY: '3',
     CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: '1',
+    CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1',
     ENABLE_TOOL_SEARCH: 'false'
   });
   assert.equal(JSON.stringify(source), before);
   assert.equal(JSON.stringify(env).includes('secret-canary'), false);
   assert.equal(Object.hasOwn(env, 'ANTHROPIC_API_KEY'), false);
-  assert.equal(Object.hasOwn(env, 'ANTHROPIC_MODEL'), false);
-  assert.equal(Object.hasOwn(env, 'ANTHROPIC_DEFAULT_OPUS_MODEL'), false);
+  assert.equal(env.ANTHROPIC_MODEL, 'gpt-5.6-sol');
+  assert.equal(env.ANTHROPIC_DEFAULT_OPUS_MODEL, 'gpt-5.6-sol');
   assert.deepEqual(result, { provider: 'codex', model: 'gpt-5.6-sol', exitCode: 0, signal: null });
   assert.deepEqual(Object.keys(claudeProvider).sort(), ['launchClaudeProvider', 'runClaudeProcess']);
+});
+
+test('mixed --all session accepts a live model from any authenticated provider and maps picker aliases', async () => {
+  const announcements = [];
+  const sessionSettingsDir = path.join(fixtureRoot, 'claude-session');
+  const f = fixture({
+    parsed: { model: 'grok-4.5', select: false, all: true, claudeArgs: [], nonInteractive: true },
+    sessionSettingsDir,
+    listModels: async (name) => {
+      if (name === 'codex') {
+        return { provider: name, status: 'available', models: [
+          { id: 'gpt-5.6-sol', object: 'model', created: 1, owned_by: 'codex' }
+        ] };
+      }
+      if (name === 'antigravity') {
+        return { provider: name, status: 'available', models: [
+          { id: 'gemini-3-flash', object: 'model', created: 2, owned_by: 'antigravity' }
+        ] };
+      }
+      return { provider: name, status: 'available', models: [
+        { id: 'grok-4.5', object: 'model', created: 3, owned_by: 'grok' }
+      ] };
+    }
+  });
+  let env;
+  let invocation;
+  const result = await launchClaudeProvider({
+    ...f.value,
+    announce: (text) => announcements.push(text),
+    runChild: async (request) => { invocation = request; env = { ...request.env }; return { code: 0, signal: null }; }
+  });
+  assert.deepEqual(result, { provider: 'grok', model: 'grok-4.5', exitCode: 0, signal: null });
+  assert.equal(Object.hasOwn(env, 'ANTHROPIC_DEFAULT_HAIKU_MODEL'), false);
+  assert.equal(Object.hasOwn(env, 'ANTHROPIC_CUSTOM_MODEL_OPTION'), false);
+  assert.equal(Object.hasOwn(env, 'CLAUDE_CODE_SUBAGENT_MODEL'), false);
+  assert.equal(env.CLAUDE_CONFIG_DIR, sessionSettingsDir);
+  const visible = visibleModelId('grok', 'grok-4.5');
+  assert.equal(env.ANTHROPIC_MODEL, visible);
+  assert.match(env.ANTHROPIC_BASE_URL, /^http:\/\/127\.0\.0\.1:\d+$/);
+  assert.notEqual(env.ANTHROPIC_BASE_URL, 'http://127.0.0.1:8317');
+  assert.equal(env.CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY, '1');
+  assert.equal(Object.hasOwn(env, 'CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC'), false);
+  assert.deepEqual(invocation.args.slice(-4), ['--model', visible, '--fallback-model', visible]);
+  const settings = JSON.parse(await fs.readFile(path.join(sessionSettingsDir, 'settings.json'), 'utf8'));
+  assert.equal(settings.model, visible);
+  assert.equal(Object.hasOwn(settings, 'availableModels'), false);
+  assert.equal(settings.env.CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY, '1');
+  assert.match(announcements.join('\n'), /\/model/);
+  assert.match(announcements.join('\n'), /grok-4.5/);
+});
+
+test('mixed --all session accepts a cloaked Anthropic id and keeps Claude-written session theme', async () => {
+  const sessionSettingsDir = path.join(fixtureRoot, 'claude-session-theme');
+  await fs.mkdir(sessionSettingsDir, { recursive: true });
+  await fs.writeFile(path.join(sessionSettingsDir, 'settings.json'), `${JSON.stringify({
+    model: 'gpt-5.3-codex-spark',
+    availableModels: ['grok-4.5', 'gpt-5.3-codex-spark'],
+    enforceAvailableModels: true,
+    theme: 'light'
+  }, null, 2)}\n`);
+  const f = fixture({
+    parsed: { model: visibleModelId('grok', 'grok-4.5'), select: false, all: true, claudeArgs: [], nonInteractive: true },
+    sessionSettingsDir,
+    listModels: async (name) => {
+      if (name === 'codex') {
+        return { provider: name, status: 'available', models: [
+          { id: 'gpt-5.6-sol', object: 'model', created: 1, owned_by: 'codex' }
+        ] };
+      }
+      if (name === 'antigravity') {
+        return { provider: name, status: 'available', models: [
+          { id: 'gemini-3-flash', object: 'model', created: 2, owned_by: 'antigravity' }
+        ] };
+      }
+      return { provider: name, status: 'available', models: [
+        { id: 'grok-4.5', object: 'model', created: 3, owned_by: 'grok' }
+      ] };
+    }
+  });
+  const result = await launchClaudeProvider({
+    ...f.value,
+    runChild: async () => ({ code: 0, signal: null })
+  });
+  assert.deepEqual(result, { provider: 'grok', model: 'grok-4.5', exitCode: 0, signal: null });
+  const settings = JSON.parse(await fs.readFile(path.join(sessionSettingsDir, 'settings.json'), 'utf8'));
+  assert.equal(settings.theme, 'light');
+  assert.equal(settings.model, visibleModelId('grok', 'grok-4.5'));
+  assert.equal(Object.hasOwn(settings, 'availableModels'), false);
 });
 
 test('sanitizes lifecycle and model-service diagnostics while preserving only stable public error classes', async () => {
@@ -180,7 +281,7 @@ test('preserves the stable not-installed remediation and fails closed on hostile
     ensureGateway: async () => { throw new ClaudexError('NOT_INSTALLED', 'install path secret-canary'); }
   });
   await assert.rejects(launchClaudeProvider(missing.value), (error) => error.code === 'NOT_INSTALLED'
-    && error.hint === 'Run claudexctl setup.' && !error.message.includes('secret-canary'));
+    && error.hint === 'Run claudey setup.' && !error.message.includes('secret-canary'));
 
   const hostile = fixture({
     ensureGateway: async () => { throw new Proxy({}, { get: () => { throw new Error('diagnostic secret-canary'); } }); }

@@ -7,6 +7,7 @@ export async function runModelsCommand(command, context) {
     throw error;
   }
   const provider = command[1] ?? 'all';
-  if (provider === 'all') return listAllGatewayModels(context);
-  return listProviderModels(provider, context);
+  const result = provider === 'all' ? await listAllGatewayModels(context) : await listProviderModels(provider, context);
+  if (typeof context?.attachUsage === 'function') return context.attachUsage(result);
+  return result;
 }

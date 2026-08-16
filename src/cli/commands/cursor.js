@@ -1,6 +1,6 @@
 import path from 'node:path';
 
-import { ClaudexError } from '../../core/errors.js';
+import { ClaudeyError } from '../../core/errors.js';
 import { verifyManifest } from '../../core/manifest.js';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
@@ -8,7 +8,7 @@ const APPROVAL = /^[A-Za-z0-9_-]{43}$/u;
 const MODEL = /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,255}$/u;
 const GLOBAL_OPTIONS = new Set(['json', 'noColor', 'verbose', 'nonInteractive']);
 
-function error(code, message) { return new ClaudexError(code, message); }
+function error(code, message) { return new ClaudeyError(code, message); }
 function safety() { return error('SAFETY_REFUSAL', 'The Cursor management operation could not be completed safely.'); }
 function usage(message = 'The Cursor command arguments are invalid.') { return error('USAGE_ERROR', message); }
 function collision() { return error('MCP_OWNERSHIP_COLLISION', 'The Cursor plugin name or marketplace is owned by another installation.'); }
@@ -124,7 +124,7 @@ async function enable(options, context) {
       await runPlugin(context, ['plugin', 'marketplace', 'add', context.marketplaceRoot, '--scope', scope]);
     }
     if (state.plugin === 'absent') {
-      await runPlugin(context, ['plugin', 'install', 'cursor-agent@claudex', '--scope', scope]);
+      await runPlugin(context, ['plugin', 'install', 'cursor-agent@claudey', '--scope', scope]);
     }
     try { await requireFunction(context, 'writePluginOwnership')({ scope, installationId: context.installationId,
       managerRoot: context.managerRoot, marketplaceRoot: context.marketplaceRoot }); } catch { throw safety(); }
@@ -143,10 +143,10 @@ async function disable(options, context) {
   const alreadyDisabled = state.marketplace === 'absent' && state.plugin === 'absent';
   if (!alreadyDisabled) {
     if (state.plugin === 'owned') {
-      await runPlugin(context, ['plugin', 'uninstall', 'cursor-agent@claudex', '--scope', scope, '--yes']);
+      await runPlugin(context, ['plugin', 'uninstall', 'cursor-agent@claudey', '--scope', scope, '--yes']);
     }
     if (state.marketplace === 'owned') {
-      await runPlugin(context, ['plugin', 'marketplace', 'remove', 'claudex', '--scope', scope]);
+      await runPlugin(context, ['plugin', 'marketplace', 'remove', 'claudey', '--scope', scope]);
     }
     try { await requireFunction(context, 'removePluginOwnership')({ scope, installationId: context.installationId }); }
     catch { throw safety(); }

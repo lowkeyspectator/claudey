@@ -106,10 +106,11 @@ export function parseManagementArgs(argv, environment = process.env) {
 
   const consume = (count, allowed) => parseOptionList(tokens.slice(count), options, allowed);
   if (first === 'launcher') {
-    if (!second || !['claudex', 'claude-agy'].includes(second)) throw usage('launcher requires claudex or claude-agy.');
+    if (!second || !['claudey', 'claudeyctl', 'claude-codex', 'claudex', 'claude-agy', 'claude-grok'].includes(second)) throw usage('launcher requires claudey, claude-codex, claude-agy, or claude-grok.');
     return { command: ['launcher', second], options: { rawArgv: tokens.slice(2) } };
   }
-  if (first === 'setup') consume(1, optionSets.setup);
+  if (first === 'onboard') consume(1, optionSets.setup);
+  else if (first === 'setup') consume(1, optionSets.setup);
   else if (first === 'install') consume(1, optionSets.install);
   else if (first === 'start') consume(1, optionSets.start);
   else if (first === 'stop' || first === 'restart' || first === 'status' || first === 'doctor') consume(1, new Map());
@@ -120,11 +121,13 @@ export function parseManagementArgs(argv, environment = process.env) {
   } else if (first === 'rollback') consume(1, optionSets.rollback);
   else if (first === 'uninstall') consume(1, optionSets.uninstall);
   else if (first === 'models') {
-    if (tokens.length > 2 || (second && !['codex', 'antigravity', 'cursor', 'all'].includes(second))) throw usage('models accepts codex, antigravity, cursor, or all.');
+    if (tokens.length > 2 || (second && !['codex', 'antigravity', 'grok', 'cursor', 'all'].includes(second))) throw usage('models accepts codex, antigravity, grok, cursor, or all.');
     return { command: second ? ['models', second] : ['models'], options };
   } else if (first === 'auth') {
-    if (!['codex', 'antigravity'].includes(second)) throw usage('auth requires codex or antigravity.');
-    consume(2, second === 'codex' ? optionSets.authCodex : optionSets.authAntigravity);
+    if (!['codex', 'antigravity', 'grok', 'all'].includes(second)) {
+      throw usage('auth requires grok, antigravity, codex, or all.');
+    }
+    consume(2, second === 'antigravity' ? optionSets.authAntigravity : optionSets.authCodex);
     assertNoMutuallyExclusive(options, 'deviceCode', 'noBrowser');
     return { command: ['auth', second], options };
   } else if (first === 'config') {
@@ -188,7 +191,8 @@ export function parseLauncherArgs(argv, environment = process.env) {
   const delimiter = argv.indexOf('--');
   const before = delimiter === -1 ? argv : argv.slice(0, delimiter);
   const claudeArgs = delimiter === -1 ? [] : argv.slice(delimiter + 1);
-  const result = { model: undefined, select: false, claudeArgs, nonInteractive: environment.CI === 'true' };
+  const result = { model: undefined, select: false, all: false, claudeArgs, nonInteractive: environment.CI === 'true' };
+  let yolo = false;
   for (let index = 0; index < before.length; index += 1) {
     const token = before[index];
     if (token === '--model') {
@@ -198,6 +202,12 @@ export function parseLauncherArgs(argv, environment = process.env) {
     } else if (token === '--select') {
       if (result.select) throw usage('Duplicate option: --select.');
       result.select = true;
+    } else if (token === '--all') {
+      if (result.all) throw usage('Duplicate option: --all.');
+      result.all = true;
+    } else if (token === '--yolo') {
+      if (yolo) throw usage('Duplicate option: --yolo.');
+      yolo = true;
     } else if (globalOptions.has(token)) {
       if (delimiter !== -1) throw usage('Global flags are not accepted by launchers.');
       if (token === '--non-interactive') result.nonInteractive = true;
@@ -205,5 +215,8 @@ export function parseLauncherArgs(argv, environment = process.env) {
     } else throw usage(`Unknown launcher option: ${token}.`);
   }
   if (result.model !== undefined && result.select) throw usage('--model and --select cannot be used together.');
+  if (yolo && !result.claudeArgs.includes('--dangerously-skip-permissions')) {
+    result.claudeArgs = ['--dangerously-skip-permissions', ...result.claudeArgs];
+  }
   return result;
 }

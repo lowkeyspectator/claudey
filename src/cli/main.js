@@ -6,26 +6,32 @@ import { runInstallCommand } from './commands/install.js';
 import { runLifecycleCommand } from './commands/lifecycle.js';
 import { runModelsCommand } from './commands/models.js';
 import { runRollbackCommand } from './commands/rollback.js';
+import { runOnboardCommand } from './commands/onboard.js';
 import { runSetupCommand } from './commands/setup.js';
 import { runStatusCommand } from './commands/status.js';
 import { runUninstallCommand } from './commands/uninstall.js';
 import { runUpdateCommand } from './commands/update.js';
-import { runClaudex } from './launchers/claudex.js';
+import { runClaudeCodex, runClaudex } from './launchers/claude-codex.js';
 import { runClaudeAgy } from './launchers/claude-agy.js';
-import { ClaudexError, exitCodeFor } from '../core/errors.js';
+import { runClaudeGrok } from './launchers/claude-grok.js';
+import { runClaudey } from './launchers/claudey.js';
+import { GATEWAY_PROVIDERS } from '../providers/catalog.js';
+import { ClaudeyError, exitCodeFor } from '../core/errors.js';
 import { emitError, emitSuccess } from './output.js';
 import { parseManagementArgs } from './parse.js';
+import { createProductionContainer } from './runtime.js';
 
 const HELP = `Usage:
-  claudexctl setup [--version VERSION] [--port PORT] [--with-cursor] [--no-start] [--no-path] [--yes]
-  claudexctl install [--version VERSION] [--port PORT] [--yes]
-  claudexctl auth codex|antigravity [options]
-  claudexctl start|stop|restart|status|doctor
-  claudexctl update|rollback [options]
-  claudexctl models [codex|antigravity|cursor|all]
-  claudexctl config set port PORT [--yes]
-  claudexctl cursor enable|disable|install|login|repo|writes|approve [options]
-  claudexctl uninstall [--dry-run] [--purge-auth] [--yes]
+  claudey onboard [--yes]
+  claudey setup [--version VERSION] [--port PORT] [--with-cursor] [--no-start] [--no-path] [--yes]
+  claudey install [--version VERSION] [--port PORT] [--yes]
+  claudey auth grok|antigravity|codex|all [options]
+  claudey start|stop|restart|status|doctor
+  claudey update|rollback [options]
+  claudey models [codex|antigravity|grok|cursor|all]
+  claudey config set port PORT [--yes]
+  claudey cursor enable|disable|install|login|repo|writes|approve [options]
+  claudey uninstall [--dry-run] [--purge-auth] [--yes]
 `;
 const PUBLIC_CODES = new Set([
   'USAGE_ERROR', 'PLATFORM_UNSUPPORTED', 'PREREQUISITE_MISSING', 'CAPABILITY_UNSUPPORTED', 'NOT_INSTALLED',
@@ -41,7 +47,7 @@ function record(value) {
   return prototype === Object.prototype || prototype === null;
 }
 
-function safety() { return new ClaudexError('SAFETY_REFUSAL', 'The management command could not be dispatched safely.'); }
+function safety() { return new ClaudeyError('SAFETY_REFUSAL', 'The management command could not be dispatched safely.'); }
 
 function schemaResult(value) {
   if (!record(value)) throw safety();
@@ -68,7 +74,7 @@ async function runRoutedModels(command, context = {}) {
       if (Array.isArray(error?.details?.providers)) gatewayProviders = [...error.details.providers];
     } catch { gatewayProviders = []; }
   }
-  if (gatewayProviders.length !== 2) gatewayProviders = ['codex', 'antigravity'].map((provider) => Object.freeze({
+  if (gatewayProviders.length !== GATEWAY_PROVIDERS.length) gatewayProviders = GATEWAY_PROVIDERS.map((provider) => Object.freeze({
     provider, status: 'unavailable', code: publicCode(gatewayError), models: Object.freeze([])
   }));
 
@@ -88,10 +94,11 @@ async function runRoutedModels(command, context = {}) {
   const candidates = [gatewayError, cursorError].filter(Boolean)
     .map((error) => ({ error, exit: exitCodeFor(error) })).sort((left, right) => right.exit - left.exit);
   const code = publicCode(candidates[0]?.error);
-  throw new ClaudexError(code, 'No requested provider model catalog is available.', { details: { providers } });
+  throw new ClaudeyError(code, 'No requested provider model catalog is available.', { details: { providers } });
 }
 
 const DEFAULT_HANDLERS = Object.freeze({
+  onboard: ({ options, context }) => runOnboardCommand(options, context),
   setup: ({ options, context }) => runSetupCommand(options, context),
   install: ({ options, context }) => runInstallCommand(options, context),
   auth: ({ command, options, context }) => runAuthCommand(command, options, context),
@@ -105,8 +112,12 @@ const DEFAULT_HANDLERS = Object.freeze({
   cursor: ({ command, options, context }) => runCursorCommand(command, options, context),
   cursorMcpServe: ({ options, context }) => runCursorMcpServe(options, context),
   uninstall: ({ options, context }) => runUninstallCommand(options, context),
+  'claude-codex': ({ options, context }) => runClaudeCodex(options?.rawArgv ?? [], process.env, context),
   claudex: ({ options, context }) => runClaudex(options?.rawArgv ?? [], process.env, context),
-  'claude-agy': ({ options, context }) => runClaudeAgy(options?.rawArgv ?? [], process.env, context)
+  'claude-agy': ({ options, context }) => runClaudeAgy(options?.rawArgv ?? [], process.env, context),
+  'claude-grok': ({ options, context }) => runClaudeGrok(options?.rawArgv ?? [], process.env, context),
+  claudey: ({ options, context }) => runClaudey(options?.rawArgv ?? [], process.env, context),
+  claudeyctl: ({ options, context }) => runClaudey(options?.rawArgv ?? [], process.env, context)
 });
 
 function family(command) {
@@ -141,20 +152,25 @@ export async function main(argv = process.argv.slice(2), environment = process.e
 }
 
 function errorEnvelope(error) {
-  if (error instanceof ClaudexError) return error;
+  if (error instanceof ClaudeyError) return error;
   try {
     if (error?.code === 'USAGE_ERROR' && typeof error.message === 'string' && error.message.length <= 1_024) {
-      return new ClaudexError('USAGE_ERROR', error.message);
+      return new ClaudeyError('USAGE_ERROR', error.message);
     }
   } catch { /* sanitize */ }
   return safety();
+}
+
+function hasExplicitContainer(container) {
+  return record(container) && (record(container.handlers) || record(container.contexts));
 }
 
 export async function run(argv = process.argv.slice(2), environment = process.env, io = process, container = {}) {
   const json = argv.includes('--json');
   const noColor = argv.includes('--no-color');
   try {
-    const result = await main(argv, environment, container);
+    const effective = hasExplicitContainer(container) ? container : createProductionContainer(environment);
+    const result = await main(argv, environment, effective);
     emitSuccess(result, { json, noColor }, io);
     return 0;
   } catch (error) {

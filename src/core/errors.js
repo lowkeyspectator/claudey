@@ -21,16 +21,18 @@ function assertNoSecret(value) {
   }
 }
 
-export class ClaudexError extends Error {
+export class ClaudeyError extends Error {
   constructor(code, message, { hint, details = {}, cause } = {}) {
     assertNoSecret(details);
     super(message, { cause });
-    this.name = 'ClaudexError';
+    this.name = 'ClaudeyError';
     this.code = code;
     this.hint = hint;
     this.details = details;
   }
 }
+
+export { ClaudeyError as ClaudexError };
 
 export function exitCodeFor(error) {
   return exitCodes.get(error?.code) ?? 2;

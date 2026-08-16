@@ -29,7 +29,10 @@ function byteLength(value) {
 
 function parseVersion(output, label) {
   if (typeof output !== 'string') return null;
-  const match = new RegExp(`^${label} ((?:0|[1-9]\\d*)\\.(?:0|[1-9]\\d*)\\.(?:0|[1-9]\\d*))\\n$`).exec(output);
+  const exact = new RegExp(`^${label} ((?:0|[1-9]\\d*)\\.(?:0|[1-9]\\d*)\\.(?:0|[1-9]\\d*))\\n$`).exec(output);
+  const match = exact ?? (label === 'Claude Code'
+    ? new RegExp(`^${label} ((?:0|[1-9]\\d*)\\.(?:0|[1-9]\\d*)\\.(?:0|[1-9]\\d*))(?:\\.\\d+)?\\s*$`, 'm').exec(output)
+    : null);
   if (!match) return null;
   const parts = match[1].split('.').map(Number);
   return parts.every(Number.isSafeInteger) ? { value: match[1], parts } : null;
@@ -75,7 +78,8 @@ async function invoke(run, tool, target, args, { stdin = null, env = {} } = {}) 
   try {
     const result = await run(invocation);
     if (!result || result.code !== 0 || typeof result.stdout !== 'string' || typeof result.stderr !== 'string') return null;
-    if (byteLength(result.stdout) > MAX_OUTPUT_BYTES || byteLength(result.stderr) > MAX_OUTPUT_BYTES || result.stderr !== '') return null;
+    if (byteLength(result.stdout) > MAX_OUTPUT_BYTES || byteLength(result.stderr) > MAX_OUTPUT_BYTES) return null;
+    if (result.stderr !== '' && tool !== 'claude') return null;
     return result.stdout;
   } catch { return null; }
 }
@@ -104,9 +108,12 @@ export function validateAuthenticatedModelCatalog(response, { allowPreAuthEmpty 
   if (response.data.length === 0) return allowPreAuthEmpty === true;
   const seen = new Set();
   return response.data.every((model) => {
-    if (!hasExactKeys(model, ['id', 'object', 'created', 'owned_by']) || typeof model.id !== 'string' || !model.id
-      || model.object !== 'model' || !Number.isSafeInteger(model.created) || model.created < 0
-      || !['codex', 'antigravity'].includes(model.owned_by) || seen.has(model.id)) return false;
+    if (!model || typeof model !== 'object' || Array.isArray(model) || typeof model.id !== 'string' || !model.id
+      || model.object !== 'model' || typeof model.owned_by !== 'string' || !/^[A-Za-z0-9._-]{1,64}$/.test(model.owned_by)
+      || seen.has(model.id)) return false;
+    const keys = Object.keys(model);
+    if (keys.some((key) => !['id', 'object', 'created', 'owned_by'].includes(key))) return false;
+    if (model.created !== undefined && (!Number.isSafeInteger(model.created) || model.created < 0)) return false;
     seen.add(model.id);
     return true;
   });

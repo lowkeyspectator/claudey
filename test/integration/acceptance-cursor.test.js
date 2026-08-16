@@ -66,7 +66,8 @@ test('default model router keeps Cursor-only gateway-free and joins all three li
   assert.deepEqual(all.providers.map(({ provider, status }) => ({ provider, status })), [
     { provider: 'codex', status: 'available' },
     { provider: 'antigravity', status: 'unavailable' },
+    { provider: 'grok', status: 'unavailable' },
     { provider: 'cursor', status: 'available' }
   ]);
-  assert.deepEqual(calls, ['gateway:codex', 'gateway:antigravity', 'cursor:verify', 'cursor:models']);
+  assert.deepEqual(calls, ['gateway:codex', 'gateway:antigravity', 'gateway:grok', 'cursor:verify', 'cursor:models']);
 });

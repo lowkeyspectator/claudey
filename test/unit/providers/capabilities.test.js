@@ -140,6 +140,16 @@ test('refuses old/spoofed versions before later probes and accepts newer version
     cliProxy: CLI, claude: CLAUDE, run: successfulRunner(calls, { versions: { cliProxy: '7.2.131', claude: '2.2.0' } })
   });
   assert.equal(newer.ready, true);
+  const current = await probeRequiredCapabilities({
+    cliProxy: CLI, claude: CLAUDE, run: async (invocation) => {
+      if (invocation.tool === 'claude' && invocation.args[0] === '--version') {
+        return { code: 0, stdout: 'Claude Code 2.1.233.0\n', stderr: 'update available\n' };
+      }
+      return successfulRunner([], { versions: { claude: '2.1.233' } })(invocation);
+    }
+  });
+  assert.equal(current.ready, true);
+  assert.equal(current.capabilities.claude.version.version, '2.1.233');
   assert.equal(calls.length, 8);
 
   for (const firstResult of [
@@ -162,8 +172,10 @@ test('validates authenticated model catalogs independently without network acces
   assert.equal(validateAuthenticatedModelCatalog({ object: 'list', data: [] }, { allowPreAuthEmpty: true }), true);
   assert.equal(validateAuthenticatedModelCatalog({ object: 'list', data: [{ id: 'gpt', object: 'model', created: 1, owned_by: 'codex' }], extra: true }), false);
   assert.equal(validateAuthenticatedModelCatalog({ object: 'list', data: [{ id: 'gpt', object: 'model', created: 1, owned_by: 'codex' }, { id: 'gpt', object: 'model', created: 2, owned_by: 'codex' }] }), false);
-  assert.equal(validateAuthenticatedModelCatalog({ object: 'list', data: [{ id: 'gpt', object: 'model', created: 1, owned_by: 'unknown' }] }), false);
+  assert.equal(validateAuthenticatedModelCatalog({ object: 'list', data: [{ id: 'gpt', object: 'model', created: 1, owned_by: '' }] }), false);
   assert.equal(validateAuthenticatedModelCatalog({ object: 'list', data: [{ id: 'gpt', object: 'model', created: 1, owned_by: 'codex' }] }), true);
+  assert.equal(validateAuthenticatedModelCatalog({ object: 'list', data: [{ id: 'grok-4.5', object: 'model', created: 1, owned_by: 'xai' }] }), true);
+  assert.equal(validateAuthenticatedModelCatalog({ object: 'list', data: [{ id: 'gemini-3-flash', object: 'model', owned_by: 'antigravity' }] }), true);
 });
 
 test('resolves verified cursor-agent first and verifies agent identity plus Cursor version before fallback', async () => {
@@ -301,7 +313,7 @@ test('executes the owned Cursor capture fixture with exact argv/env/stdin bounda
   const previousCanary = process.env.ANTHROPIC_API_KEY;
   process.env.ANTHROPIC_API_KEY = 'TASK7_ENV_CANARY';
   t.after(() => { if (previousCanary === undefined) delete process.env.ANTHROPIC_API_KEY; else process.env.ANTHROPIC_API_KEY = previousCanary; });
-  const cursor = CURSOR;
+  const cursor = await makeTarget('cursor-agent', 'fake-cursor-agent.js', '-t310');
   const capturePath = path.join(path.dirname(cursor.argsPrefix[0]), 'capture.jsonl');
   await fs.rm(capturePath, { force: true });
   const synthetic = successfulRunner([]);
@@ -330,11 +342,13 @@ test('executes owned CLIProxyAPI and Claude fixtures through branded resolution 
   t.after(() => {
     if (previousCanary === undefined) delete process.env.ANTHROPIC_API_KEY; else process.env.ANTHROPIC_API_KEY = previousCanary;
   });
-  for (const target of [CLI, CLAUDE]) await fs.rm(path.join(path.dirname(target.argsPrefix[0]), 'capture.jsonl'), { force: true });
-  const result = await probeRequiredCapabilities({ cliProxy: CLI, claude: CLAUDE, run: runFixedCommand });
+  const cli = await makeTarget('cliproxyapi', 'fake-cliproxy.js', '-t339');
+  const claude = await makeTarget('claude', 'fake-claude.js', '-t339');
+  for (const target of [cli, claude]) await fs.rm(path.join(path.dirname(target.argsPrefix[0]), 'capture.jsonl'), { force: true });
+  const result = await probeRequiredCapabilities({ cliProxy: cli, claude, run: runFixedCommand });
   assert.equal(result.ready, true);
-  const cliCaptures = (await fs.readFile(path.join(path.dirname(CLI.argsPrefix[0]), 'capture.jsonl'), 'utf8')).trim().split('\n').map(JSON.parse);
-  const claudeCaptures = (await fs.readFile(path.join(path.dirname(CLAUDE.argsPrefix[0]), 'capture.jsonl'), 'utf8')).trim().split('\n').map(JSON.parse);
+  const cliCaptures = (await fs.readFile(path.join(path.dirname(cli.argsPrefix[0]), 'capture.jsonl'), 'utf8')).trim().split('\n').map(JSON.parse);
+  const claudeCaptures = (await fs.readFile(path.join(path.dirname(claude.argsPrefix[0]), 'capture.jsonl'), 'utf8')).trim().split('\n').map(JSON.parse);
   assert.deepEqual(cliCaptures.map((capture) => capture.args), [['--version'], ['--help', '--json'], ['config', 'probe', '--json']]);
   assert.deepEqual(claudeCaptures.map((capture) => capture.args), [['--version'], ['model', '--help', '--json'], ['plugin', '--help', '--json'], ['mcp', '--help', '--json'], ['environment', '--json']]);
   assert.ok([...cliCaptures, ...claudeCaptures].every((capture) => capture.stdin === '' && !JSON.stringify(capture.env).includes('TASK7_ENV_CANARY')));

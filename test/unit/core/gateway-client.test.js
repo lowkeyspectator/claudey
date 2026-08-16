@@ -59,7 +59,7 @@ test('accepts an authenticated empty setup catalog only when pre-auth emptiness 
 test('rejects unknown catalog keys, duplicate models, and ambiguous provider ownership', async (t) => {
   const invalidCatalogs = [
     { object: 'list', data: [], extra: true },
-    { object: 'list', data: [{ id: 'x', object: 'model', created: 1, owned_by: 'other' }] },
+    { object: 'list', data: [{ id: 'x', object: 'model', created: 1, owned_by: '' }] },
     { object: 'list', data: [
       { id: 'x', object: 'model', created: 1, owned_by: 'codex' },
       { id: 'x', object: 'model', created: 2, owned_by: 'antigravity' }

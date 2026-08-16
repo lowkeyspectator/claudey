@@ -1,13 +1,13 @@
 import path from 'node:path';
 
-import { ClaudexError } from './errors.js';
+import { ClaudeyError } from './errors.js';
 
 const PLANS = new WeakSet();
-const BEGIN = '# >>> claudexctl PATH >>>';
-const END = '# <<< claudexctl PATH <<<';
+const BEGIN = '# >>> claudeyctl PATH >>>';
+const END = '# <<< claudeyctl PATH <<<';
 
 function safety(message = 'PATH mutation could not be completed safely.') {
-  return new ClaudexError('SAFETY_REFUSAL', message);
+  return new ClaudeyError('SAFETY_REFUSAL', message);
 }
 
 function safeString(value, label, { empty = false, multiline = false } = {}) {
@@ -74,7 +74,7 @@ function visible(currentShellPath, binDirectory, kind) {
 }
 
 function launcher(binDirectory, kind) {
-  return kind === 'windows' ? path.win32.join(binDirectory, 'claudexctl.exe') : path.posix.join(binDirectory, 'claudexctl');
+  return kind === 'windows' ? path.win32.join(binDirectory, 'claudeyctl.exe') : path.posix.join(binDirectory, 'claudeyctl');
 }
 
 function remediation(binDirectory, kind, shellVisible, changed) {
@@ -148,12 +148,12 @@ export function planPathMutation(options = {}) {
   const before = safeString(options.profileText ?? '', 'Profile text', { empty: true, multiline: true });
   const beginCount = occurrences(before, BEGIN);
   const endCount = occurrences(before, END);
-  if (beginCount !== endCount || beginCount > 1) throw safety('The Claudex PATH marker block is ambiguous.');
+  if (beginCount !== endCount || beginCount > 1) throw safety('The Claudey PATH marker block is ambiguous.');
   const block = ownedBlock(binDirectory);
   if (beginCount === 1) {
     const blockOffset = before.indexOf(block);
     if (blockOffset < 0 || blockOffset > 0 && before[blockOffset - 1] !== '\n') {
-      throw safety('The Claudex PATH marker block was modified.');
+      throw safety('The Claudey PATH marker block was modified.');
     }
     return branded({
       schemaVersion: 1, kind: 'posix-profile-block', changed: false, binDirectory, profilePath,

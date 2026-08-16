@@ -5,13 +5,13 @@
       "platform": { "family": "windows", "runtimePlatform": "win32", "runtimeArch": "x64" },
       "env": { "LOCALAPPDATA": "C:\\Users\\Casey\\AppData\\Local", "APPDATA": "C:\\Users\\Casey\\AppData\\Roaming", "USERPROFILE": "C:\\Users\\Casey" },
       "expected": {
-        "managerRoot": "C:\\Users\\Casey\\AppData\\Local\\claudexctl",
-        "releaseRoot": "C:\\Users\\Casey\\AppData\\Local\\claudexctl\\releases",
-        "launcherRoot": "C:\\Users\\Casey\\AppData\\Local\\claudexctl\\launchers",
-        "stateRoot": "C:\\Users\\Casey\\AppData\\Local\\claudexctl\\state",
-        "userBinRoot": "C:\\Users\\Casey\\AppData\\Local\\claudexctl\\bin",
-        "configRoot": "C:\\Users\\Casey\\AppData\\Roaming\\claudexctl",
-        "authRoot": "C:\\Users\\Casey\\AppData\\Roaming\\claudexctl\\auth"
+        "managerRoot": "C:\\Users\\Casey\\AppData\\Local\\claudey",
+        "releaseRoot": "C:\\Users\\Casey\\AppData\\Local\\claudey\\releases",
+        "launcherRoot": "C:\\Users\\Casey\\AppData\\Local\\claudey\\launchers",
+        "stateRoot": "C:\\Users\\Casey\\AppData\\Local\\claudey\\state",
+        "userBinRoot": "C:\\Users\\Casey\\AppData\\Local\\claudey\\bin",
+        "configRoot": "C:\\Users\\Casey\\AppData\\Roaming\\claudey",
+        "authRoot": "C:\\Users\\Casey\\AppData\\Roaming\\claudey\\auth"
       }
     },
     {
@@ -19,12 +19,12 @@
       "platform": { "family": "macos", "runtimePlatform": "darwin", "runtimeArch": "arm64" },
       "env": { "HOME": "/Users/casey" },
       "expected": {
-        "managerRoot": "/Users/casey/Library/Application Support/claudexctl",
-        "releaseRoot": "/Users/casey/Library/Application Support/claudexctl/releases",
-        "launcherRoot": "/Users/casey/Library/Application Support/claudexctl/launchers",
-        "configRoot": "/Users/casey/Library/Application Support/claudexctl",
-        "authRoot": "/Users/casey/Library/Application Support/claudexctl/auth",
-        "stateRoot": "/Users/casey/Library/Application Support/claudexctl/state",
+        "managerRoot": "/Users/casey/Library/Application Support/claudey",
+        "releaseRoot": "/Users/casey/Library/Application Support/claudey/releases",
+        "launcherRoot": "/Users/casey/Library/Application Support/claudey/launchers",
+        "configRoot": "/Users/casey/Library/Application Support/claudey",
+        "authRoot": "/Users/casey/Library/Application Support/claudey/auth",
+        "stateRoot": "/Users/casey/Library/Application Support/claudey/state",
         "userBinRoot": "/Users/casey/.local/bin"
       }
     },
@@ -33,12 +33,12 @@
       "platform": { "family": "linux", "runtimePlatform": "linux", "runtimeArch": "x64", "isWsl": false },
       "env": { "HOME": "/home/casey", "XDG_DATA_HOME": "/var/home/casey/data", "XDG_CONFIG_HOME": "/var/home/casey/config", "XDG_STATE_HOME": "/var/home/casey/state" },
       "expected": {
-        "managerRoot": "/var/home/casey/data/claudexctl",
-        "releaseRoot": "/var/home/casey/data/claudexctl/releases",
-        "launcherRoot": "/var/home/casey/data/claudexctl/launchers",
-        "configRoot": "/var/home/casey/config/claudexctl",
-        "authRoot": "/var/home/casey/config/claudexctl/auth",
-        "stateRoot": "/var/home/casey/state/claudexctl",
+        "managerRoot": "/var/home/casey/data/claudey",
+        "releaseRoot": "/var/home/casey/data/claudey/releases",
+        "launcherRoot": "/var/home/casey/data/claudey/launchers",
+        "configRoot": "/var/home/casey/config/claudey",
+        "authRoot": "/var/home/casey/config/claudey/auth",
+        "stateRoot": "/var/home/casey/state/claudey",
         "userBinRoot": "/home/casey/.local/bin"
       }
     },
@@ -47,12 +47,12 @@
       "platform": { "family": "linux", "runtimePlatform": "linux", "runtimeArch": "arm64", "isWsl": false },
       "env": { "HOME": "/home/casey", "XDG_DATA_HOME": "", "XDG_CONFIG_HOME": "", "XDG_STATE_HOME": "" },
       "expected": {
-        "managerRoot": "/home/casey/.local/share/claudexctl",
-        "releaseRoot": "/home/casey/.local/share/claudexctl/releases",
-        "launcherRoot": "/home/casey/.local/share/claudexctl/launchers",
-        "configRoot": "/home/casey/.config/claudexctl",
-        "authRoot": "/home/casey/.config/claudexctl/auth",
-        "stateRoot": "/home/casey/.local/state/claudexctl",
+        "managerRoot": "/home/casey/.local/share/claudey",
+        "releaseRoot": "/home/casey/.local/share/claudey/releases",
+        "launcherRoot": "/home/casey/.local/share/claudey/launchers",
+        "configRoot": "/home/casey/.config/claudey",
+        "authRoot": "/home/casey/.config/claudey/auth",
+        "stateRoot": "/home/casey/.local/state/claudey",
         "userBinRoot": "/home/casey/.local/bin"
       }
     },
@@ -62,12 +62,12 @@
       "env": { "HOME": "/home/casey", "XDG_DATA_HOME": "/var/home/casey/data", "XDG_CONFIG_HOME": "/var/home/casey/config", "XDG_STATE_HOME": "/var/home/casey/state" },
       "safety": { "mountTable": [] },
       "expected": {
-        "managerRoot": "/var/home/casey/data/claudexctl",
-        "releaseRoot": "/var/home/casey/data/claudexctl/releases",
-        "launcherRoot": "/var/home/casey/data/claudexctl/launchers",
-        "configRoot": "/var/home/casey/config/claudexctl",
-        "authRoot": "/var/home/casey/config/claudexctl/auth",
-        "stateRoot": "/var/home/casey/state/claudexctl",
+        "managerRoot": "/var/home/casey/data/claudey",
+        "releaseRoot": "/var/home/casey/data/claudey/releases",
+        "launcherRoot": "/var/home/casey/data/claudey/launchers",
+        "configRoot": "/var/home/casey/config/claudey",
+        "authRoot": "/var/home/casey/config/claudey/auth",
+        "stateRoot": "/var/home/casey/state/claudey",
         "userBinRoot": "/home/casey/.local/bin"
       }
     },
@@ -77,12 +77,12 @@
       "env": { "HOME": "/home/casey" },
       "safety": { "mountTable": [] },
       "expected": {
-        "managerRoot": "/home/casey/.local/share/claudexctl",
-        "releaseRoot": "/home/casey/.local/share/claudexctl/releases",
-        "launcherRoot": "/home/casey/.local/share/claudexctl/launchers",
-        "configRoot": "/home/casey/.config/claudexctl",
-        "authRoot": "/home/casey/.config/claudexctl/auth",
-        "stateRoot": "/home/casey/.local/state/claudexctl",
+        "managerRoot": "/home/casey/.local/share/claudey",
+        "releaseRoot": "/home/casey/.local/share/claudey/releases",
+        "launcherRoot": "/home/casey/.local/share/claudey/launchers",
+        "configRoot": "/home/casey/.config/claudey",
+        "authRoot": "/home/casey/.config/claudey/auth",
+        "stateRoot": "/home/casey/.local/state/claudey",
         "userBinRoot": "/home/casey/.local/bin"
       }
     }

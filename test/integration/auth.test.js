@@ -30,6 +30,7 @@ async function fixture(t, exitCode = 0) {
   const capturePath = path.join(root, 'capture.json');
   const entryDirectory = path.join(root, 'node_modules', 'cliproxyapi');
   await fs.mkdir(entryDirectory, { recursive: true });
+  await fs.writeFile(path.join(entryDirectory, 'package.json'), '{"type":"module"}');
   await fs.copyFile(process.execPath, path.join(root, 'node.exe'));
   const help = 'Usage of CLIProxyAPI\n  -antigravity-login\n  -codex-device-login\n  -codex-login\n  -config string\n  -no-browser\n  -oauth-callback-port int\n';
   await fs.writeFile(path.join(entryDirectory, 'cli.js'), `

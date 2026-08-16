@@ -2,7 +2,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 
-import { ClaudexError } from './errors.js';
+import { ClaudeyError } from './errors.js';
 import { assertContainedNoLinks, assertRelativeManagedChild } from './fs-safe.js';
 import { atomicReplace } from './permissions.js';
 
@@ -22,7 +22,7 @@ const PATH_KEYS = ['staging', 'configTemp', 'candidateProcess', 'priorPointerBac
 const HASH_KEYS = ['candidate', 'priorPointer', 'priorConfig'];
 
 function safety(message) {
-  return new ClaudexError('SAFETY_REFUSAL', message);
+  return new ClaudeyError('SAFETY_REFUSAL', message);
 }
 
 function exactKeys(value, keys) {

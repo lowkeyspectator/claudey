@@ -9,6 +9,7 @@ import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 
 import { runClaudeAgy } from '../../src/cli/launchers/claude-agy.js';
+import { runClaudeGrok } from '../../src/cli/launchers/claude-grok.js';
 import { runClaudex, stageLaunchers } from '../../src/cli/launchers/claudex.js';
 import { resolveVerifiedExecutable } from '../../src/core/executable.js';
 import { requestGatewayModels } from '../../src/core/gateway-client.js';
@@ -47,7 +48,8 @@ async function fixture(t) {
   const claude = await resolveVerifiedExecutable({ command: 'claude', platform: 'win32', candidates: [{ path: shim }], adapter: executableAdapter() });
   const gateway = await startFakeGateway({ token: TOKEN_TEXT, catalog: { object: 'list', data: [
     { id: 'gpt-live', object: 'model', created: 2, owned_by: 'codex' },
-    { id: 'agy-live', object: 'model', created: 3, owned_by: 'antigravity' }
+    { id: 'agy-live', object: 'model', created: 3, owned_by: 'antigravity' },
+    { id: 'grok-live', object: 'model', created: 4, owned_by: 'xai' }
   ] } });
   t.after(() => gateway.close());
   const context = {
@@ -113,6 +115,18 @@ test('real Antigravity launcher relays the exact nonzero Claude exit without fal
   assert.deepEqual(captured[0].args, ['--model', 'agy-live', '--fallback-model', 'agy-live', '--fixture-exit=23']);
 });
 
+test('real Grok launcher pins the selected model for Claude Code subagents', async (t) => {
+  const f = await fixture(t);
+  const result = await runClaudeGrok(['--model', 'grok-live', '--', '--fixture-exit=0'], {}, f.context);
+  assert.deepEqual(result, { provider: 'grok', model: 'grok-live', exitCode: 0, signal: null });
+  const captured = await captures(f.capturePath);
+  assert.deepEqual(captured[0].args, ['--model', 'grok-live', '--fallback-model', 'grok-live', '--fixture-exit=0']);
+  assert.equal(captured[0].env.CLAUDE_CODE_SUBAGENT_MODEL, 'grok-live');
+  assert.equal(captured[0].env.ANTHROPIC_DEFAULT_HAIKU_MODEL, 'grok-live');
+  assert.equal(captured[0].env.ANTHROPIC_DEFAULT_SONNET_MODEL, 'grok-live');
+  assert.equal(captured[0].env.ANTHROPIC_DEFAULT_OPUS_MODEL, 'grok-live');
+});
+
 test('real Claude child receives a relayed terminal signal and the launcher reports exact signal termination', async (t) => {
   const f = await fixture(t);
   const parent = new EventEmitter();
@@ -144,13 +158,17 @@ test('staged launcher artifacts are deterministic, port/token-free, and preserve
     platform: 'linux', nodePath: '/opt/claudex/node', managerPath: '/opt/claudex/bin/claudexctl.js',
     stageFile: async (file) => staged.push({ ...file, bytes: Buffer.from(file.bytes) })
   });
-  assert.equal(files.length, 3);
+  assert.equal(files.length, 5);
   assert.deepEqual(staged.map(({ child, mode }) => ({ child, mode })), [
-    { child: 'claudexctl', mode: 0o755 }, { child: 'claudex', mode: 0o755 }, { child: 'claude-agy', mode: 0o755 }
+    { child: 'claudeyctl', mode: 0o755 }, { child: 'claudey', mode: 0o755 },
+    { child: 'claude-codex', mode: 0o755 }, { child: 'claude-agy', mode: 0o755 },
+    { child: 'claude-grok', mode: 0o755 }
   ]);
   const joined = staged.map(({ bytes }) => bytes.toString('utf8')).join('\n');
   assert.equal(joined.includes(String((await f.context.ensureGateway()).port)), false);
   assert.equal(joined.includes(TOKEN_TEXT), false);
-  assert.match(joined, /'launcher' 'claudex' "\$@"/);
+  assert.match(joined, /'launcher' 'claudey' "\$@"/);
+  assert.match(joined, /'launcher' 'claude-codex' "\$@"/);
   assert.match(joined, /'launcher' 'claude-agy' "\$@"/);
+  assert.match(joined, /'launcher' 'claude-grok' "\$@"/);
 });

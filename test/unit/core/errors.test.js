@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { ClaudexError, exitCodeFor } from '../../../src/core/errors.js';
+import { ClaudeyError, ClaudexError, exitCodeFor } from '../../../src/core/errors.js';
 import { Secret } from '../../../src/core/secrets.js';
 
 test('maps every documented public error class to its stable exit code', () => {
@@ -31,6 +31,7 @@ test('maps every documented public error class to its stable exit code', () => {
     ROLLBACK_UNAVAILABLE: 8
   };
   for (const [code, exitCode] of Object.entries(cases)) {
+    assert.equal(exitCodeFor(new ClaudeyError(code, 'message')), exitCode, code);
     assert.equal(exitCodeFor(new ClaudexError(code, 'message')), exitCode, code);
   }
 });
@@ -41,7 +42,7 @@ test('uses usage exit code for unknown errors', () => {
 
 test('refuses secret-bearing error details', () => {
   assert.throws(
-    () => new ClaudexError('NETWORK_FAILURE', 'download failed', { details: { token: Secret.fromBytes(Buffer.alloc(32)) } }),
+    () => new ClaudeyError('NETWORK_FAILURE', 'download failed', { details: { token: Secret.fromBytes(Buffer.alloc(32)) } }),
     /SECRET_SERIALIZATION_REFUSED/
   );
 });

@@ -1,4 +1,4 @@
-import { ClaudexError } from '../core/errors.js';
+import { ClaudeyError } from '../core/errors.js';
 
 const COMMANDS = new Set(['cursor-agent', 'agent']);
 const SOURCES = new Set(['path', 'fallback']);
@@ -6,7 +6,7 @@ const BINDINGS = new WeakSet();
 const REVALIDATE = new WeakMap();
 
 function unsupported() {
-  return new ClaudexError('CAPABILITY_UNSUPPORTED', 'A verified Cursor Agent executable is unavailable.');
+  return new ClaudeyError('CAPABILITY_UNSUPPORTED', 'A verified Cursor Agent executable is unavailable.');
 }
 
 function candidatesOf(value) {

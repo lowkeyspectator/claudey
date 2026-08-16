@@ -1,4 +1,4 @@
-import { ClaudexError } from '../core/errors.js';
+import { ClaudeyError } from '../core/errors.js';
 import {
   MCP_PROTOCOL_VERSION, buildCursorToolDescriptors, validateCursorToolArguments
 } from './mcp-schema.js';
@@ -14,7 +14,7 @@ const PUBLIC_CODES = new Set([
 ]);
 
 function safety(message = 'The Cursor MCP server refused an unsafe operation.') {
-  return new ClaudexError('SAFETY_REFUSAL', message);
+  return new ClaudeyError('SAFETY_REFUSAL', message);
 }
 
 function record(value) {
@@ -148,7 +148,7 @@ export function createCursorMcpServer({
         initializeReceived = true;
         return response(id, {
           protocolVersion: MCP_PROTOCOL_VERSION, capabilities: { tools: { listChanged: false } },
-          serverInfo: { name: 'claudex-cursor', version: '1.0.0' }
+          serverInfo: { name: 'claudey-cursor', version: '1.0.0' }
         });
       }
       if (!initialized) return protocolError(id, -32002, 'Cursor MCP server is not initialized.');

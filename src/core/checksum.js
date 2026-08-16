@@ -1,12 +1,12 @@
 import { createHash, timingSafeEqual } from 'node:crypto';
 
-import { ClaudexError } from './errors.js';
+import { ClaudeyError } from './errors.js';
 
 const HEX_DIGEST = /^[a-fA-F0-9]{64}$/;
 const SAFE_BASENAME = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
 
 function integrityError(message, assetName) {
-  return new ClaudexError('CHECKSUM_MISMATCH', message, {
+  return new ClaudeyError('CHECKSUM_MISMATCH', message, {
     details: assetName ? { assetName } : {}
   });
 }

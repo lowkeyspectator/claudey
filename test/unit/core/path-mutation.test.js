@@ -24,7 +24,7 @@ test('Windows user PATH mutation deduplicates case-insensitively and never targe
   assert.equal(plan.shellVisible, false);
   assert.deepEqual(plan.remediation, {
     restartShell: true,
-    absoluteLauncher: `${BIN}\\claudexctl.exe`
+    absoluteLauncher: `${BIN}\\claudeyctl.exe`
   });
   await applyPathMutation(plan, {
     writeUserPath: async (value) => writes.push(value),
@@ -89,9 +89,9 @@ test('POSIX profile mutation uses one bounded marker block and restoration remov
     currentShellPath: '/usr/bin:/bin'
   });
   assert.equal(plan.kind, 'posix-profile-block');
-  assert.match(plan.after, /# >>> claudexctl PATH >>>/u);
+  assert.match(plan.after, /# >>> claudeyctl PATH >>>/u);
   assert.match(plan.after, /export PATH="\/home\/casey\/\.local\/bin:\$PATH"/u);
-  assert.equal((plan.after.match(/claudexctl PATH/gu) ?? []).length, 2);
+  assert.equal((plan.after.match(/claudeyctl PATH/gu) ?? []).length, 2);
   const later = `${plan.after}export PAGER=less\n`;
   const writes = [];
   assert.deepEqual(await restorePathMutation(plan, {
@@ -112,7 +112,7 @@ test('POSIX refuses ambiguous or modified marker blocks', async () => {
   }), { action: 'preserved', reason: 'modified' });
   assert.throws(() => planPathMutation({
     platform: 'linux', binDirectory: '/home/casey/.local/bin', profilePath: '/home/casey/.profile',
-    profileText: '# >>> claudexctl PATH >>>\nforeign\n'
+    profileText: '# >>> claudeyctl PATH >>>\nforeign\n'
   }), (error) => error.code === 'SAFETY_REFUSAL');
   assert.throws(() => planPathMutation({
     platform: 'linux', binDirectory: '/home/casey/.local/bin', profilePath: '/home/casey/.profile',
@@ -130,7 +130,7 @@ test('--no-path produces a closed no-op plan with current-shell remediation only
     changed: false,
     binDirectory: BIN,
     shellVisible: false,
-    remediation: { restartShell: false, absoluteLauncher: `${BIN}\\claudexctl.exe` }
+    remediation: { restartShell: false, absoluteLauncher: `${BIN}\\claudeyctl.exe` }
   });
   await applyPathMutation(plan, new Proxy({}, { get: () => assert.fail('adapter must not be used') }));
   assert.deepEqual(await restorePathMutation(plan, {}), { action: 'preserved', reason: 'not-owned' });

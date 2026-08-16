@@ -1,4 +1,4 @@
-import { ClaudexError } from '../../core/errors.js';
+import { ClaudeyError } from '../../core/errors.js';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
 const VERSION = /^\d+\.\d+\.\d+$/u;
@@ -16,7 +16,7 @@ function freeze(value) {
   return value;
 }
 
-function safety() { return new ClaudexError('SAFETY_REFUSAL', 'Installation status could not be inspected safely.'); }
+function safety() { return new ClaudeyError('SAFETY_REFUSAL', 'Installation status could not be inspected safely.'); }
 
 function inspector(context, name) {
   try {
@@ -44,8 +44,9 @@ function gateway(value) {
 
 function providers(value) {
   const states = ['authenticated', 'missing', 'unavailable'];
-  if (!exact(value, ['codex', 'antigravity']) || !states.includes(value.codex) || !states.includes(value.antigravity)) throw safety();
-  return { codex: value.codex, antigravity: value.antigravity };
+  if (!exact(value, ['codex', 'antigravity', 'grok']) || !states.includes(value.codex)
+    || !states.includes(value.antigravity) || !states.includes(value.grok)) throw safety();
+  return { codex: value.codex, antigravity: value.antigravity, grok: value.grok };
 }
 
 function cursor(value) {
@@ -78,18 +79,51 @@ async function inspected(context, name, validate) {
   try { return validate(value); } catch { throw safety(); }
 }
 
-function defaultStatusContext() {
+async function productionStatusContext() {
+  const { listProviderModels } = await import('../../providers/models.js');
+  const { createProductionContainer, loadInstallation } = await import('../runtime.js');
+  const container = createProductionContainer();
+  const gateway = container.contexts.models;
   return {
-    inspectInstallation: async () => ({ state: 'installed', version: '1.0.0', installationId: '11111111-1111-4111-8111-111111111111' }),
-    inspectGateway: async () => ({ state: 'healthy', port: 8317 }),
-    inspectProviders: async () => ({ codex: 'authenticated', antigravity: 'authenticated' }),
-    inspectCursor: async () => ({ registration: 'enabled', login: 'authenticated', writes: 'enabled', pendingWorktrees: 0 }),
-    inspectRecovery: async () => ({ journal: 'clear', rollback: 'available' })
+    inspectInstallation: async () => {
+      try {
+        const installed = await loadInstallation();
+        return { state: 'installed', version: installed.version, installationId: installed.installationId };
+      } catch (error) {
+        if (error?.code === 'NOT_INSTALLED') return { state: 'not-installed', version: null, installationId: null };
+        throw error;
+      }
+    },
+    inspectGateway: async () => {
+      try {
+        await gateway.ensureHealthy();
+        return { state: 'healthy', port: gateway.port };
+      } catch (error) {
+        if (error?.code === 'NOT_INSTALLED') return { state: 'not-installed', port: null };
+        if (error?.code === 'PORT_IN_USE') return { state: 'port-occupied', port: gateway.port };
+        return { state: 'unhealthy', port: gateway.port };
+      }
+    },
+    inspectProviders: async () => {
+      const stateFor = async (provider) => {
+        try {
+          await listProviderModels(provider, gateway);
+          return 'authenticated';
+        } catch (error) {
+          return error?.code === 'AUTH_REQUIRED' ? 'missing' : 'unavailable';
+        }
+      };
+      return { codex: await stateFor('codex'), antigravity: await stateFor('antigravity'), grok: await stateFor('grok') };
+    },
+    inspectCursor: async () => ({ registration: 'disabled', login: 'unavailable', writes: 'disabled', pendingWorktrees: 0 }),
+    inspectRecovery: async () => ({ journal: 'clear', rollback: 'unavailable' })
   };
 }
 
 export async function runStatusCommand(context = {}) {
-  const effectiveContext = typeof context?.inspectInstallation === 'function' ? context : defaultStatusContext();
+  const effectiveContext = typeof context?.inspectInstallation === 'function'
+    ? context
+    : await productionStatusContext();
   const result = freeze({ schemaVersion: 1, healthy: false,
     installation: await inspected(effectiveContext, 'inspectInstallation', installation),
     gateway: await inspected(effectiveContext, 'inspectGateway', gateway),
@@ -101,7 +135,7 @@ export async function runStatusCommand(context = {}) {
   const final = freeze({ ...result, healthy });
   if (!healthy) {
     const code = unhealthyCode(final);
-    throw new ClaudexError(code, code === 'NOT_INSTALLED' ? 'Claudex is not installed.'
+    throw new ClaudeyError(code, code === 'NOT_INSTALLED' ? 'Claudey is not installed.'
       : code === 'PORT_IN_USE' ? 'The configured loopback port is occupied by an unrelated listener.'
         : code === 'PROCESS_IDENTITY_MISMATCH' ? 'The managed gateway process identity could not be verified.'
           : code === 'GATEWAY_UNHEALTHY' ? 'The managed gateway is not healthy.' : 'Installation status is unsafe.',

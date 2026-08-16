@@ -59,7 +59,7 @@ test('async run emits exactly one JSON envelope, maps errors, and renders help/h
   const help = captured();
   assert.equal(await run(['--help'], {}, help.io, f.value), 0);
   assert.equal(help.stdout.length, 1);
-  assert.match(help.stdout[0], /claudexctl setup/);
+  assert.match(help.stdout[0], /claudey setup/);
   assert.deepEqual(help.stderr, []);
 
   const human = captured();
@@ -73,7 +73,7 @@ test('healthy and unhealthy status/doctor preserve schema-1 JSON and mapped exit
     inspectInstallation: async () => ({ state: 'installed', version: '7.2.130',
       installationId: '11111111-1111-4111-8111-111111111111' }),
     inspectGateway: async () => ({ state: gatewayState, port: 8317 }),
-    inspectProviders: async () => ({ codex: 'authenticated', antigravity: 'missing' }),
+    inspectProviders: async () => ({ codex: 'authenticated', antigravity: 'missing', grok: 'missing' }),
     inspectCursor: async () => ({ registration: 'disabled', login: 'unavailable', writes: 'disabled', pendingWorktrees: 0 }),
     inspectRecovery: async () => ({ journal: 'clear', rollback: 'unavailable' })
   });

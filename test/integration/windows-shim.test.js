@@ -27,12 +27,15 @@ test('native shim sources enforce fixed profiles, authenticated metadata, wide C
   const quote = await fs.readFile(path.join(root, 'native/windows-shim/src/quote.c'), 'utf8');
   const header = await fs.readFile(path.join(root, 'native/windows-shim/src/quote.h'), 'utf8');
   const cmake = await fs.readFile(path.join(root, 'native/windows-shim/CMakeLists.txt'), 'utf8');
-  for (const token of ['claudexctl.exe', 'claudex.exe', 'claude-agy.exe', 'claudex-launcher.bin',
+  for (const token of ['claudeyctl.exe', 'claudexctl.exe', 'claude-codex.exe', 'claudex.exe', 'claude-agy.exe', 'claude-grok.exe', 'claudey.exe',
+    'claudey-launcher.bin', 'claudey-launcher.key', 'claudex-launcher.bin',
     'claudex-launcher.key', 'BCryptOpenAlgorithmProvider', 'BCryptHashData', 'BCryptFinishHash',
     'CreateProcessW', 'CREATE_UNICODE_ENVIRONMENT', 'GetStdHandle', 'SetConsoleCtrlHandler',
     'WaitForSingleObject', 'GetExitCodeProcess', 'pin_executable_leaf']) assert.match(main, new RegExp(token.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
-  assert.match(main, /L"launcher"[\s\S]+L"claudex"/u);
+  assert.match(main, /L"launcher"[\s\S]+L"claude-codex"/u);
   assert.match(main, /L"launcher"[\s\S]+L"claude-agy"/u);
+  assert.match(main, /L"launcher"[\s\S]+L"claude-grok"/u);
+  assert.match(main, /L"launcher"[\s\S]+L"claudey"/u);
   assert.doesNotMatch(`${main}\n${quote}`, /cmd\.exe|\.cmd\b|powershell|%\*/iu);
   assert.match(quote, /2\s*\*\s*backslashes\s*\+\s*1/u);
   assert.match(header, /claudex_quote_argument/u);

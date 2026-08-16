@@ -7,7 +7,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { inflateRawSync } from 'node:zlib';
 
-import { ClaudexError } from './errors.js';
+import { ClaudeyError } from './errors.js';
 import { assertWindowsDacl, runWindowsSecurityHelper } from '../platform/windows-helpers.js';
 
 export const ARCHIVE_LIMITS = Object.freeze({
@@ -30,13 +30,13 @@ const TAR_BLOCK_BYTES = 512;
 const ZIP_ALLOWED_FLAGS = 0x0800;
 const FIXED_POWERSHELL_PATH = 'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe';
 const WINDOWS_HELPER_BOOTSTRAP = String.raw`$ErrorActionPreference = 'Stop'
-$powershellSha256 = $env:CLAUDEX_ARCHIVE_POWERSHELL_SHA256
-$helperPath = $env:CLAUDEX_ARCHIVE_HELPER_PATH
-$helperSha256 = $env:CLAUDEX_ARCHIVE_HELPER_SHA256
-$requestPath = $env:CLAUDEX_ARCHIVE_REQUEST_PATH
-$requestSha256 = $env:CLAUDEX_ARCHIVE_REQUEST_SHA256
-$destinationVolume = $env:CLAUDEX_ARCHIVE_DESTINATION_VOLUME
-$destinationFileId = $env:CLAUDEX_ARCHIVE_DESTINATION_FILE_ID
+$powershellSha256 = $env:CLAUDEY_ARCHIVE_POWERSHELL_SHA256
+$helperPath = $env:CLAUDEY_ARCHIVE_HELPER_PATH
+$helperSha256 = $env:CLAUDEY_ARCHIVE_HELPER_SHA256
+$requestPath = $env:CLAUDEY_ARCHIVE_REQUEST_PATH
+$requestSha256 = $env:CLAUDEY_ARCHIVE_REQUEST_SHA256
+$destinationVolume = $env:CLAUDEY_ARCHIVE_DESTINATION_VOLUME
+$destinationFileId = $env:CLAUDEY_ARCHIVE_DESTINATION_FILE_ID
 if ($powershellSha256 -notmatch '^[a-f0-9]{64}$' -or $helperSha256 -notmatch '^[a-f0-9]{64}$' -or $requestSha256 -notmatch '^[a-f0-9]{64}$' -or
     $destinationVolume -notmatch '^(0|[1-9][0-9]*)$' -or $destinationFileId -notmatch '^(0|[1-9][0-9]*)$') { exit 1 }
 
@@ -46,13 +46,13 @@ using System;
 using System.IO;
 using System.Runtime.InteropServices;
 using Microsoft.Win32.SafeHandles;
-public sealed class ClaudexBootstrapPin : IDisposable {
+public sealed class ClaudeyBootstrapPin : IDisposable {
  [StructLayout(LayoutKind.Sequential)] private struct Info { public uint Attributes; public System.Runtime.InteropServices.ComTypes.FILETIME Creation; public System.Runtime.InteropServices.ComTypes.FILETIME Access; public System.Runtime.InteropServices.ComTypes.FILETIME Write; public uint Volume; public uint SizeHigh; public uint SizeLow; public uint Links; public uint IndexHigh; public uint IndexLow; }
  [DllImport("kernel32.dll", CharSet=CharSet.Unicode, SetLastError=true)] private static extern SafeFileHandle CreateFileW(string name,uint access,FileShare share,IntPtr security,FileMode mode,uint flags,IntPtr template);
  [DllImport("kernel32.dll",SetLastError=true)] [return:MarshalAs(UnmanagedType.Bool)] private static extern bool GetFileInformationByHandle(SafeFileHandle handle,out Info info);
  public readonly SafeFileHandle Handle; public readonly uint Volume; public readonly ulong FileId; public readonly uint Attributes;
- private ClaudexBootstrapPin(SafeFileHandle handle,Info info){Handle=handle;Volume=info.Volume;FileId=((ulong)info.IndexHigh<<32)|info.IndexLow;Attributes=info.Attributes;}
- public static ClaudexBootstrapPin Open(string path,bool directory){ const uint GENERIC_READ=0x80000000,READ_CONTROL=0x20000,READ_ATTRIBUTES=0x80,BACKUP=0x02000000,OPEN_REPARSE=0x00200000; uint access=directory?0:GENERIC_READ|READ_CONTROL|READ_ATTRIBUTES;FileShare share=directory?FileShare.Read|FileShare.Write|FileShare.Delete:FileShare.Read;SafeFileHandle handle=CreateFileW(path,access,share,IntPtr.Zero,FileMode.Open,OPEN_REPARSE|(directory?BACKUP:0),IntPtr.Zero); if(handle.IsInvalid)throw new IOException("Pin open.",new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error())); Info info;if(!GetFileInformationByHandle(handle,out info)){int code=Marshal.GetLastWin32Error();handle.Dispose();throw new IOException("Pin identity.",new System.ComponentModel.Win32Exception(code));}return new ClaudexBootstrapPin(handle,info);}
+ private ClaudeyBootstrapPin(SafeFileHandle handle,Info info){Handle=handle;Volume=info.Volume;FileId=((ulong)info.IndexHigh<<32)|info.IndexLow;Attributes=info.Attributes;}
+ public static ClaudeyBootstrapPin Open(string path,bool directory){ const uint GENERIC_READ=0x80000000,READ_CONTROL=0x20000,READ_ATTRIBUTES=0x80,BACKUP=0x02000000,OPEN_REPARSE=0x00200000; uint access=directory?0:GENERIC_READ|READ_CONTROL|READ_ATTRIBUTES;FileShare share=directory?FileShare.Read|FileShare.Write|FileShare.Delete:FileShare.Read;SafeFileHandle handle=CreateFileW(path,access,share,IntPtr.Zero,FileMode.Open,OPEN_REPARSE|(directory?BACKUP:0),IntPtr.Zero); if(handle.IsInvalid)throw new IOException("Pin open.",new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error())); Info info;if(!GetFileInformationByHandle(handle,out info)){int code=Marshal.GetLastWin32Error();handle.Dispose();throw new IOException("Pin identity.",new System.ComponentModel.Win32Exception(code));}return new ClaudeyBootstrapPin(handle,info);}
  public void Dispose(){Handle.Dispose();}
 }
 '@
@@ -79,7 +79,7 @@ function Get-LaunchNativeError([Exception]$ErrorValue) {
   return -1
 }
 function Assert-LaunchProof {
-  $encoded = $env:CLAUDEX_ARCHIVE_LAUNCH_PROOF
+  $encoded = $env:CLAUDEY_ARCHIVE_LAUNCH_PROOF
   if ([string]::IsNullOrWhiteSpace($encoded) -or $encoded.Length -gt 65536) { throw 'Launch proof.' }
   $records = ([Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($encoded))) | ConvertFrom-Json
   $expected = [Collections.Generic.List[string]]::new()
@@ -109,7 +109,7 @@ function Assert-LaunchProof {
     if ($record.currentUserCanReplace -ne $false -or $record.isReparsePoint -ne $false) { throw 'Launch proof ACL.' }
     $pin = $null
     try {
-      $pin = [ClaudexBootstrapPin]::Open($expectedPath, $directory)
+      $pin = [ClaudeyBootstrapPin]::Open($expectedPath, $directory)
       if (($pin.Attributes -band 0x400) -ne 0 -or [string]$pin.Volume -ne [string]$record.volume -or [string]$pin.FileId -ne [string]$record.fileId) { throw 'Launch proof identity.' }
       $launchPins.Add($pin); $pin = $null
     } catch {
@@ -157,18 +157,18 @@ try {
 } catch { exit 1 } finally { if ($null -ne $stream) { $stream.Dispose() }; if ($null -ne $selfStream) { $selfStream.Dispose() }; foreach ($launchPin in $launchPins) { $launchPin.Dispose() } }`;
 const WINDOWS_HELPER_BOOTSTRAP_ENCODED = Buffer.from(WINDOWS_HELPER_BOOTSTRAP, 'utf16le').toString('base64');
 const WINDOWS_CANDIDATE_PIN = String.raw`$ErrorActionPreference = 'Stop'
-$CandidatePath = $env:CLAUDEX_CANDIDATE_PATH
-$ExpectedVolume = $env:CLAUDEX_CANDIDATE_VOLUME
-$ExpectedFileId = $env:CLAUDEX_CANDIDATE_FILE_ID
-$ExpectedSize = $env:CLAUDEX_CANDIDATE_SIZE
-$ExpectedSha256 = $env:CLAUDEX_CANDIDATE_SHA256
-$ExpectedPowerShellSha256 = $env:CLAUDEX_CANDIDATE_POWERSHELL_SHA256
+$CandidatePath = $env:CLAUDEY_CANDIDATE_PATH
+$ExpectedVolume = $env:CLAUDEY_CANDIDATE_VOLUME
+$ExpectedFileId = $env:CLAUDEY_CANDIDATE_FILE_ID
+$ExpectedSize = $env:CLAUDEY_CANDIDATE_SIZE
+$ExpectedSha256 = $env:CLAUDEY_CANDIDATE_SHA256
+$ExpectedPowerShellSha256 = $env:CLAUDEY_CANDIDATE_POWERSHELL_SHA256
 Add-Type @'
 using System;
 using System.IO;
 using System.Runtime.InteropServices;
 using Microsoft.Win32.SafeHandles;
-public static class ClaudexCandidateIdentity {
+public static class ClaudeyCandidateIdentity {
   [StructLayout(LayoutKind.Sequential)] public struct Info {
     public uint Attributes; public System.Runtime.InteropServices.ComTypes.FILETIME Creation;
     public System.Runtime.InteropServices.ComTypes.FILETIME Access; public System.Runtime.InteropServices.ComTypes.FILETIME Write;
@@ -208,30 +208,30 @@ try {
   if ($ExpectedVolume -notmatch '^(0|[1-9][0-9]*)$' -or $ExpectedFileId -notmatch '^(0|[1-9][0-9]*)$' -or
       $ExpectedSize -notmatch '^(0|[1-9][0-9]*)$' -or $ExpectedSha256 -notmatch '^[a-f0-9]{64}$') { throw 'Input.' }
   $stream = [IO.File]::Open($CandidatePath, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::Read)
-  $info = New-Object ClaudexCandidateIdentity+Info
-  if (-not [ClaudexCandidateIdentity]::GetFileInformationByHandle($stream.SafeFileHandle, [ref]$info)) { throw 'Identity.' }
+  $info = New-Object ClaudeyCandidateIdentity+Info
+  if (-not [ClaudeyCandidateIdentity]::GetFileInformationByHandle($stream.SafeFileHandle, [ref]$info)) { throw 'Identity.' }
   $fileId = ([uint64]$info.IndexHigh -shl 32) -bor [uint64]$info.IndexLow
   if ([string]$info.Volume -ne $ExpectedVolume -or [string]$fileId -ne $ExpectedFileId -or [string]$stream.Length -ne $ExpectedSize) { throw 'Identity.' }
   $sha = [Security.Cryptography.SHA256]::Create()
   try { $actual = ([BitConverter]::ToString($sha.ComputeHash($stream))).Replace('-', '').ToLowerInvariant() } finally { $sha.Dispose() }
   if ($actual -ne $ExpectedSha256) { throw 'Digest.' }
-  [Console]::Out.WriteLine('CLAUDEX_CANDIDATE_PIN_READY'); [Console]::Out.Flush()
+  [Console]::Out.WriteLine('CLAUDEY_CANDIDATE_PIN_READY'); [Console]::Out.Flush()
   if ([Console]::In.ReadLine() -ne 'release') { throw 'Protocol.' }
 } catch { [Console]::Error.Write('Candidate pin refused.'); exit 1 } finally { if ($null -ne $stream) { $stream.Dispose() }; if ($null -ne $selfStream) { $selfStream.Dispose() } }`;
 const WINDOWS_CANDIDATE_PIN_ENCODED = Buffer.from(WINDOWS_CANDIDATE_PIN, 'utf16le').toString('base64');
 const WINDOWS_LAUNCH_PIN = String.raw`$ErrorActionPreference = 'Stop'
-$powershellPath = $env:CLAUDEX_LAUNCH_POWERSHELL_PATH
-$helperPath = $env:CLAUDEX_LAUNCH_HELPER_PATH
-$powershellSha256 = $env:CLAUDEX_LAUNCH_POWERSHELL_SHA256
-$helperSha256 = $env:CLAUDEX_LAUNCH_HELPER_SHA256
-$helperAncestorProof = $env:CLAUDEX_LAUNCH_HELPER_ANCESTORS
+$powershellPath = $env:CLAUDEY_LAUNCH_POWERSHELL_PATH
+$helperPath = $env:CLAUDEY_LAUNCH_HELPER_PATH
+$powershellSha256 = $env:CLAUDEY_LAUNCH_POWERSHELL_SHA256
+$helperSha256 = $env:CLAUDEY_LAUNCH_HELPER_SHA256
+$helperAncestorProof = $env:CLAUDEY_LAUNCH_HELPER_ANCESTORS
 $pins = [Collections.Generic.List[IDisposable]]::new()
 Add-Type @'
 using System;
 using System.IO;
 using System.Runtime.InteropServices;
 using Microsoft.Win32.SafeHandles;
-public sealed class ClaudexLaunchPin : IDisposable {
+public sealed class ClaudeyLaunchPin : IDisposable {
   [StructLayout(LayoutKind.Sequential)] private struct Info {
     public uint Attributes; public System.Runtime.InteropServices.ComTypes.FILETIME Creation;
     public System.Runtime.InteropServices.ComTypes.FILETIME Access; public System.Runtime.InteropServices.ComTypes.FILETIME Write;
@@ -245,10 +245,10 @@ public sealed class ClaudexLaunchPin : IDisposable {
   public readonly uint Volume;
   public readonly ulong FileId;
   public readonly uint Attributes;
-  private ClaudexLaunchPin(SafeFileHandle handle, Info info) {
+  private ClaudeyLaunchPin(SafeFileHandle handle, Info info) {
     Handle = handle; Volume = info.Volume; FileId = ((ulong)info.IndexHigh << 32) | info.IndexLow; Attributes = info.Attributes;
   }
-  public static ClaudexLaunchPin Open(string path, bool directory) {
+  public static ClaudeyLaunchPin Open(string path, bool directory) {
     const uint GENERIC_READ = 0x80000000, READ_CONTROL = 0x00020000, FILE_READ_ATTRIBUTES = 0x80;
     const uint BACKUP = 0x02000000, OPEN_REPARSE = 0x00200000;
     uint access = directory ? 0 : GENERIC_READ | READ_CONTROL | FILE_READ_ATTRIBUTES;
@@ -258,7 +258,7 @@ public sealed class ClaudexLaunchPin : IDisposable {
     if (handle.IsInvalid) throw new IOException("Launch pin open failed.", new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error()));
     Info info;
     if (!GetFileInformationByHandle(handle, out info)) { int code = Marshal.GetLastWin32Error(); handle.Dispose(); throw new IOException("Launch pin identity failed.", new System.ComponentModel.Win32Exception(code)); }
-    return new ClaudexLaunchPin(handle, info);
+    return new ClaudeyLaunchPin(handle, info);
   }
   public void Dispose() { Handle.Dispose(); }
 }
@@ -293,7 +293,7 @@ function Inspect-HelperDirectory([string]$Target, [object]$Expected) {
   if (-not $item.PSIsContainer -or ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0 -or $null -eq $Expected) { throw 'Helper ancestor.' }
   $pin = $null
   try {
-    $pin = [ClaudexLaunchPin]::Open($item.FullName, $true)
+    $pin = [ClaudeyLaunchPin]::Open($item.FullName, $true)
     if (($pin.Attributes -band 0x400) -ne 0 -or [string]$pin.Volume -ne [string]$Expected.volume -or [string]$pin.FileId -ne [string]$Expected.fileId) { throw 'Helper ancestor identity.' }
     $pins.Add($pin); $pin = $null
   } catch {
@@ -308,7 +308,7 @@ function Inspect-HelperDirectory([string]$Target, [object]$Expected) {
   $item = Get-Item -LiteralPath $Target -Force
   $directory = $Type -eq 'directory'
   if (($directory -and -not $item.PSIsContainer) -or (-not $directory -and $item.PSIsContainer)) { throw 'Type.' }
-  $pin = [ClaudexLaunchPin]::Open($item.FullName, $directory); $pins.Add($pin)
+  $pin = [ClaudeyLaunchPin]::Open($item.FullName, $directory); $pins.Add($pin)
   if (($pin.Attributes -band 0x400) -ne 0) { throw 'Reparse.' }
   $acl = Get-Acl -LiteralPath $item.FullName
   $owner = $acl.GetOwner([Security.Principal.SecurityIdentifier]).Value
@@ -372,7 +372,7 @@ const validatedPlans = new WeakSet();
 const extractedCandidates = new WeakMap();
 
 function unsafe(message = 'The release archive is unsafe.', cause) {
-  return new ClaudexError('ARCHIVE_UNSAFE', message, cause ? { cause } : undefined);
+  return new ClaudeyError('ARCHIVE_UNSAFE', message, cause ? { cause } : undefined);
 }
 
 function checkedInteger(value, label, { positive = false } = {}) {
@@ -864,7 +864,7 @@ async function verifiedArchiveBytes(descriptor, limits, adapter) {
       throw unsafe('The verified archive changed while being read.');
     }
   } catch (cause) {
-    if (cause instanceof ClaudexError) throw cause;
+    if (cause instanceof ClaudeyError) throw cause;
     throw unsafe('The verified archive could not be safely rechecked.', cause);
   }
   if (!sameDigest(digest(bytes), descriptor.sha256)) throw unsafe('The verified archive digest changed.');
@@ -884,7 +884,7 @@ async function canonicalStagingRoot(adapter, archiveStats) {
       || stats.dev !== archiveStats.dev) throw unsafe('The archive staging root is unsafe or on another filesystem.');
     return { canonical, identity: { dev: stats.dev, ino: stats.ino } };
   } catch (cause) {
-    if (cause instanceof ClaudexError) throw cause;
+    if (cause instanceof ClaudeyError) throw cause;
     throw unsafe('The archive staging root could not be verified.', cause);
   }
 }
@@ -939,15 +939,15 @@ export async function validateArchive(descriptor, expectedExecutable, limitOverr
   return plan;
 }
 function capability(message, cause, details) {
-  return new ClaudexError('CAPABILITY_UNSUPPORTED', message, { cause, details });
+  return new ClaudeyError('CAPABILITY_UNSUPPORTED', message, { cause, details });
 }
 
 function prerequisite(message, cause) {
-  return new ClaudexError('PREREQUISITE_MISSING', message, cause ? { cause } : undefined);
+  return new ClaudeyError('PREREQUISITE_MISSING', message, cause ? { cause } : undefined);
 }
 
 function safety(message, cause) {
-  return new ClaudexError('SAFETY_REFUSAL', message, cause ? { cause } : undefined);
+  return new ClaudeyError('SAFETY_REFUSAL', message, cause ? { cause } : undefined);
 }
 
 function helperEntry(entry) {
@@ -1093,7 +1093,7 @@ async function runProcess(command, args, options, adapter) {
   try {
     result = await (adapter.runProcess ?? defaultRunProcess)(command, args, options);
   } catch (cause) {
-    if (cause instanceof ClaudexError) throw cause;
+    if (cause instanceof ClaudeyError) throw cause;
     if (cause?.code === 'PREREQUISITE_MISSING') throw prerequisite('The required archive extractor is unavailable.', cause);
     throw capability('The archive extractor failed safely.', cause);
   }
@@ -1206,7 +1206,7 @@ async function verifyFixedFile(exactPath, fsApi, missingMessage) {
     }
     return canonical;
   } catch (cause) {
-    if (cause instanceof ClaudexError) throw cause;
+    if (cause instanceof ClaudeyError) throw cause;
     if (cause?.code === 'ENOENT') throw prerequisite(missingMessage, cause);
     throw capability('A fixed archive extractor path could not be verified.', cause);
   }
@@ -1245,7 +1245,7 @@ async function assertExactFile(target, expectedIdentity, fsApi) {
     }
     return stats;
   } catch (cause) {
-    if (cause instanceof ClaudexError) throw cause;
+    if (cause instanceof ClaudeyError) throw cause;
     throw safety('A protected archive file could not be rechecked.', cause);
   }
 }
@@ -1296,7 +1296,7 @@ async function recheckArchive(plan, fsApi) {
       throw unsafe('The verified archive changed before extraction.');
     }
   } catch (cause) {
-    if (cause instanceof ClaudexError) throw cause;
+    if (cause instanceof ClaudeyError) throw cause;
     throw unsafe('The verified archive could not be rechecked before extraction.', cause);
   }
 }
@@ -1349,7 +1349,7 @@ async function createStaging(plan, stagingDir, fsApi, adapter) {
 }
 async function defaultPrivateRequest(input, adapter) {
   const fsApi = adapter.fsApi ?? fs;
-  const directoryPath = await fsApi.mkdtemp(path.join(os.tmpdir(), 'claudexctl-archive-request-'));
+  const directoryPath = await fsApi.mkdtemp(path.join(os.tmpdir(), 'claudeyctl-archive-request-'));
   const requestPath = path.join(directoryPath, 'request.json');
   let directoryIdentity;
   let requestIdentity;
@@ -1469,11 +1469,11 @@ async function defaultCreateWindowsLaunchPin(input) {
     stdio: ['pipe', 'pipe', 'pipe'],
     env: {
       ...process.env,
-      CLAUDEX_LAUNCH_POWERSHELL_PATH: input.powershellPath,
-      CLAUDEX_LAUNCH_HELPER_PATH: input.helperPath,
-      CLAUDEX_LAUNCH_POWERSHELL_SHA256: input.powershellSha256,
-      CLAUDEX_LAUNCH_HELPER_SHA256: input.helperSha256,
-      CLAUDEX_LAUNCH_HELPER_ANCESTORS: Buffer.from(JSON.stringify(input.helperAncestors), 'utf8').toString('base64')
+      CLAUDEY_LAUNCH_POWERSHELL_PATH: input.powershellPath,
+      CLAUDEY_LAUNCH_HELPER_PATH: input.helperPath,
+      CLAUDEY_LAUNCH_POWERSHELL_SHA256: input.powershellSha256,
+      CLAUDEY_LAUNCH_HELPER_SHA256: input.helperSha256,
+      CLAUDEY_LAUNCH_HELPER_ANCESTORS: Buffer.from(JSON.stringify(input.helperAncestors), 'utf8').toString('base64')
     }
   });
   child.stdout.setEncoding('utf8');
@@ -1640,14 +1640,14 @@ async function runWindowsExtraction(plan, staging, adapter) {
     await assertExactNativeFile(storage.requestPath, requestIdentity, fsApi);
     const helperEnvironment = {
       ...process.env,
-      CLAUDEX_ARCHIVE_POWERSHELL_SHA256: toolDigests.powershell,
-      CLAUDEX_ARCHIVE_HELPER_PATH: tools.helperPath,
-      CLAUDEX_ARCHIVE_HELPER_SHA256: toolDigests.helper,
-      CLAUDEX_ARCHIVE_LAUNCH_PROOF: Buffer.from(JSON.stringify(launchProof), 'utf8').toString('base64'),
-      CLAUDEX_ARCHIVE_REQUEST_PATH: storage.requestPath,
-      CLAUDEX_ARCHIVE_REQUEST_SHA256: requestSha256,
-      CLAUDEX_ARCHIVE_DESTINATION_VOLUME: staging.nativeIdentity.volume,
-      CLAUDEX_ARCHIVE_DESTINATION_FILE_ID: staging.nativeIdentity.fileId
+      CLAUDEY_ARCHIVE_POWERSHELL_SHA256: toolDigests.powershell,
+      CLAUDEY_ARCHIVE_HELPER_PATH: tools.helperPath,
+      CLAUDEY_ARCHIVE_HELPER_SHA256: toolDigests.helper,
+      CLAUDEY_ARCHIVE_LAUNCH_PROOF: Buffer.from(JSON.stringify(launchProof), 'utf8').toString('base64'),
+      CLAUDEY_ARCHIVE_REQUEST_PATH: storage.requestPath,
+      CLAUDEY_ARCHIVE_REQUEST_SHA256: requestSha256,
+      CLAUDEY_ARCHIVE_DESTINATION_VOLUME: staging.nativeIdentity.volume,
+      CLAUDEY_ARCHIVE_DESTINATION_FILE_ID: staging.nativeIdentity.fileId
     };
     await adapter.afterLaunchIdentityPinBeforeProcessCreate?.({
       plan, stagingDir: staging.target, requestPath: storage.requestPath, tools, toolIdentities,
@@ -1728,12 +1728,12 @@ async function pinWindowsCandidate(record, candidate) {
     shell: false, windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'],
     env: {
       ...process.env,
-      CLAUDEX_CANDIDATE_POWERSHELL_SHA256: powershellSha256,
-      CLAUDEX_CANDIDATE_PATH: record.path,
-      CLAUDEX_CANDIDATE_VOLUME: record.identity.dev,
-      CLAUDEX_CANDIDATE_FILE_ID: record.identity.ino,
-      CLAUDEX_CANDIDATE_SIZE: String(candidate.size),
-      CLAUDEX_CANDIDATE_SHA256: candidate.sha256
+      CLAUDEY_CANDIDATE_POWERSHELL_SHA256: powershellSha256,
+      CLAUDEY_CANDIDATE_PATH: record.path,
+      CLAUDEY_CANDIDATE_VOLUME: record.identity.dev,
+      CLAUDEY_CANDIDATE_FILE_ID: record.identity.ino,
+      CLAUDEY_CANDIDATE_SIZE: String(candidate.size),
+      CLAUDEY_CANDIDATE_SHA256: candidate.sha256
     }
   });
   let stdout = '';
@@ -1750,7 +1750,7 @@ async function pinWindowsCandidate(record, candidate) {
     await new Promise((resolve, reject) => {
       const timer = setTimeout(() => reject(safety('The native candidate pin timed out.')), 5000);
       const inspect = () => {
-        if (stdout === 'CLAUDEX_CANDIDATE_PIN_READY\r\n' || stdout === 'CLAUDEX_CANDIDATE_PIN_READY\n') {
+        if (stdout === 'CLAUDEY_CANDIDATE_PIN_READY\r\n' || stdout === 'CLAUDEY_CANDIDATE_PIN_READY\n') {
           ready = true;
           clearTimeout(timer);
           resolve();
@@ -1988,7 +1988,7 @@ export async function withValidatedExtractedCandidate(candidate, consumer, adapt
       || !sameExactIdentity(callbackPath, record.identity)) throw unsafe('The extracted candidate changed during scoped use.');
     return result;
   } catch (cause) {
-    if (cause instanceof ClaudexError) throw cause;
+    if (cause instanceof ClaudeyError) throw cause;
     throw unsafe('The extracted candidate could not be used through a pinned scope.', cause);
   } finally {
     await handle?.close();
@@ -2031,7 +2031,7 @@ export async function extractValidatedArchive(plan, stagingDir, adapter = {}) {
     await adapter.beforePostWalk?.({ plan, stagingDir: staging.target });
     return await walkExtractedTree(plan, staging, adapter);
   } catch (cause) {
-    if (cause instanceof ClaudexError && cause.details?.exitUnconfirmed) {
+    if (cause instanceof ClaudeyError && cause.details?.exitUnconfirmed) {
       cause.details = { ...cause.details, stagingRetained: true };
       throw cause;
     }
@@ -2046,7 +2046,7 @@ export async function extractValidatedArchive(plan, stagingDir, adapter = {}) {
       retainedStagingPath: cleanup.retainedPath,
       retainedStagingIdentity: cleanup.retainedIdentity
     } : {};
-    if (cause instanceof ClaudexError) {
+    if (cause instanceof ClaudeyError) {
       if (cleanup?.retained) cause.details = { ...cause.details, ...retention };
       throw cause;
     }

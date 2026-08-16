@@ -34,7 +34,7 @@ after(() => fs.rm(fixtureRoot, { recursive: true, force: true }));
 const CLI = await resolveVerifiedExecutable({
   command: 'cliproxyapi', platform: 'win32', candidates: [{ path: process.execPath }], adapter: executableAdapter()
 });
-const HELP = `Usage of CLIProxyAPI\n  -antigravity-login\n  -codex-device-login\n  -codex-login\n  -config string\n  -no-browser\n  -oauth-callback-port int\n`;
+const HELP = `Usage of CLIProxyAPI\n  -antigravity-login\n  -codex-device-login\n  -codex-login\n  -config string\n  -grok-login\n  -no-browser\n  -oauth-callback-port int\n  -xai-login\n`;
 
 async function capabilities(calls = [], version = '7.2.130') {
   return probeAuthCapabilities({
@@ -71,7 +71,8 @@ test('probes exact installed version and help and returns a frozen, nonforgeable
   assert.equal(Object.isFrozen(descriptor), true);
   assert.deepEqual(descriptor.providers, {
     codex: { browser: true, deviceCode: true, noBrowser: true, callbackPort: true, defaultCallbackPort: 1455 },
-    antigravity: { browser: true, noBrowser: true, callbackPort: true, defaultCallbackPort: 51121 }
+    antigravity: { browser: true, noBrowser: true, callbackPort: true, defaultCallbackPort: 51121 },
+    grok: { browser: true, deviceCode: true, noBrowser: true, callbackPort: true, defaultCallbackPort: 1456, preferGrokLogin: true }
   });
   assert.deepEqual(calls.map(({ args, shell, stdin, env, timeoutMs, maxStdoutBytes, maxStderrBytes }) => ({ args, shell, stdin, env, timeoutMs, maxStdoutBytes, maxStderrBytes })), [
     { args: ['--version'], shell: false, stdin: null, env: {}, timeoutMs: 3_000, maxStdoutBytes: 16_384, maxStderrBytes: 16_384 },
@@ -115,17 +116,13 @@ test('rejects old, malformed, noisy, and nonzero version probes before reading a
   }
 });
 
-test('newer reviewed-help versions require an explicit callback port instead of assuming baseline defaults', async () => {
+test('newer reviewed-help versions keep documented callback defaults when the flag is still present', async () => {
   const descriptor = await capabilities([], '7.2.131');
-  assert.equal(descriptor.providers.codex.defaultCallbackPort, null);
-  let touched = false;
-  await assert.rejects(authenticateProvider(authOptions(descriptor, {
-    inspectCallbackPort: async () => { touched = true; return { state: 'free' }; },
-    runInteractive: async () => { touched = true; return { code: 0, signal: null }; }
-  })), (error) => error.code === 'CAPABILITY_UNSUPPORTED');
-  assert.equal(touched, false);
-  const explicit = await authenticateProvider(authOptions(descriptor, { callbackPort: 24567 }));
-  assert.equal(explicit.authenticated, true);
+  assert.equal(descriptor.providers.codex.defaultCallbackPort, 1455);
+  assert.equal(descriptor.providers.antigravity.defaultCallbackPort, 51121);
+  assert.equal(descriptor.providers.grok.defaultCallbackPort, 1456);
+  const result = await authenticateProvider(authOptions(descriptor));
+  assert.equal(result.authenticated, true);
 });
 
 test('constructs only fixed supported provider argv and checks effective callback ports before spawn', async () => {
@@ -135,7 +132,10 @@ test('constructs only fixed supported provider argv and checks effective callbac
     { provider: 'codex', mode: 'device-code', callbackPort: undefined, port: null, suffix: ['--codex-device-login'] },
     { provider: 'codex', mode: 'no-browser', callbackPort: 23456, port: 23456, suffix: ['--codex-login', '--no-browser', '--oauth-callback-port', '23456'] },
     { provider: 'antigravity', mode: 'browser', callbackPort: undefined, port: 51121, suffix: ['--antigravity-login'] },
-    { provider: 'antigravity', mode: 'no-browser', callbackPort: 34567, port: 34567, suffix: ['--antigravity-login', '--no-browser', '--oauth-callback-port', '34567'] }
+    { provider: 'antigravity', mode: 'no-browser', callbackPort: 34567, port: 34567, suffix: ['--antigravity-login', '--no-browser', '--oauth-callback-port', '34567'] },
+    { provider: 'grok', mode: 'browser', callbackPort: undefined, port: 1456, suffix: ['--grok-login'] },
+    { provider: 'grok', mode: 'device-code', callbackPort: undefined, port: null, suffix: ['--grok-login'] },
+    { provider: 'grok', mode: 'no-browser', callbackPort: 24567, port: 24567, suffix: ['--grok-login', '--no-browser', '--oauth-callback-port', '24567'] }
   ];
   for (const item of cases) {
     const inspected = [];

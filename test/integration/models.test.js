@@ -41,7 +41,8 @@ test('models all preserves a successful provider while marking an unauthenticate
   assert.equal(result.status, 'partial');
   assert.deepEqual(result.providers.map(({ provider, status, code }) => ({ provider, status, code })), [
     { provider: 'codex', status: 'available', code: undefined },
-    { provider: 'antigravity', status: 'unavailable', code: 'AUTH_REQUIRED' }
+    { provider: 'antigravity', status: 'unavailable', code: 'AUTH_REQUIRED' },
+    { provider: 'grok', status: 'unavailable', code: 'AUTH_REQUIRED' }
   ]);
 });
 

@@ -35,7 +35,7 @@ test('doctor preserves exact remediation commands in bounded findings and exits 
     assert.equal(error.code, 'GATEWAY_UNHEALTHY');
     assert.equal(error.details.doctor.healthy, false);
     assert.deepEqual(error.details.doctor.findings, [{
-      name: 'gateway', status: 'error', message: 'The gateway is unhealthy.', remediation: 'claudexctl restart'
+      name: 'gateway', status: 'error', message: 'The gateway is unhealthy.', remediation: 'claudey restart'
     }]);
     return true;
   });

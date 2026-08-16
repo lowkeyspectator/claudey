@@ -2,17 +2,17 @@ import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 
-import { ClaudexError } from './errors.js';
+import { ClaudeyError } from './errors.js';
 import { assertContainedNoLinks } from './fs-safe.js';
 
 const noncePattern = /^[A-Za-z0-9_-]{43}$/;
 
-function lockBusy(message = 'Another Claudex operation owns the installation lock.') {
-  return new ClaudexError('LOCK_BUSY', message);
+function lockBusy(message = 'Another Claudey operation owns the installation lock.') {
+  return new ClaudeyError('LOCK_BUSY', message);
 }
 
 function safetyRefusal(message) {
-  return new ClaudexError('SAFETY_REFUSAL', message);
+  return new ClaudeyError('SAFETY_REFUSAL', message);
 }
 
 function pathApiFor(platform) {
@@ -127,7 +127,7 @@ export async function openExclusive({
     const existing = await readRecord(lockPath, fsApi);
     if (!existing || !await isStale(existing, { now, staleAfterMs, inspectOwner })) throw lockBusy();
 
-    const quarantineName = `.claudexctl-stale-lock-${crypto.randomUUID()}`;
+    const quarantineName = `.claudeyctl-stale-lock-${crypto.randomUUID()}`;
     const quarantinePath = pathApi.join(parent, quarantineName);
     const quarantineChild = pathApi.join(pathApi.relative(root, parent), quarantineName);
     await assertContainedNoLinks({ root, child, platform }, safetyDeps);

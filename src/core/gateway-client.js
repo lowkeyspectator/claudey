@@ -1,6 +1,6 @@
 import http from 'node:http';
 
-import { ClaudexError } from './errors.js';
+import { ClaudeyError } from './errors.js';
 import { isSecret } from './secrets.js';
 import { validateAuthenticatedModelCatalog } from '../providers/capabilities.js';
 
@@ -8,7 +8,7 @@ const DEFAULT_TIMEOUT_MS = 3_000;
 const DEFAULT_MAX_RESPONSE_BYTES = 64 * 1024;
 
 function unhealthy() {
-  return new ClaudexError('GATEWAY_UNHEALTHY', 'The managed gateway did not provide authenticated readiness.');
+  return new ClaudeyError('GATEWAY_UNHEALTHY', 'The managed gateway did not provide authenticated readiness.');
 }
 
 function checkedInteger(value, minimum, maximum) {

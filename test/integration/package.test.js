@@ -44,7 +44,7 @@ test('manager payload is byte-deterministic, sorted, timestamp-free, and contain
   assert.equal(entries.every(({ mtime }) => mtime === 0), true);
   assert.equal(first.archiveBytes[9], 255);
   for (const required of ['.claude-plugin/marketplace.json', 'LICENSE', 'package.json', 'bin/claudex',
-    'bin/claude-agy', 'bin/claudexctl', 'bin/claudexctl.js', 'plugins/cursor-agent/.mcp.json',
+    'bin/claude-agy', 'bin/claude-grok', 'bin/claudey', 'bin/claudexctl', 'bin/claudexctl.js', 'plugins/cursor-agent/.mcp.json',
     'scripts/windows/archive-helper.ps1', 'src/cli/main.js']) assert.equal(names.includes(required), true, required);
   assert.equal(names.some((name) => /^(?:docs|test|schemas|\.superpowers|\.git)(?:\/|$)/u.test(name)), false);
   assert.equal(names.some((name) => name === 'node_modules' || name.startsWith('node_modules/')), false);
@@ -72,7 +72,7 @@ test('manager payload is byte-deterministic, sorted, timestamp-free, and contain
     cwd: extracted, encoding: 'utf8', env: { PATH: process.env.PATH }
   });
   assert.equal(help.status, 0, help.stderr);
-  assert.match(help.stdout, /claudexctl setup/);
+  assert.match(help.stdout, /claudey setup/);
 });
 
 test('packager rejects undeclared runtime files, secret canaries, runtime dependencies, and hostile metadata before output', async (t) => {

@@ -1,10 +1,10 @@
 import crypto from 'node:crypto';
 
-import { ClaudexError } from './errors.js';
+import { ClaudeyError } from './errors.js';
 import { advanceJournal, assertJournal } from './journal.js';
 
 function safety(message) {
-  return new ClaudexError('SAFETY_REFUSAL', message);
+  return new ClaudeyError('SAFETY_REFUSAL', message);
 }
 
 function requireFunction(value, name) {

@@ -12,7 +12,7 @@ const SHA256 = /^[0-9a-f]{64}$/u;
 const NAME = /^[A-Za-z0-9][A-Za-z0-9._-]{0,255}$/u;
 const TARGETS = Object.freeze(['windows-x64', 'windows-arm64', 'darwin-x64', 'darwin-arm64', 'linux-x64', 'linux-arm64']);
 const ROOT_FILES = new Set(['LICENSE', 'package.json']);
-const BIN_FILES = new Set(['bin/claudex', 'bin/claude-agy', 'bin/claudexctl', 'bin/claudexctl.js']);
+const BIN_FILES = new Set(['bin/claudex', 'bin/claude-agy', 'bin/claude-grok', 'bin/claudey', 'bin/claudexctl', 'bin/claudexctl.js', 'bin/claudeyctl', 'bin/claudeyctl.js', 'bin/claude-codex']);
 const WINDOWS_HELPERS = new Set([
   'scripts/windows/archive-helper.ps1', 'scripts/windows/process-helper.ps1',
   'scripts/windows/request-dacl-helper.ps1', 'scripts/windows/security-helper.ps1'
@@ -24,10 +24,12 @@ const PLUGIN_FILES = new Set([
 const RUNTIME_SOURCE_FILES = new Set([
   'src/cli/commands/auth.js', 'src/cli/commands/config.js', 'src/cli/commands/cursor.js',
   'src/cli/commands/doctor.js', 'src/cli/commands/install.js', 'src/cli/commands/lifecycle.js',
-  'src/cli/commands/models.js', 'src/cli/commands/rollback.js', 'src/cli/commands/setup.js',
+  'src/cli/commands/models.js', 'src/cli/commands/onboard.js', 'src/cli/commands/rollback.js', 'src/cli/commands/setup.js',
   'src/cli/commands/status.js', 'src/cli/commands/uninstall.js', 'src/cli/commands/update.js',
-  'src/cli/launchers/claude-agy.js', 'src/cli/launchers/claudex.js', 'src/cli/main.js',
-  'src/cli/output.js', 'src/cli/parse.js', 'src/core/activation.js', 'src/core/archive.js',
+  'src/cli/launchers/claude-agy.js', 'src/cli/launchers/claude-grok.js', 'src/cli/launchers/claudey.js', 'src/cli/launchers/claude-codex.js', 'src/cli/launchers/claudex.js',
+  'src/cli/first-run.js',
+  'src/cli/main.js', 'src/cli/output.js', 'src/cli/parse.js', 'src/cli/runtime.js', 'src/core/activation.js',
+  'src/core/archive.js', 'src/core/http.js',
   'src/core/checksum.js', 'src/core/config.js', 'src/core/errors.js', 'src/core/executable.js',
   'src/core/fs-safe.js', 'src/core/gateway-client.js', 'src/core/journal.js', 'src/core/lifecycle.js',
   'src/core/limits.js', 'src/core/lock.js', 'src/core/manifest.js', 'src/core/path-mutation.js',
@@ -39,7 +41,8 @@ const RUNTIME_SOURCE_FILES = new Set([
   'src/cursor/runner.js', 'src/cursor/service.js', 'src/cursor/snapshot.js', 'src/cursor/worktree.js',
   'src/platform/asset-map.js', 'src/platform/detect.js', 'src/platform/index.js', 'src/platform/linux.js',
   'src/platform/macos.js', 'src/platform/posix.js', 'src/platform/windows.js', 'src/platform/windows-helpers.js',
-  'src/providers/auth.js', 'src/providers/capabilities.js', 'src/providers/claude.js', 'src/providers/models.js'
+  'src/providers/auth.js', 'src/providers/capabilities.js', 'src/providers/catalog.js', 'src/providers/claude.js',
+  'src/providers/models.js', 'src/providers/picker-gateway.js', 'src/providers/usage.js'
 ]);
 const REQUIRED = Object.freeze([...ROOT_FILES, ...BIN_FILES, ...WINDOWS_HELPERS, ...PLUGIN_FILES,
   ...RUNTIME_SOURCE_FILES, '.claude-plugin/marketplace.json'].sort());

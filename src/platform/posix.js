@@ -1,10 +1,10 @@
 import fs from 'node:fs/promises';
 
-import { ClaudexError } from '../core/errors.js';
+import { ClaudeyError } from '../core/errors.js';
 import { lstatNoFollow } from '../core/fs-safe.js';
 
 function safetyRefusal(message) {
-  return new ClaudexError('SAFETY_REFUSAL', message);
+  return new ClaudeyError('SAFETY_REFUSAL', message);
 }
 
 export async function assertPosixProtection({ target, type, mode }, { lstat = fs.lstat } = {}) {

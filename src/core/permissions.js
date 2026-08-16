@@ -2,13 +2,13 @@ import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 
-import { ClaudexError } from './errors.js';
+import { ClaudeyError } from './errors.js';
 import { assertContainedNoLinks } from './fs-safe.js';
 import { assertPosixProtection } from '../platform/posix.js';
 import { assertWindowsDacl, runWindowsSecurityHelper } from '../platform/windows-helpers.js';
 
 function safetyRefusal(message) {
-  return new ClaudexError('SAFETY_REFUSAL', message);
+  return new ClaudeyError('SAFETY_REFUSAL', message);
 }
 
 function pathApiFor(platform) {
@@ -49,7 +49,7 @@ export async function atomicReplace({ root, child, bytes, mode }, {
   await fsApi.mkdir(parent, { recursive: true, mode: 0o700 });
   await assertContainedNoLinks({ root, child, platform }, safetyDeps);
 
-  const temporaryName = `.claudexctl-${crypto.randomUUID()}.tmp`;
+  const temporaryName = `.claudeyctl-${crypto.randomUUID()}.tmp`;
   const temporaryChild = pathApi.join(relativeChild(root, parent, platform), temporaryName);
   const temporary = pathApi.join(parent, temporaryName);
   let handle;

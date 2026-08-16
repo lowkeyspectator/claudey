@@ -1,4 +1,4 @@
-import { ClaudexError } from '../core/errors.js';
+import { ClaudeyError } from '../core/errors.js';
 
 const ENVIRONMENTS = new WeakSet();
 const WINDOWS = Object.freeze([
@@ -11,7 +11,7 @@ const POSIX = Object.freeze([
 ]);
 
 function safety() {
-  return new ClaudexError('SAFETY_REFUSAL', 'The Cursor child environment could not be constructed safely.');
+  return new ClaudeyError('SAFETY_REFUSAL', 'The Cursor child environment could not be constructed safely.');
 }
 
 export function buildCursorEnvironment(parentEnvironment = {}, { platform = process.platform } = {}) {

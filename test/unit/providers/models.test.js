@@ -23,7 +23,8 @@ function context(overrides = {}) {
         return { object: 'list', data: [
           { id: 'zeta', object: 'model', created: 2, owned_by: 'codex' },
           { id: 'alpha', object: 'model', created: 1, owned_by: 'codex' },
-          { id: 'agy-pro', object: 'model', created: 3, owned_by: 'antigravity' }
+          { id: 'agy-pro', object: 'model', created: 3, owned_by: 'antigravity' },
+          { id: 'grok-4.5', object: 'model', created: 4, owned_by: 'xai' }
         ] };
       },
       ...overrides
@@ -44,6 +45,47 @@ test('ensures the owned gateway, fetches an authenticated strict catalog, filter
   });
   assert.equal(fixture.calls[0], 'healthy');
   assert.deepEqual(fixture.calls[1].request, { host: '127.0.0.1', port: 8317, token: TOKEN, allowPreAuthEmpty: true, signal: undefined });
+});
+
+test('retries an empty provider catalog until Antigravity finishes async registration', async () => {
+  let calls = 0;
+  const fixture = context({
+    modelReadyWaitMs: 1_000,
+    sleep: async () => {},
+    requestModels: async () => {
+      calls += 1;
+      if (calls < 3) {
+        return { object: 'list', data: [{ id: 'gpt', object: 'model', created: 1, owned_by: 'openai' }] };
+      }
+      return { object: 'list', data: [
+        { id: 'gpt', object: 'model', created: 1, owned_by: 'openai' },
+        { id: 'gemini-3-flash', object: 'model', created: 2, owned_by: 'antigravity' }
+      ] };
+    }
+  });
+  const result = await listProviderModels('antigravity', fixture.value);
+  assert.equal(result.models[0].id, 'gemini-3-flash');
+  assert.equal(calls, 3);
+});
+
+test('maps live Google ownership onto the antigravity provider', async () => {
+  const fixture = context({
+    requestModels: async () => ({ object: 'list', data: [
+      { id: 'gemini-3-flash', object: 'model', created: 2, owned_by: 'google' }
+    ] })
+  });
+  const result = await listProviderModels('antigravity', fixture.value);
+  assert.deepEqual(result.models, [{ id: 'gemini-3-flash', object: 'model', created: 2, owned_by: 'antigravity' }]);
+});
+
+test('maps live xAI ownership onto the grok provider without guessing from the model name', async () => {
+  const fixture = context();
+  const result = await listProviderModels('grok', fixture.value);
+  assert.deepEqual(result, {
+    provider: 'grok',
+    status: 'available',
+    models: [{ id: 'grok-4.5', object: 'model', created: 4, owned_by: 'grok' }]
+  });
 });
 
 test('rejects malformed catalogs, ambiguous attribution, duplicates, and provider-name heuristics', async () => {
@@ -94,7 +136,8 @@ test('models all reports every provider and succeeds when at least one provider 
     status: 'partial',
     providers: [
       { provider: 'codex', status: 'available', models: [{ id: 'gpt', object: 'model', created: 1, owned_by: 'codex' }] },
-      { provider: 'antigravity', status: 'unavailable', code: 'AUTH_REQUIRED', models: [] }
+      { provider: 'antigravity', status: 'unavailable', code: 'AUTH_REQUIRED', models: [] },
+      { provider: 'grok', status: 'unavailable', code: 'AUTH_REQUIRED', models: [] }
     ]
   });
 });

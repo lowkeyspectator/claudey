@@ -10,7 +10,7 @@ const ALLOWED_ENVIRONMENT = new Set([
 ]);
 
 function refusal() {
-  const error = new Error('The Claudex Cursor plugin bootstrap is unsafe.');
+  const error = new Error('The Claudey Cursor plugin bootstrap is unsafe.');
   error.code = 'SAFETY_REFUSAL';
   return error;
 }
@@ -130,7 +130,7 @@ async function linkFreeCanonical(candidate) {
 }
 
 async function defaultManager(pluginRoot) {
-  const raw = JSON.parse(await fs.readFile(path.join(pluginRoot, '.claudex-owner.json'), 'utf8'));
+  const raw = JSON.parse(await fs.readFile(path.join(pluginRoot, '.claudey-owner.json'), 'utf8'));
   if (!exact(raw, ['schemaVersion', 'managerPath', 'managerRoot', 'installationId']) || raw.schemaVersion !== 1) throw refusal();
   return { nodePath: process.execPath, managerPath: raw.managerPath, managerRoot: raw.managerRoot,
     installationId: raw.installationId };
@@ -189,7 +189,7 @@ async function main() {
 
 if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) {
   main().catch(() => {
-    process.stderr.write('error[SAFETY_REFUSAL]: The Claudex Cursor plugin could not start safely.\n');
+    process.stderr.write('error[SAFETY_REFUSAL]: The Claudey Cursor plugin could not start safely.\n');
     process.exitCode = 7;
   });
 }

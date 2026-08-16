@@ -196,6 +196,7 @@ else
 fi
 cldx_user_bin="$HOME/.local/bin"
 cldx_target="$cldx_platform-$cldx_arch"
+cldx_project_dir=$(cd "$(dirname "$0")" && pwd)
 
 export CLDX_PROJECT_ORIGIN="$PROJECT_ORIGIN"
 export CLDX_MANAGER_VERSION="$manager_version"
@@ -207,6 +208,7 @@ export CLDX_TARGET="$cldx_target"
 export CLDX_MANAGER_ROOT="$cldx_manager_root"
 export CLDX_STATE_ROOT="$cldx_state_root"
 export CLDX_USER_BIN="$cldx_user_bin"
+export CLDX_PROJECT_DIR="$cldx_project_dir"
 
 set +e
 "$node_path" --input-type=module - <<'NODE'
@@ -397,7 +399,7 @@ function parseArchive(compressed) {
     offset = nextOffset;
   }
   if (entries.length < 1 || data.length - offset < 1024 || !data.subarray(offset).every((byte) => byte === 0)) fail('ARCHIVE_UNSAFE');
-  for (const required of ['LICENSE', 'bin/claude-agy', 'bin/claudex', 'bin/claudexctl', 'bin/claudexctl.js', 'package.json']) {
+  for (const required of ['LICENSE', 'bin/claude-agy', 'bin/claude-grok', 'bin/claudey', 'bin/claudex', 'bin/claudexctl', 'bin/claudexctl.js', 'package.json']) {
     if (!entries.some((entry) => entry.path === required)) fail('ARCHIVE_UNSAFE');
   }
   return entries;
@@ -542,7 +544,7 @@ async function captureLaunchers(stage) {
   const captureOutput = path.join(capture, 'capture.jsonl');
   const source = "import fs from 'node:fs'; fs.appendFileSync(process.env.CLDX_CAPTURE_FILE, JSON.stringify(process.argv.slice(2)) + '\\n');\n";
   await fs.writeFile(captureManager, source, { flag: 'wx', mode: 0o600 });
-  const profiles = [['claudexctl', []], ['claudex', ['launcher', 'claudex']], ['claude-agy', ['launcher', 'claude-agy']]];
+  const profiles = [['claudexctl', []], ['claudex', ['launcher', 'claudex']], ['claude-agy', ['launcher', 'claude-agy']], ['claude-grok', ['launcher', 'claude-grok']], ['claudey', ['launcher', 'claudey']]];
   const hostile = ['', 'two words', 'quote"value', "single'value", '$()', '%PATH%', '--flag', 'line\nbreak'];
   for (const [name, profile] of profiles) {
     const target = path.join(capture, name);
@@ -553,8 +555,8 @@ async function captureLaunchers(stage) {
     if (result.error || result.status !== 0 || result.signal !== null || result.stdout !== '' || result.stderr !== '') fail();
   }
   const rows = (await fs.readFile(captureOutput, 'utf8')).trim().split('\n').map(JSON.parse);
-  if (rows.length !== 3 || JSON.stringify(rows) !== JSON.stringify([
-    hostile, ['launcher', 'claudex', ...hostile], ['launcher', 'claude-agy', ...hostile]
+  if (rows.length !== 5 || JSON.stringify(rows) !== JSON.stringify([
+    hostile, ['launcher', 'claudex', ...hostile], ['launcher', 'claude-agy', ...hostile], ['launcher', 'claude-grok', ...hostile], ['launcher', 'claudey', ...hostile]
   ])) fail();
   await fs.rm(capture, { recursive: true });
 }
@@ -754,7 +756,8 @@ async function installLaunchers(managerRoot, userBin) {
   const created = [];
   try {
     for (const [name, profile] of [['claudexctl', []], ['claudex', ['launcher', 'claudex']],
-      ['claude-agy', ['launcher', 'claude-agy']]]) {
+      ['claude-agy', ['launcher', 'claude-agy']], ['claude-grok', ['launcher', 'claude-grok']],
+      ['claudey', ['launcher', 'claudey']]]) {
       const target = path.join(userBin, name); const bytes = launcherBytes(process.execPath, manager, profile);
       if (await installLauncher(target, bytes)) created.push({ target, bytes });
     }
@@ -798,17 +801,29 @@ async function main() {
   const manifestUrl = requestedVersion
     ? `${releaseBase}releases/download/v${requestedVersion}/project-manifest.json`
     : `${releaseBase}releases/latest/download/project-manifest.json`;
+  const projectDir = process.env.CLDX_PROJECT_DIR ? path.resolve(process.env.CLDX_PROJECT_DIR) : process.cwd();
   let manifestBytes;
   let fromLocal = false;
   try {
     manifestBytes = await download(manifestUrl, MAX_MANIFEST, projectOrigin);
   } catch (error) {
-    const localManifest = path.resolve(process.cwd(), 'dist', 'project-manifest.json');
+    const localManifest = path.join(projectDir, 'dist', 'project-manifest.json');
     try {
       manifestBytes = await readRegular(localManifest, MAX_MANIFEST);
       fromLocal = true;
     } catch {
-      throw error;
+      try {
+        const buildScript = path.join(projectDir, 'scripts', 'build-local-release.mjs');
+        const res = spawnSync(process.execPath, [buildScript], { cwd: projectDir, encoding: 'utf8' });
+        if (res.status === 0) {
+          manifestBytes = await readRegular(localManifest, MAX_MANIFEST);
+          fromLocal = true;
+        } else {
+          throw error;
+        }
+      } catch {
+        throw error;
+      }
     }
   }
   let manifest;
@@ -816,7 +831,7 @@ async function main() {
   catch (error) { if (error instanceof BootstrapFailure) throw error; fail('CHECKSUM_MISMATCH'); }
   let payload;
   if (fromLocal) {
-    payload = await readRegular(path.resolve(process.cwd(), 'dist', manifest.payload.name), MAX_PAYLOAD);
+    payload = await readRegular(path.join(projectDir, 'dist', manifest.payload.name), MAX_PAYLOAD);
   } else {
     const payloadUrl = `${releaseBase}releases/download/v${manifest.managerVersion}/${manifest.payload.name}`;
     payload = await download(payloadUrl, MAX_PAYLOAD, projectOrigin);

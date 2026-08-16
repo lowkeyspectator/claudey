@@ -3,7 +3,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { TextDecoder } from 'node:util';
 
-import { ClaudexError } from './errors.js';
+import { ClaudeyError } from './errors.js';
 
 const MAX_SHIM_BYTES = 4_096;
 const KNOWN_NPM_ENTRIES = Object.freeze({
@@ -15,11 +15,12 @@ const KNOWN_NPM_ENTRIES = Object.freeze({
 const KNOWN_NATIVE_COMMANDS = new Set(['claude', 'cursor-agent', 'agent', 'CLIProxyAPI', 'cliproxyapi', 'node', 'git', 'tar', 'powershell', 'taskkill']);
 const REQUIRED_ADAPTER_METHODS = Object.freeze(['realpath', 'lstat', 'stat', 'openNoFollow']);
 const STABLE_FIELDS = Object.freeze(['dev', 'ino', 'birthtimeMs']);
-const EXACT_LEAF_FIELDS = Object.freeze(['mode', 'size', 'mtimeMs', 'ctimeMs']);
+const EXACT_LEAF_FIELDS = Object.freeze(['mode', 'size', 'mtimeMs']);
+const ALL_STAT_FIELDS = Object.freeze([...STABLE_FIELDS, ...EXACT_LEAF_FIELDS, 'ctimeMs']);
 const PRIVATE_EXECUTABLES = new WeakMap();
 
 function refusal(message, cause) {
-  throw new ClaudexError('PREREQUISITE_MISSING', message, { cause });
+  throw new ClaudeyError('PREREQUISITE_MISSING', message, { cause });
 }
 
 function deeplyFreeze(value, seen = new Set()) {
@@ -76,7 +77,7 @@ function assertStats(stats, platform) {
   if (!stats || typeof stats !== 'object' || typeof stats.isFile !== 'function' || typeof stats.isDirectory !== 'function' || typeof stats.isSymbolicLink !== 'function') {
     refusal('Executable filesystem metadata is invalid');
   }
-  for (const field of [...STABLE_FIELDS, ...EXACT_LEAF_FIELDS]) numericIdentity(stats[field], field);
+  for (const field of ALL_STAT_FIELDS) numericIdentity(stats[field], field);
   if (platform === 'win32' && (!Number.isSafeInteger(stats.reparseTag) || stats.reparseTag !== 0)) refusal('Windows executable reparse tag is missing or unsafe');
   if (stats.isSymbolicLink() || stats.reparse === true || stats.isReparsePoint === true) refusal('Executable path traverses a link or reparse point');
   const file = stats.isFile();
@@ -146,7 +147,7 @@ async function inspectLeafHandle(adapter, target, leafType, readBytes, platform)
     }
     return { canonical: canonicalAfterOpen, stats: handleStats, bytes };
   } catch (error) {
-    if (error instanceof ClaudexError) throw error;
+    if (error instanceof ClaudeyError) throw error;
     refusal('Executable no-follow inspection failed', error);
   } finally {
     if (handle && typeof handle.close === 'function') {
@@ -264,7 +265,7 @@ export async function resolveVerifiedExecutable({ command, platform, candidates,
     argsPrefix: [...frozen.argsPrefix]
   }));
   if (expectedIdentity !== undefined && !identityMatches(frozen.identity, expectedIdentity)) {
-    throw new ClaudexError('PROCESS_IDENTITY_MISMATCH', 'Executable identity changed');
+    throw new ClaudeyError('PROCESS_IDENTITY_MISMATCH', 'Executable identity changed');
   }
   return frozen;
 }

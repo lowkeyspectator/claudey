@@ -1,4 +1,4 @@
-import { ClaudexError } from '../core/errors.js';
+import { ClaudeyError } from '../core/errors.js';
 import { cursorCapabilitiesMatchBinding, isCursorCapabilitySet } from './capabilities.js';
 import { isCursorExecutableBinding, revalidateCursorExecutableBinding } from './executable.js';
 
@@ -8,11 +8,11 @@ const MAX_OUTPUT_BYTES = 16_384;
 const MODEL_ID = /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,255}$/u;
 
 function capabilityFailure() {
-  return new ClaudexError('CAPABILITY_UNSUPPORTED', 'The live Cursor model catalog is unavailable.');
+  return new ClaudeyError('CAPABILITY_UNSUPPORTED', 'The live Cursor model catalog is unavailable.');
 }
 
 function safety() {
-  return new ClaudexError('SAFETY_REFUSAL', 'The Cursor model selection could not be verified.');
+  return new ClaudeyError('SAFETY_REFUSAL', 'The Cursor model selection could not be verified.');
 }
 
 function exact(value, keys) {
@@ -62,7 +62,7 @@ export async function listCursorModels(binding, capabilities, { invoke, revalida
 export function requireCursorModel(catalog, requested) {
   if (!catalog || typeof catalog !== 'object' || !CATALOGS.has(catalog)) throw safety();
   if (typeof requested !== 'string' || !MODEL_ID.test(requested) || !catalog.models.includes(requested)) {
-    throw new ClaudexError('MODEL_NOT_FOUND', 'The requested model is not available from Cursor Agent.');
+    throw new ClaudeyError('MODEL_NOT_FOUND', 'The requested model is not available from Cursor Agent.');
   }
   return requested;
 }

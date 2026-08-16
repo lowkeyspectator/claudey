@@ -49,13 +49,13 @@ test('resolves only an enumerated full ref or full object ID and peels to an exa
 
 test('creates only a fixed generated worktree/branch with resolved commit after -- and no caller text', async () => {
   const f = fixture({
-    [`worktree add -b claudex/cursor-abc -- /home/casey/worktrees/abc ${COMMIT}`]: {
-      code: 0, stdout: 'HEAD is now at aaaaaaa fixture\n', stderr: 'Preparing worktree (new branch \'claudex/cursor-abc\')\n'
+    [`worktree add -b claudey/cursor-abc -- /home/casey/worktrees/abc ${COMMIT}`]: {
+      code: 0, stdout: 'HEAD is now at aaaaaaa fixture\n', stderr: 'Preparing worktree (new branch \'claudey/cursor-abc\')\n'
     }
   });
-  await f.git.addWorktree({ branch: 'claudex/cursor-abc', path: '/home/casey/worktrees/abc', commit: COMMIT });
+  await f.git.addWorktree({ branch: 'claudey/cursor-abc', path: '/home/casey/worktrees/abc', commit: COMMIT });
   const call = f.calls.at(-1);
-  assert.deepEqual(call.args, ['worktree', 'add', '-b', 'claudex/cursor-abc', '--', '/home/casey/worktrees/abc', COMMIT]);
+  assert.deepEqual(call.args, ['worktree', 'add', '-b', 'claudey/cursor-abc', '--', '/home/casey/worktrees/abc', COMMIT]);
 });
 
 test('fails closed on malformed refs, non-commit objects, repository identity changes, and hostile diagnostics', async () => {

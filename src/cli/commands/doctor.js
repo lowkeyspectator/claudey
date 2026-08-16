@@ -1,4 +1,4 @@
-import { ClaudexError } from '../../core/errors.js';
+import { ClaudeyError } from '../../core/errors.js';
 
 export const DOCTOR_CHECKS = Object.freeze([
   'platform', 'node', 'claude', 'git', 'manifest', 'config', 'permissions', 'token', 'gateway',
@@ -7,14 +7,14 @@ export const DOCTOR_CHECKS = Object.freeze([
 
 const FINDINGS = Object.freeze({
   PLATFORM_UNSUPPORTED: ['The platform is unsupported.', null],
-  PREREQUISITE_MISSING: ['A required executable or runtime is missing.', 'claudexctl setup'],
-  CONFIG_MODIFIED: ['The managed configuration no longer matches its recorded identity.', 'claudexctl setup'],
-  PORT_IN_USE: ['The configured loopback port is occupied by an unrelated listener.', 'claudexctl config set port 8317'],
-  GATEWAY_UNHEALTHY: ['The gateway is unhealthy.', 'claudexctl restart'],
-  PROCESS_IDENTITY_MISMATCH: ['The gateway process identity is stale or unsafe.', 'claudexctl stop'],
-  AUTH_REQUIRED: ['A provider is not authenticated.', 'claudexctl auth codex'],
-  MCP_OWNERSHIP_COLLISION: ['The Cursor plugin registration has an ownership collision.', 'claudexctl cursor disable --scope local'],
-  SAFETY_REFUSAL: ['A managed identity or permission boundary is unsafe.', 'claudexctl setup']
+  PREREQUISITE_MISSING: ['A required executable or runtime is missing.', 'claudey setup'],
+  CONFIG_MODIFIED: ['The managed configuration no longer matches its recorded identity.', 'claudey setup'],
+  PORT_IN_USE: ['The configured loopback port is occupied by an unrelated listener.', 'claudey config set port 8317'],
+  GATEWAY_UNHEALTHY: ['The gateway is unhealthy.', 'claudey restart'],
+  PROCESS_IDENTITY_MISMATCH: ['The gateway process identity is stale or unsafe.', 'claudey stop'],
+  AUTH_REQUIRED: ['A provider is not authenticated.', 'claudey auth codex'],
+  MCP_OWNERSHIP_COLLISION: ['The Cursor plugin registration has an ownership collision.', 'claudey cursor disable --scope local'],
+  SAFETY_REFUSAL: ['A managed identity or permission boundary is unsafe.', 'claudey setup']
 });
 
 function exact(value, keys) {
@@ -30,7 +30,7 @@ function freeze(value) {
   return value;
 }
 
-function safety() { return new ClaudexError('SAFETY_REFUSAL', 'Doctor could not inspect this installation safely.'); }
+function safety() { return new ClaudeyError('SAFETY_REFUSAL', 'Doctor could not inspect this installation safely.'); }
 
 function checkedResult(name, value) {
   if (exact(value, ['status']) && value.status === 'ok') {
@@ -61,6 +61,6 @@ export async function runDoctorCommand(context = {}) {
   if (result.healthy) return result;
   const errors = findings.filter(({ status }) => status === 'error');
   const code = errors[0]?.code ?? findings[0]?.code ?? 'SAFETY_REFUSAL';
-  throw new ClaudexError(code, FINDINGS[code]?.[0] ?? 'Doctor found an unsafe installation state.',
+  throw new ClaudeyError(code, FINDINGS[code]?.[0] ?? 'Doctor found an unsafe installation state.',
     { details: { doctor: result } });
 }

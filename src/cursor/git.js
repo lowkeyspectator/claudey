@@ -1,14 +1,14 @@
 import path from 'node:path';
 
-import { ClaudexError } from '../core/errors.js';
+import { ClaudeyError } from '../core/errors.js';
 
 const OID = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/u;
 const REF = /^refs\/(?:heads|tags)\/[A-Za-z0-9][A-Za-z0-9._/-]{0,1023}$/u;
-const BRANCH = /^claudex\/cursor-[a-z0-9][a-z0-9-]{0,63}$/u;
+const BRANCH = /^claudey\/cursor-[a-z0-9][a-z0-9-]{0,63}$/u;
 const FINGERPRINT_KEYS = ['files', 'head', 'index', 'tree'];
 
 function safety() {
-  return new ClaudexError('SAFETY_REFUSAL', 'The Cursor Git operation could not be completed safely.');
+  return new ClaudeyError('SAFETY_REFUSAL', 'The Cursor Git operation could not be completed safely.');
 }
 
 function safeAbsolute(value, pathApi) {

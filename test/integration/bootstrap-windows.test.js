@@ -58,6 +58,8 @@ else if (args[0] !== 'launcher') process.exitCode = 2;
     { name: 'bin/claudexctl', mode: 0o755, bytes: '#!/bin/sh\nexit 99\n' },
     { name: 'bin/claudex', mode: 0o755, bytes: '#!/bin/sh\nexit 99\n' },
     { name: 'bin/claude-agy', mode: 0o755, bytes: '#!/bin/sh\nexit 99\n' },
+    { name: 'bin/claude-grok', mode: 0o755, bytes: '#!/bin/sh\nexit 99\n' },
+    { name: 'bin/claudey', mode: 0o755, bytes: '#!/bin/sh\nexit 99\n' },
     { name: 'package.json', mode: 0o644, bytes: `${JSON.stringify({ name: 'claudexctl', version, type: 'module' })}\n` },
     { name: 'LICENSE', mode: 0o644, bytes: 'test license\n' }
   ]);
@@ -130,6 +132,8 @@ public static class FixtureShim {
       string name = Path.GetFileName(Assembly.GetExecutingAssembly().Location).ToLowerInvariant();
       if (name == "claudex.exe") { child.Add("launcher"); child.Add("claudex"); }
       else if (name == "claude-agy.exe") { child.Add("launcher"); child.Add("claude-agy"); }
+      else if (name == "claude-grok.exe") { child.Add("launcher"); child.Add("claude-grok"); }
+      else if (name == "claudey.exe") { child.Add("launcher"); child.Add("claudey"); }
       else if (name != "claudexctl.exe") return 7;
       child.AddRange(args); List<string> quoted = new List<string>(); foreach (string item in child) quoted.Add(Quote(item));
       ProcessStartInfo start = new ProcessStartInfo(node, String.Join(" ", quoted.ToArray())); start.UseShellExecute = false;
@@ -257,7 +261,7 @@ test('native bootstrap verifies target artifacts, self-tests shims, activates, f
   const previous = JSON.parse(await fs.readFile(path.join(managerRoot, 'previous.json'), 'utf8'));
   assert.match(current.target, /1\.0\.1/u); assert.match(previous.target, /1\.0\.0/u);
   const bin = path.join(managerRoot, 'bin');
-  const launcherBytes = await Promise.all(['claudexctl.exe', 'claudex.exe', 'claude-agy.exe']
+  const launcherBytes = await Promise.all(['claudexctl.exe', 'claudex.exe', 'claude-agy.exe', 'claude-grok.exe', 'claudey.exe']
     .map((name) => fs.readFile(path.join(bin, name))));
   assert.ok(launcherBytes.every((bytes) => bytes.equals(shim)));
   assert.equal((await fs.readFile(path.join(bin, 'claudex-launcher.key'))).length, 32);

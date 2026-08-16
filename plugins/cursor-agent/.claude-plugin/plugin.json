@@ -1,8 +1,8 @@
 {
   "name": "cursor-agent",
   "version": "1.0.0",
-  "description": "Constrained Cursor Agent tools managed by Claudex.",
+  "description": "Constrained Cursor Agent tools managed by Claudey.",
   "author": {
-    "name": "Claudex"
+    "name": "Claudey"
   }
 }

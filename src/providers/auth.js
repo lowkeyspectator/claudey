@@ -2,7 +2,7 @@ import { spawn } from 'node:child_process';
 import path from 'node:path';
 
 import { GATEWAY_CONFIG_CHILD } from '../core/config.js';
-import { ClaudexError } from '../core/errors.js';
+import { ClaudeyError } from '../core/errors.js';
 import { getVerifiedInvocation, isVerifiedExecutableForCommand, revalidateExecutable } from '../core/executable.js';
 import { runFixedCommand } from './capabilities.js';
 
@@ -10,9 +10,9 @@ const MAX_HELP_BYTES = 16_384;
 const HELP_TIMEOUT_MS = 3_000;
 const PRIVATE_DESCRIPTORS = new WeakMap();
 const REVIEWED_AUTH_VERSION = '7.2.130';
-const DEFAULT_CALLBACK_PORTS = Object.freeze({ codex: 1455, antigravity: 51121 });
+const DEFAULT_CALLBACK_PORTS = Object.freeze({ codex: 1455, antigravity: 51121, grok: 1456 });
 const REQUIRED_FLAGS = Object.freeze(['antigravity-login', 'codex-login', 'config', 'no-browser', 'oauth-callback-port']);
-const KNOWN_LOGIN_FLAGS = new Set(['login', 'antigravity-login', 'claude-login', 'codex-device-login', 'codex-login', 'kimi-login', 'xai-login']);
+const KNOWN_LOGIN_FLAGS = new Set(['login', 'antigravity-login', 'claude-login', 'codex-device-login', 'codex-login', 'grok-login', 'kimi-login', 'xai-login']);
 const SAFE_ENVIRONMENT = new Map([
   ['PATH', 'PATH'], ['SYSTEMROOT', 'SystemRoot'], ['WINDIR', 'WINDIR'], ['COMSPEC', 'ComSpec'],
   ['PATHEXT', 'PATHEXT'], ['TEMP', 'TEMP'], ['TMP', 'TMP'], ['HOME', 'HOME'],
@@ -23,7 +23,7 @@ const SAFE_ENVIRONMENT = new Map([
 export const AUTH_WARNING = 'CLIProxyAPI is a third-party project that is not audited or endorsed by OpenAI, Anthropic, Google, or Cursor. Subscription OAuth through a proxy may have terms-of-service or account consequences.';
 
 function authError(code, message, options) {
-  return new ClaudexError(code, message, options);
+  return new ClaudeyError(code, message, options);
 }
 
 function unsupported() {
@@ -63,7 +63,8 @@ function safeManagedPaths(configPath, cwd) {
 
 function parseInstalledVersion(output) {
   if (typeof output !== 'string') throw unsupported();
-  const match = /^CLIProxyAPI ((?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*))\n$/.exec(output);
+  const match = /^CLIProxyAPI ((?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*))\n$/.exec(output)
+    ?? /CLIProxyAPI Version: ((?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*))/u.exec(output);
   if (!match) throw unsupported();
   const parts = match[1].split('.').map(Number);
   const baseline = REVIEWED_AUTH_VERSION.split('.').map(Number);
@@ -74,8 +75,38 @@ function parseInstalledVersion(output) {
   return match[1];
 }
 
+function stderrIsGoFlagNoise(stderr) {
+  if (stderr === '') return true;
+  return stderr.replaceAll('\r\n', '\n').split('\n').filter(Boolean).every((line) => (
+    /flag provided but not defined/i.test(line)
+    || /^Usage of /u.test(line)
+    || /^ {2}-[A-Za-z]/u.test(line)
+    || /^ {4}\S/u.test(line)
+  ));
+}
+
+function usableProbeResult(result) {
+  if (!result || typeof result.stdout !== 'string' || typeof result.stderr !== 'string'
+    || Buffer.byteLength(result.stdout, 'utf8') > MAX_HELP_BYTES
+    || Buffer.byteLength(result.stderr, 'utf8') > MAX_HELP_BYTES
+    || result.cleanupConfirmed === false) return false;
+  if (result.code === 0 && result.stderr === '') return true;
+  const combined = `${result.stdout}\n${result.stderr}`;
+  if (result.code === 0 && stderrIsGoFlagNoise(result.stderr) && /Usage of |CLIProxyAPI Version:/u.test(combined)) return true;
+  return result.code === 2 && /flag provided but not defined/i.test(result.stderr)
+    && /CLIProxyAPI Version: |Usage of | {2}-codex-login/u.test(combined);
+}
+
+function probeText(result) {
+  if (result.stderr === '') return result.stdout;
+  if (result.stdout === '' || result.stdout.endsWith('\n')) return `${result.stdout}${result.stderr}`;
+  return `${result.stdout}\n${result.stderr}`;
+}
+
 function parseInstalledHelp(output, version) {
-  if (typeof output !== 'string' || Buffer.byteLength(output, 'utf8') > MAX_HELP_BYTES || !output.endsWith('\n') || /\r/.test(output)) throw unsupported();
+  const normalized = typeof output === 'string' ? output.replaceAll('\r\n', '\n').replaceAll('\r', '\n') : output;
+  if (typeof normalized !== 'string' || Buffer.byteLength(normalized, 'utf8') > MAX_HELP_BYTES || !normalized.endsWith('\n')) throw unsupported();
+  output = normalized;
   const flags = new Set();
   for (const line of output.split('\n')) {
     const match = /^  -([a-z][a-z0-9-]*)(?:\s+(?:int|string))?$/.exec(line);
@@ -91,18 +122,27 @@ function parseInstalledHelp(output, version) {
       deviceCode: flags.has('codex-device-login'),
       noBrowser: flags.has('no-browser'),
       callbackPort: flags.has('oauth-callback-port'),
-      defaultCallbackPort: version === REVIEWED_AUTH_VERSION ? DEFAULT_CALLBACK_PORTS.codex : null
+      defaultCallbackPort: flags.has('oauth-callback-port') ? DEFAULT_CALLBACK_PORTS.codex : null
     },
     antigravity: {
       browser: flags.has('antigravity-login'),
       noBrowser: flags.has('no-browser'),
       callbackPort: flags.has('oauth-callback-port'),
-      defaultCallbackPort: version === REVIEWED_AUTH_VERSION ? DEFAULT_CALLBACK_PORTS.antigravity : null
+      defaultCallbackPort: flags.has('oauth-callback-port') ? DEFAULT_CALLBACK_PORTS.antigravity : null
+    },
+    grok: {
+      browser: flags.has('grok-login') || flags.has('xai-login'),
+      deviceCode: flags.has('grok-login'),
+      noBrowser: flags.has('no-browser') && (flags.has('grok-login') || flags.has('xai-login')),
+      callbackPort: flags.has('oauth-callback-port'),
+      defaultCallbackPort: flags.has('oauth-callback-port') ? DEFAULT_CALLBACK_PORTS.grok : null,
+      preferGrokLogin: flags.has('grok-login')
     }
   };
   return Object.freeze({
     codex: Object.freeze(providers.codex),
-    antigravity: Object.freeze(providers.antigravity)
+    antigravity: Object.freeze(providers.antigravity),
+    grok: Object.freeze(providers.grok)
   });
 }
 
@@ -136,7 +176,13 @@ function checkedMode(provider, mode, capabilities) {
     if (mode === 'browser' && capabilities.browser) return ['--antigravity-login'];
     if (mode === 'no-browser' && capabilities.noBrowser) return ['--antigravity-login', '--no-browser'];
   }
-  if (!['codex', 'antigravity'].includes(provider) || !['browser', 'device-code', 'no-browser'].includes(mode)) {
+  if (provider === 'grok') {
+    const loginFlag = capabilities.preferGrokLogin === true ? '--grok-login' : '--xai-login';
+    if (mode === 'browser' && capabilities.browser) return [loginFlag];
+    if (mode === 'device-code' && capabilities.deviceCode) return ['--grok-login'];
+    if (mode === 'no-browser' && capabilities.noBrowser) return [loginFlag, '--no-browser'];
+  }
+  if (!['codex', 'antigravity', 'grok'].includes(provider) || !['browser', 'device-code', 'no-browser'].includes(mode)) {
     throw authError('USAGE_ERROR', 'The provider authentication mode is invalid.');
   }
   throw unsupported();
@@ -162,9 +208,8 @@ export async function probeAuthCapabilities({ cliProxy, run = runFixedCommand } 
         maxStderrBytes: MAX_HELP_BYTES
       });
     } catch { throw unsupported(); }
-    if (!result || result.code !== 0 || typeof result.stdout !== 'string' || result.stderr !== ''
-      || result.cleanupConfirmed === false || Buffer.byteLength(result.stdout, 'utf8') > MAX_HELP_BYTES) throw unsupported();
-    return result.stdout;
+    if (!usableProbeResult(result)) throw unsupported();
+    return probeText(result);
   };
   const version = parseInstalledVersion(await invokeProbe('cliProxyAuthVersion', '--version'));
   const providers = parseInstalledHelp(await invokeProbe('cliProxyAuthHelp', '--help'), version);

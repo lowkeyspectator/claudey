@@ -2,7 +2,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 
-import { ClaudexError } from './errors.js';
+import { ClaudeyError } from './errors.js';
 import { assertContainedNoLinks, resolveManagedChild } from './fs-safe.js';
 import { getVerifiedInvocation, revalidateExecutable } from './executable.js';
 import { requestGatewayModels } from './gateway-client.js';
@@ -29,18 +29,18 @@ const DEFAULTS = Object.freeze({
 const ENV_ALLOWLIST = Object.freeze([
   'SystemRoot', 'WINDIR', 'TEMP', 'TMP', 'TMPDIR', 'HOME', 'USERPROFILE', 'LANG', 'LC_ALL'
 ]);
-const READINESS_DOMAIN = 'claudexctl-gateway-readiness-v1\0';
+const READINESS_DOMAIN = 'claudeyctl-gateway-readiness-v1\0';
 const READINESS_BINDING_KEYS = Object.freeze([
   'schemaVersion', 'installationId', 'instanceId', 'pid', 'processGroupId', 'processStartTime',
   'executableCanonicalPath', 'configCanonicalPath', 'version', 'host', 'port', 'nonce'
 ]);
 
 function unhealthy(message = 'The managed gateway lifecycle operation could not be completed safely.') {
-  return new ClaudexError('GATEWAY_UNHEALTHY', message);
+  return new ClaudeyError('GATEWAY_UNHEALTHY', message);
 }
 
 function mismatch() {
-  return new ClaudexError('PROCESS_IDENTITY_MISMATCH', 'Managed process identity could not be verified.');
+  return new ClaudeyError('PROCESS_IDENTITY_MISMATCH', 'Managed process identity could not be verified.');
 }
 
 function checkedDuration(value, fallback) {
@@ -64,7 +64,7 @@ function safeCanonicalPath(value, platform) {
 function publicError(error) {
   if (error?.code === 'PROCESS_IDENTITY_MISMATCH') return mismatch();
   if (error?.code === 'PORT_IN_USE') {
-    return new ClaudexError('PORT_IN_USE', 'The configured loopback port is occupied by an unrelated listener.');
+    return new ClaudeyError('PORT_IN_USE', 'The configured loopback port is occupied by an unrelated listener.');
   }
   return unhealthy();
 }

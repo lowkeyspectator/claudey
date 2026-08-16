@@ -1,7 +1,7 @@
 import crypto from 'node:crypto';
 import path from 'node:path';
 
-import { ClaudexError } from '../core/errors.js';
+import { ClaudeyError } from '../core/errors.js';
 import { deriveApprovalKey } from '../core/manifest.js';
 import { isSecret, normalizePromptForApproval } from '../core/secrets.js';
 
@@ -16,7 +16,7 @@ function fail(code = 'SAFETY_REFUSAL') {
     APPROVAL_INVALID: 'The Cursor approval is invalid, expired, declined, or already consumed.',
     INTERACTION_REQUIRED: 'Cursor approval requires an interactive terminal.'
   };
-  return new ClaudexError(code, messages[code]);
+  return new ClaudeyError(code, messages[code]);
 }
 
 function exact(value, keys) {

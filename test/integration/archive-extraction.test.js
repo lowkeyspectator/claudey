@@ -235,12 +235,12 @@ test('invokes only fixed System32 PowerShell and the bundled helper with a priva
       ]);
       assert.match(args[6], /^[A-Za-z0-9+/]+=*$/);
       assert.equal(options.shell, false);
-      assert.equal(options.env.CLAUDEX_ARCHIVE_HELPER_PATH, ARCHIVE_HELPER_PATH);
-      assert.match(options.env.CLAUDEX_ARCHIVE_HELPER_SHA256, /^[a-f0-9]{64}$/);
-      assert.equal(options.env.CLAUDEX_ARCHIVE_REQUEST_PATH, requestPath);
-      assert.match(options.env.CLAUDEX_ARCHIVE_REQUEST_SHA256, /^[a-f0-9]{64}$/);
-      assert.match(options.env.CLAUDEX_ARCHIVE_DESTINATION_VOLUME, /^\d+$/);
-      assert.match(options.env.CLAUDEX_ARCHIVE_DESTINATION_FILE_ID, /^\d+$/);      await materializePlan(fixture.plan, fixture.staging);
+      assert.equal(options.env.CLAUDEY_ARCHIVE_HELPER_PATH, ARCHIVE_HELPER_PATH);
+      assert.match(options.env.CLAUDEY_ARCHIVE_HELPER_SHA256, /^[a-f0-9]{64}$/);
+      assert.equal(options.env.CLAUDEY_ARCHIVE_REQUEST_PATH, requestPath);
+      assert.match(options.env.CLAUDEY_ARCHIVE_REQUEST_SHA256, /^[a-f0-9]{64}$/);
+      assert.match(options.env.CLAUDEY_ARCHIVE_DESTINATION_VOLUME, /^\d+$/);
+      assert.match(options.env.CLAUDEY_ARCHIVE_DESTINATION_FILE_ID, /^\d+$/);      await materializePlan(fixture.plan, fixture.staging);
       const request = JSON.parse(await fs.readFile(requestPath, 'utf8'));
       return { code: 0, stderr: '', stdout: JSON.stringify({
         ok: true,
