@@ -146,6 +146,100 @@ function Acquire-BootstrapLock([string]$Target) {
   return $Stream
 }
 
+function Test-LegacyManagedInstall([string]$Root) {
+  if (-not (Test-Path -LiteralPath $Root)) { return $false }
+  foreach ($Marker in @((Join-Path $Root 'installation.json'), (Join-Path $Root 'token'), (Join-Path $Root 'current.json'))) {
+    if (Test-Path -LiteralPath $Marker -PathType Leaf) { return $true }
+  }
+  $Auth = Join-Path $Root 'auth'
+  if (Test-Path -LiteralPath $Auth -PathType Container) {
+    if (@(Get-ChildItem -LiteralPath $Auth -Filter '*.json' -File -Force -ErrorAction SilentlyContinue).Count -gt 0) {
+      return $true
+    }
+  }
+  $Releases = Join-Path $Root 'releases'
+  if (Test-Path -LiteralPath $Releases -PathType Container) {
+    if (@(Get-ChildItem -LiteralPath $Releases -Force -ErrorAction SilentlyContinue).Count -gt 0) { return $true }
+  }
+  return $false
+}
+
+function Move-LegacyProductRoot([string]$Parent, [string]$CurrentLeaf) {
+  $Current = Join-Path $Parent $CurrentLeaf
+  $Found = @()
+  foreach ($Leaf in @('claudexctl', 'claudex', 'claudey')) {
+    $Legacy = Join-Path $Parent $Leaf
+    if (Test-LegacyManagedInstall $Legacy) { $Found += $Legacy }
+  }
+  $CurrentHasInstall = Test-LegacyManagedInstall $Current
+  if ($CurrentHasInstall -and $Found.Count -gt 0) {
+    Write-Failure 'SAFETY_REFUSAL' 'Legacy and current Claudey roots both contain an installation.' 7
+  }
+  if ($CurrentHasInstall -or $Found.Count -eq 0) { return }
+  if ($Found.Count -gt 1) {
+    Write-Failure 'SAFETY_REFUSAL' 'Multiple legacy Claudey roots contain an installation.' 7
+  }
+  if (Test-Path -LiteralPath $Current) {
+    if (@(Get-ChildItem -LiteralPath $Current -Force -ErrorAction SilentlyContinue).Count -gt 0) {
+      Write-Failure 'SAFETY_REFUSAL' 'The current Claudey root is not vacant for brand migration.' 7
+    }
+    Remove-Item -LiteralPath $Current -Force
+  }
+  Rename-Item -LiteralPath $Found[0] -NewName $CurrentLeaf
+}
+
+function Remove-StaleBrandLaunchers([string]$Directory) {
+  if (-not (Test-Path -LiteralPath $Directory -PathType Container)) { return }
+  foreach ($Name in @('claudey', 'claudeyctl', 'claude-codex', 'claude-agy', 'claude-grok', 'claudex', 'claudexctl')) {
+    foreach ($Extension in @('.cmd', '.bat', '.ps1')) {
+      $Target = Join-Path $Directory ($Name + $Extension)
+      if (-not (Test-Path -LiteralPath $Target -PathType Leaf)) { continue }
+      $Text = [IO.File]::ReadAllText($Target)
+      if ($Name -in @('claudex', 'claudexctl') -or $Text -match 'claudexctl\.js|claudex\.js|launcher claudex') {
+        Remove-Item -LiteralPath $Target -Force
+      }
+    }
+  }
+}
+
+function Update-LegacyUserPath([string]$LocalAppData, [string]$CurrentBin) {
+  $UserPath = [Environment]::GetEnvironmentVariable('Path', 'User')
+  if ($null -eq $UserPath) { $UserPath = '' }
+  $Entries = @()
+  if ($UserPath.Length -gt 0) { $Entries = $UserPath.Split(';') }
+  $Retire = @{}
+  foreach ($Leaf in @('claudexctl', 'claudex', 'claudey')) {
+    $Retire[(Join-Path $LocalAppData "$Leaf\bin").TrimEnd([char]'\').ToLowerInvariant()] = $true
+  }
+  $Kept = New-Object System.Collections.Generic.List[string]
+  $HaveCurrent = $false
+  $CurrentNorm = $CurrentBin.TrimEnd([char]'\').ToLowerInvariant()
+  foreach ($Entry in $Entries) {
+    $Norm = $Entry.TrimEnd([char]'\').ToLowerInvariant()
+    if ($Retire.ContainsKey($Norm)) { continue }
+    if ($Norm -eq $CurrentNorm) {
+      if ($HaveCurrent) { continue }
+      $HaveCurrent = $true
+    }
+    [void]$Kept.Add($Entry)
+  }
+  if (-not $HaveCurrent) { [void]$Kept.Add($CurrentBin) }
+  $After = [string]::Join(';', $Kept)
+  if ($After -ne $UserPath) {
+    [Environment]::SetEnvironmentVariable('Path', $After, 'User')
+  }
+  $ProcessEntries = New-Object System.Collections.Generic.List[string]
+  foreach ($Entry in @($env:Path.Split(';'))) {
+    $Norm = $Entry.TrimEnd([char]'\').ToLowerInvariant()
+    if ($Retire.ContainsKey($Norm)) { continue }
+    [void]$ProcessEntries.Add($Entry)
+  }
+  if (-not (@($ProcessEntries | ForEach-Object { $_.TrimEnd([char]'\').ToLowerInvariant() }) -contains $CurrentNorm)) {
+    $ProcessEntries.Insert(0, $CurrentBin)
+  }
+  $env:Path = [string]::Join(';', $ProcessEntries)
+}
+
 $LockStream = $null
 $NodePin = $null
 $DirectoryPins = @()
@@ -184,6 +278,8 @@ try {
   $AppData = Assert-SafeAbsolutePath ([Environment]::GetEnvironmentVariable('APPDATA')) 'APPDATA'
   Assert-NoReparseChain $LocalAppData
   Assert-NoReparseChain $AppData
+  Move-LegacyProductRoot $LocalAppData 'claudeyctl'
+  Move-LegacyProductRoot $AppData 'claudeyctl'
   $ManagerRoot = Join-Path $LocalAppData 'claudeyctl'
   $ReleaseRoot = Join-Path $ManagerRoot 'releases'
   $StagingRoot = Join-Path $ManagerRoot 'staging'
@@ -192,6 +288,10 @@ try {
   foreach ($Directory in @($ManagerRoot, $ReleaseRoot, $StagingRoot, $StateRoot, $UserBin)) {
     Protect-Directory $Directory $Identity.User
   }
+  $UserProfile = [Environment]::GetEnvironmentVariable('USERPROFILE')
+  if ($UserProfile) { Remove-StaleBrandLaunchers (Join-Path $UserProfile '.local\bin') }
+  Remove-StaleBrandLaunchers $UserBin
+  Update-LegacyUserPath $LocalAppData $UserBin
   $PinSource = @'
 using System;
 using System.ComponentModel;

@@ -15,6 +15,7 @@ Start with `claudey doctor` (or `claudey doctor --json`). Doctor is read-only: i
 | `CHECKSUM_MISMATCH` / `ARCHIVE_UNSAFE` | Downloaded bytes or archive structure failed integrity checks | Keep the current version. Retry only from the official release after checking provenance. |
 | `UPDATE_ROLLED_BACK` | Candidate readiness failed and the prior version was restored | Inspect redacted diagnostics, resolve the cause, and retry. |
 | `ROLLBACK_UNAVAILABLE` | No eligible default rollback point remains | Install an explicit verified version; do not edit activation pointers. |
+| leftover `claudexctl` / `Cannot find module ...\\claudexctl.js` | A pre-rebrand install or launcher still points at the old manager name | Run `claudey setup` from a new shell, or rerun the verified `install.ps1` / `install.sh`. Do not add a compatibility `claudexctl.js`. |
 | `SAFETY_REFUSAL` | A path, permission, identity, approval, or secret boundary was ambiguous | Correct the reported state. Never bypass the boundary by broadening permissions. |
 
 ## Windows execution policy

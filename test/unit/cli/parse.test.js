@@ -152,6 +152,30 @@ test('rejects --yes where it cannot approve interaction', () => {
   );
 });
 
+test('claudey with no command or only launcher flags is a unified launch', () => {
+  assert.deepEqual(parseManagementArgs([]), {
+    command: ['launcher', 'claudey'], options: { rawArgv: [] }
+  });
+  assert.deepEqual(parseManagementArgs(['--all', '--yolo']), {
+    command: ['launcher', 'claudey'], options: { rawArgv: ['--all', '--yolo'] }
+  });
+  assert.deepEqual(parseManagementArgs(['launcher', 'claudey', '--select']), {
+    command: ['launcher', 'claudey'], options: { rawArgv: ['--select'] }
+  });
+});
+
+test('claudey unwraps a management command from the launcher wrapper', () => {
+  assert.deepEqual(parseManagementArgs(['launcher', 'claudey', 'status', '--json']), {
+    command: ['status'], options: { json: true }
+  });
+  assert.deepEqual(parseManagementArgs(['launcher', 'claudey', 'auth', 'grok']), {
+    command: ['auth', 'grok'], options: {}
+  });
+  assert.deepEqual(parseManagementArgs(['launcher', 'claude-codex', 'status']), {
+    command: ['launcher', 'claude-codex'], options: { rawArgv: ['status'] }
+  });
+});
+
 test('launcher requires a delimiter before Claude arguments', () => {
   assert.throws(
     () => parseLauncherArgs(['--model', 'gpt-test', '--verbose']),

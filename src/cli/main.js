@@ -138,8 +138,15 @@ function dependency(container, familyName) {
   } catch { throw safety(); }
 }
 
+function isHelpArgv(argv) {
+  if (!Array.isArray(argv) || argv.includes('--')) return false;
+  const tokens = argv.filter((token, index, all) => !(token === 'launcher' && all[index + 1] === 'claudey')
+    && !(token === 'claudey' && all[index - 1] === 'launcher'));
+  return tokens.length === 1 && ['--help', 'help'].includes(tokens[0]);
+}
+
 export async function main(argv = process.argv.slice(2), environment = process.env, container = {}) {
-  if (Array.isArray(argv) && (argv.length === 1 && ['--help', 'help'].includes(argv[0]))) {
+  if (isHelpArgv(argv)) {
     return Object.freeze({ type: 'help', text: HELP });
   }
   const parsed = parseManagementArgs(argv, environment);

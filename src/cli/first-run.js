@@ -1,3 +1,4 @@
+import { migrateLegacyBrand } from '../core/brand-migration.js';
 import { ClaudeyError } from '../core/errors.js';
 import { loadInstallation, runProductionSetup } from './runtime.js';
 
@@ -8,6 +9,8 @@ function writeLine(text) {
 }
 
 export async function ensureLocalInstall(environment = process.env, context = {}) {
+  if (typeof context.migrateLegacyBrand === 'function') await context.migrateLegacyBrand(environment, context);
+  else if (typeof context.loadInstallation !== 'function') await migrateLegacyBrand(environment);
   const load = context.loadInstallation ?? loadInstallation;
   try { return await load(environment); } catch (error) {
     if (error?.code !== 'NOT_INSTALLED') throw error;

@@ -4,7 +4,8 @@ import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 
-import { getManagedPaths } from '../../../src/core/paths.js';
+import { PRODUCT_LEAF } from '../../../src/core/identity.js';
+import { getLegacyManagedPathSets, getManagedPaths } from '../../../src/core/paths.js';
 import { getManagedPaths as getManagedPathsFromPlatform, getPlatformAdapter } from '../../../src/platform/index.js';
 
 const fixturesPath = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../fixtures/platform/paths.json');
@@ -41,6 +42,23 @@ test('requires WSL mount metadata and refuses a custom Windows mount root', () =
     ),
     (error) => error.code === 'SAFETY_REFUSAL'
   );
+});
+
+test('derives previous branded siblings without changing the current product leaf', () => {
+  assert.equal(PRODUCT_LEAF, 'claudeyctl');
+  const current = getManagedPaths(
+    { family: 'windows' },
+    { LOCALAPPDATA: 'C:\\Users\\Casey\\AppData\\Local', APPDATA: 'C:\\Users\\Casey\\AppData\\Roaming' }
+  );
+  const legacy = getLegacyManagedPathSets(
+    { family: 'windows' },
+    { LOCALAPPDATA: 'C:\\Users\\Casey\\AppData\\Local', APPDATA: 'C:\\Users\\Casey\\AppData\\Roaming' }
+  );
+  assert.deepEqual(legacy.map(({ leaf }) => leaf), ['claudexctl', 'claudex', 'claudey']);
+  assert.equal(current.managerRoot, 'C:\\Users\\Casey\\AppData\\Local\\claudeyctl');
+  assert.equal(legacy[0].paths.managerRoot, 'C:\\Users\\Casey\\AppData\\Local\\claudexctl');
+  assert.equal(legacy[0].paths.configRoot, 'C:\\Users\\Casey\\AppData\\Roaming\\claudexctl');
+  assert.equal(legacy[2].paths.managerRoot, 'C:\\Users\\Casey\\AppData\\Local\\claudey');
 });
 
 test('selects a family adapter only for a detected supported family', () => {

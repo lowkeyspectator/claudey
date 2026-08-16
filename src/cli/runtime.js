@@ -6,6 +6,7 @@ import path from 'node:path';
 import process from 'node:process';
 import { setTimeout as delay } from 'node:timers/promises';
 
+import { migrateLegacyBrand } from '../core/brand-migration.js';
 import { requestGatewayModels } from '../core/gateway-client.js';
 import { providerOwns } from '../providers/catalog.js';
 import { attachUsage, collectProviderUsage } from '../providers/usage.js';
@@ -368,6 +369,23 @@ async function findExtractedExecutable(root) {
 }
 
 export async function runProductionSetup(options = {}, environment = process.env) {
+  const migrated = await migrateLegacyBrand(environment, { noPath: options.noPath === true });
+  try {
+    const existing = await loadInstallation(environment);
+    if (options.noStart !== true) await startGatewayProcess(existing);
+    return Object.freeze({
+      schemaVersion: 1,
+      operation: 'setup',
+      version: existing.version,
+      port: existing.port,
+      started: options.noStart !== true,
+      changed: migrated.changed === true,
+      launchers: Object.freeze(['claudey', 'claudeyctl', 'claude-codex', 'claude-agy', 'claude-grok'])
+    });
+  } catch (error) {
+    if (error?.code !== 'NOT_INSTALLED') throw error;
+  }
+
   const paths = managedPaths(environment);
   const port = options.port ?? 8317;
   const platform = {

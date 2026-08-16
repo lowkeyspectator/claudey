@@ -33,6 +33,9 @@ test('CLI emits one human success document for the dependency-free help invocati
   assert.equal(child.stderr, '');
   assert.match(child.stdout, /claudey setup/);
   assert.match(child.stdout, /claudey cursor/);
+  const wrapped = runCli(['launcher', 'claudey', '--help']);
+  assert.equal(wrapped.status, 0);
+  assert.match(wrapped.stdout, /claudey setup/);
 });
 
 test('CLI emits a human error envelope and usage exit without a Node stack', () => {

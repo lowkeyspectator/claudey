@@ -170,7 +170,84 @@ if [ "$cldy_is_wsl" -eq 1 ]; then
   ;; esac
 fi
 
+cldy_legacy_has_install() {
+  if [ -f "$1/installation.json" ] || [ -f "$1/token" ] || [ -f "$1/current.json" ]; then
+    return 0
+  fi
+  if [ -d "$1/auth" ]; then
+    for cldy_auth_file in "$1/auth"/*.json; do
+      if [ -f "$cldy_auth_file" ]; then
+        return 0
+      fi
+    done
+  fi
+  if [ -d "$1/releases" ]; then
+    for cldy_release_entry in "$1/releases"/*; do
+      if [ -e "$cldy_release_entry" ]; then
+        return 0
+      fi
+    done
+  fi
+  return 1
+}
+
+cldy_move_legacy_root() {
+  cldy_current="$1/$2"
+  cldy_selected=""
+  cldy_selected_count=0
+  for cldy_leaf in claudexctl claudex claudey; do
+    cldy_legacy="$1/$cldy_leaf"
+    if cldy_legacy_has_install "$cldy_legacy"; then
+      cldy_selected="$cldy_legacy"
+      cldy_selected_count=$((cldy_selected_count + 1))
+    fi
+  done
+  if cldy_legacy_has_install "$cldy_current"; then
+    if [ "$cldy_selected_count" -gt 0 ]; then
+      printf '%s\n' 'error[SAFETY_REFUSAL]: Legacy and current Claudey roots both contain an installation.' >&2
+      exit 7
+    fi
+    return 0
+  fi
+  if [ "$cldy_selected_count" -eq 0 ]; then
+    return 0
+  fi
+  if [ "$cldy_selected_count" -gt 1 ]; then
+    printf '%s\n' 'error[SAFETY_REFUSAL]: Multiple legacy Claudey roots contain an installation.' >&2
+    exit 7
+  fi
+  if [ -e "$cldy_current" ]; then
+    if [ -n "$(ls -A "$cldy_current" 2>/dev/null)" ]; then
+      printf '%s\n' 'error[SAFETY_REFUSAL]: The current Claudey root is not vacant for brand migration.' >&2
+      exit 7
+    fi
+    rmdir "$cldy_current"
+  fi
+  mv "$cldy_selected" "$cldy_current"
+}
+
+cldy_remove_stale_launchers() {
+  if [ ! -d "$1" ]; then
+    return 0
+  fi
+  for cldy_name in claudey claudeyctl claude-codex claude-agy claude-grok claudex claudexctl; do
+    cldy_target="$1/$cldy_name"
+    if [ ! -f "$cldy_target" ]; then
+      continue
+    fi
+    case "$cldy_name" in
+      claudex|claudexctl) rm -f "$cldy_target" ;;
+      *)
+        if grep -q 'claudexctl\.js\|claudex\.js\|launcher claudex' "$cldy_target" 2>/dev/null; then
+          rm -f "$cldy_target"
+        fi
+      ;;
+    esac
+  done
+}
+
 if [ "$cldy_platform" = 'darwin' ]; then
+  cldy_move_legacy_root "$HOME/Library/Application Support" claudeyctl
   cldy_manager_root="$HOME/Library/Application Support/claudeyctl"
   cldy_state_root="$cldy_manager_root/state"
 else
@@ -191,10 +268,15 @@ else
       exit 7
     ;; esac
   fi
+  cldy_config_home=${XDG_CONFIG_HOME:-"$HOME/.config"}
+  cldy_move_legacy_root "$cldy_data_home" claudeyctl
+  cldy_move_legacy_root "$cldy_config_home" claudeyctl
+  cldy_move_legacy_root "$cldy_state_home" claudeyctl
   cldy_manager_root="$cldy_data_home/claudeyctl"
   cldy_state_root="$cldy_state_home/claudeyctl"
 fi
 cldy_user_bin="$HOME/.local/bin"
+cldy_remove_stale_launchers "$cldy_user_bin"
 cldy_target="$cldy_platform-$cldy_arch"
 cldy_project_dir=$(cd "$(dirname "$0")" && pwd)
 

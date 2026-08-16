@@ -1,6 +1,7 @@
 import path from 'node:path';
 
 import { ClaudeyError } from './errors.js';
+import { LEGACY_PRODUCT_LEAVES, PRODUCT_LEAF } from './identity.js';
 
 function safetyRefusal(message) {
   return new ClaudeyError('SAFETY_REFUSAL', message);
@@ -73,11 +74,11 @@ function familyOf(platform) {
   throw unsupported('Managed paths are unavailable for this platform.');
 }
 
-function windowsPaths(env, safety) {
+function windowsPaths(env, safety, leaf) {
   const localAppData = canonicalRoot(env.LOCALAPPDATA, path.win32, 'LOCALAPPDATA', safety);
   const appData = canonicalRoot(env.APPDATA, path.win32, 'APPDATA', safety);
-  const managerRoot = path.win32.join(localAppData, 'claudey');
-  const configRoot = path.win32.join(appData, 'claudey');
+  const managerRoot = path.win32.join(localAppData, leaf);
+  const configRoot = path.win32.join(appData, leaf);
   return {
     managerRoot,
     releaseRoot: path.win32.join(managerRoot, 'releases'),
@@ -93,9 +94,9 @@ function posixHome(env, safety, wsl) {
   return canonicalRoot(env.HOME, path.posix, 'HOME', safety, { wsl });
 }
 
-function macosPaths(env, safety) {
+function macosPaths(env, safety, leaf) {
   const home = posixHome(env, safety, false);
-  const managerRoot = path.posix.join(home, 'Library', 'Application Support', 'claudey');
+  const managerRoot = path.posix.join(home, 'Library', 'Application Support', leaf);
   return {
     managerRoot,
     releaseRoot: path.posix.join(managerRoot, 'releases'),
@@ -113,28 +114,39 @@ function xdgRoot(env, key, fallback, safety, wsl) {
   return canonicalRoot(root, path.posix, key, safety, { wsl });
 }
 
-function linuxPaths(platform, env, safety) {
+function linuxPaths(platform, env, safety, leaf) {
   const wsl = platform?.isWsl === true;
   const home = posixHome(env, safety, wsl);
   const dataRoot = xdgRoot(env, 'XDG_DATA_HOME', path.posix.join(home, '.local', 'share'), safety, wsl);
   const configBase = xdgRoot(env, 'XDG_CONFIG_HOME', path.posix.join(home, '.config'), safety, wsl);
   const stateBase = xdgRoot(env, 'XDG_STATE_HOME', path.posix.join(home, '.local', 'state'), safety, wsl);
-  const managerRoot = path.posix.join(dataRoot, 'claudey');
-  const configRoot = path.posix.join(configBase, 'claudey');
+  const managerRoot = path.posix.join(dataRoot, leaf);
+  const configRoot = path.posix.join(configBase, leaf);
   return {
     managerRoot,
     releaseRoot: path.posix.join(managerRoot, 'releases'),
     launcherRoot: path.posix.join(managerRoot, 'launchers'),
     configRoot,
     authRoot: path.posix.join(configRoot, 'auth'),
-    stateRoot: path.posix.join(stateBase, 'claudey'),
+    stateRoot: path.posix.join(stateBase, leaf),
     userBinRoot: path.posix.join(home, '.local', 'bin')
   };
 }
 
-export function getManagedPaths(platform, env = {}, safety = {}) {
+function pathsFor(platform, env, safety, leaf) {
   const family = familyOf(platform);
-  if (family === 'windows') return windowsPaths(env, safety);
-  if (family === 'macos') return macosPaths(env, safety);
-  return linuxPaths(platform, env, safety);
+  if (family === 'windows') return windowsPaths(env, safety, leaf);
+  if (family === 'macos') return macosPaths(env, safety, leaf);
+  return linuxPaths(platform, env, safety, leaf);
+}
+
+export function getManagedPaths(platform, env = {}, safety = {}) {
+  return pathsFor(platform, env, safety, PRODUCT_LEAF);
+}
+
+export function getLegacyManagedPathSets(platform, env = {}, safety = {}) {
+  return LEGACY_PRODUCT_LEAVES.map((leaf) => Object.freeze({
+    leaf,
+    paths: Object.freeze(pathsFor(platform, env, safety, leaf))
+  }));
 }

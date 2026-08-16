@@ -97,12 +97,27 @@ function assertNoMutuallyExclusive(options, first, second) {
   if (options[first] && options[second]) throw usage(`Options ${first} and ${second} cannot be used together.`);
 }
 
+const MANAGEMENT_COMMANDS = new Set([
+  'onboard', 'setup', 'install', 'auth', 'start', 'stop', 'restart', 'status', 'doctor',
+  'update', 'rollback', 'models', 'config', 'cursor', 'uninstall'
+]);
+
+function asClaudeyLaunch(rawArgv) {
+  return { command: ['launcher', 'claudey'], options: { rawArgv } };
+}
+
 export function parseManagementArgs(argv, environment = process.env) {
   const options = {};
-  const tokens = removeGlobalFlags([...argv], options);
+  let tokens = removeGlobalFlags([...argv], options);
   if (environment.CI === 'true') options.nonInteractive = true;
+  if (tokens[0] === 'launcher' && tokens[1] === 'claudey') {
+    const rest = tokens.slice(2);
+    if (!rest[0] || rest[0].startsWith('--') || !MANAGEMENT_COMMANDS.has(rest[0])) return asClaudeyLaunch(rest);
+    tokens = rest;
+  } else if (!tokens[0] || tokens[0].startsWith('--')) {
+    return asClaudeyLaunch(tokens);
+  }
   const [first, second, third] = tokens;
-  if (!first) throw usage('A management command is required.');
 
   const consume = (count, allowed) => parseOptionList(tokens.slice(count), options, allowed);
   if (first === 'launcher') {
