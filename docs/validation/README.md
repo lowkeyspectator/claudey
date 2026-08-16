@@ -33,7 +33,7 @@ Every report binds evidence digests for:
 - clean bootstrap, repeat bootstrap, update, rollback, dry-run uninstall, uninstall, and repeat uninstall;
 - Codex browser, supported device-code, and supported no-browser flows;
 - Antigravity browser and supported no-browser flows;
-- bounded inference through `claudex` and `claude-agy`;
+- bounded inference through `claude-codex` and `claude-agy`;
 - Cursor login, models, ask, plan, and approved disposable-worktree operation;
 - exact loopback binding, missing/wrong/correct bearer behavior, protected permissions, cleanup, and secret-canary scan;
 - before/after source-tree hash, index hash, and `HEAD` revision.

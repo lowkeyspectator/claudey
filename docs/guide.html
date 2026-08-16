@@ -3,8 +3,8 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Claudex - Beginner's Complete Setup Guide & Operating Manual</title>
-  <meta name="description" content="Step-by-step beginner setup guide for Claudex: Install Node.js, Git, Claude Code, CLIProxyAPI, Codex & Google Antigravity OAuth, and Cursor Agent.">
+  <title>Claudey - Beginner's Complete Setup Guide & Operating Manual</title>
+  <meta name="description" content="Step-by-step beginner setup guide for Claudey: Install Node.js, Git, Claude Code, CLIProxyAPI, Codex & Google Antigravity OAuth, and Cursor Agent.">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Outfit:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
@@ -355,7 +355,7 @@
         <span class="badge-dot"></span>
         Zero-Dependency Cross-Platform CLI Proxy
       </div>
-      <h1>Claudex Complete Setup & Manual</h1>
+      <h1>Claudey Complete Setup & Manual</h1>
       <p class="subtitle">
         A step-by-step guide for absolute beginners: From installing Node.js, Git, and Claude Code to configuring Codex & Antigravity models.
       </p>
@@ -536,8 +536,8 @@
 
     <!-- STEP 1: DOWNLOAD & SETUP -->
     <section id="step-1" style="display: none;">
-      <h2 class="section-title">Step 1: Clone Repository & Run Claudex Setup</h2>
-      <p class="section-desc">Download Claudex and run the automated setup command.</p>
+      <h2 class="section-title">Step 1: Clone Repository & Run Claudey Setup</h2>
+      <p class="section-desc">Download Claudey and run the automated setup command.</p>
 
       <div class="grid">
         <div class="card">
@@ -593,8 +593,8 @@
             <div class="terminal-header"><span class="terminal-title">Terminal</span></div>
             <div class="terminal-body">
               <div class="command-line">
-                <span class="cmd-text">claudexctl auth codex</span>
-                <button class="copy-btn" id="a1" onclick="copyText('claudexctl auth codex', 'a1')">Copy</button>
+                <span class="cmd-text">claudey auth codex</span>
+                <button class="copy-btn" id="a1" onclick="copyText('claudey auth codex', 'a1')">Copy</button>
               </div>
             </div>
           </div>
@@ -608,8 +608,8 @@
             <div class="terminal-header"><span class="terminal-title">Terminal</span></div>
             <div class="terminal-body">
               <div class="command-line">
-                <span class="cmd-text">claudexctl auth antigravity</span>
-                <button class="copy-btn" id="a2" onclick="copyText('claudexctl auth antigravity', 'a2')">Copy</button>
+                <span class="cmd-text">claudey auth antigravity</span>
+                <button class="copy-btn" id="a2" onclick="copyText('claudey auth antigravity', 'a2')">Copy</button>
               </div>
             </div>
           </div>
@@ -625,17 +625,17 @@
       <div class="grid">
         <div class="card">
           <div class="card-icon">✨</div>
-          <h3>Launch via Codex (<code>claudex</code>)</h3>
+          <h3>Launch via Codex (<code>claude-codex</code>)</h3>
           <div class="terminal-box">
             <div class="terminal-header"><span class="terminal-title">Terminal</span></div>
             <div class="terminal-body">
               <div class="command-line" style="margin-bottom: 0.5rem;">
-                <span class="cmd-text">claudex</span>
-                <button class="copy-btn" id="l1" onclick="copyText('claudex', 'l1')">Copy</button>
+                <span class="cmd-text">claude-codex</span>
+                <button class="copy-btn" id="l1" onclick="copyText('claude-codex', 'l1')">Copy</button>
               </div>
               <div class="command-line">
-                <span class="cmd-text">claudex --model gpt-4o -- --verbose</span>
-                <button class="copy-btn" id="l2" onclick="copyText('claudex --model gpt-4o -- --verbose', 'l2')">Copy</button>
+                <span class="cmd-text">claude-codex --model gpt-4o -- --verbose</span>
+                <button class="copy-btn" id="l2" onclick="copyText('claude-codex --model gpt-4o -- --verbose', 'l2')">Copy</button>
               </div>
             </div>
           </div>
@@ -673,12 +673,12 @@
             <div class="terminal-header"><span class="terminal-title">Terminal</span></div>
             <div class="terminal-body">
               <div class="command-line" style="margin-bottom: 0.5rem;">
-                <span class="cmd-text">claudexctl setup --with-cursor</span>
-                <button class="copy-btn" id="cur1" onclick="copyText('claudexctl setup --with-cursor', 'cur1')">Copy</button>
+                <span class="cmd-text">claudey setup --with-cursor</span>
+                <button class="copy-btn" id="cur1" onclick="copyText('claudey setup --with-cursor', 'cur1')">Copy</button>
               </div>
               <div class="command-line">
-                <span class="cmd-text">claudexctl cursor login</span>
-                <button class="copy-btn" id="cur2" onclick="copyText('claudexctl cursor login', 'cur2')">Copy</button>
+                <span class="cmd-text">claudey cursor login</span>
+                <button class="copy-btn" id="cur2" onclick="copyText('claudey cursor login', 'cur2')">Copy</button>
               </div>
             </div>
           </div>
@@ -690,12 +690,12 @@
             <div class="terminal-header"><span class="terminal-title">Terminal</span></div>
             <div class="terminal-body">
               <div class="command-line" style="margin-bottom: 0.5rem;">
-                <span class="cmd-text">claudexctl cursor writes enable --yes</span>
-                <button class="copy-btn" id="cur3" onclick="copyText('claudexctl cursor writes enable --yes', 'cur3')">Copy</button>
+                <span class="cmd-text">claudey cursor writes enable --yes</span>
+                <button class="copy-btn" id="cur3" onclick="copyText('claudey cursor writes enable --yes', 'cur3')">Copy</button>
               </div>
               <div class="command-line">
-                <span class="cmd-text">claudexctl cursor approve &lt;APPROVAL_ID&gt;</span>
-                <button class="copy-btn" id="cur4" onclick="copyText('claudexctl cursor approve ', 'cur4')">Copy</button>
+                <span class="cmd-text">claudey cursor approve &lt;APPROVAL_ID&gt;</span>
+                <button class="copy-btn" id="cur4" onclick="copyText('claudey cursor approve ', 'cur4')">Copy</button>
               </div>
             </div>
           </div>
@@ -709,9 +709,9 @@
       <p class="section-desc">Test simulated live CLI output in your browser:</p>
 
       <div class="sim-controls">
-        <button class="sim-btn" onclick="runSim('status')">claudexctl status</button>
-        <button class="sim-btn" onclick="runSim('models')">claudexctl models all</button>
-        <button class="sim-btn" onclick="runSim('doctor')">claudexctl doctor</button>
+        <button class="sim-btn" onclick="runSim('status')">claudey status</button>
+        <button class="sim-btn" onclick="runSim('models')">claudey models all</button>
+        <button class="sim-btn" onclick="runSim('doctor')">claudey doctor</button>
       </div>
 
       <div class="sim-terminal">
@@ -736,19 +736,19 @@
 
       <div class="faq-item">
         <div class="faq-q">Q: Error: PORT_IN_USE (Port 8317 is occupied)?</div>
-        <div class="faq-a">Run <code>claudexctl config set port 8320 --yes</code> or specify a custom port during setup: <code>claudexctl setup --port 8320</code>.</div>
+        <div class="faq-a">Run <code>claudey config set port 8320 --yes</code> or specify a custom port during setup: <code>claudey setup --port 8320</code>.</div>
       </div>
 
       <div class="faq-item">
-        <div class="faq-q">Q: Does Claudex alter my system 'claude' command?</div>
-        <div class="faq-a">No! Claudex installs only <code>claudexctl</code>, <code>claudex</code>, and <code>claude-agy</code>. Your existing <code>claude</code> executable and configuration remain completely untouched.</div>
+        <div class="faq-q">Q: Does Claudey alter my system 'claude' command?</div>
+        <div class="faq-a">No! Claudey installs only <code>claudey</code>, <code>claude-codex</code>, <code>claude-agy</code>, and <code>claude-grok</code>. Your existing <code>claude</code> executable and configuration remain completely untouched.</div>
       </div>
     </section>
   </div>
 
   <footer>
     <div class="container">
-      <p>Claudex Open Source Project — <a href="https://github.com/ramsaijanapana/claude_code_cliProxy" target="_blank">GitHub Repository</a></p>
+      <p>Claudey Open Source Project — <a href="https://github.com/ramsaijanapana/claude_code_cliProxy" target="_blank">GitHub Repository</a></p>
       <p style="margin-top: 0.5rem; font-size: 0.8rem; color: #5a657c;">Built with zero runtime dependencies. Designed for safety, speed, and cross-platform reliability.</p>
     </div>
   </footer>
@@ -801,11 +801,11 @@
     function runSim(cmd) {
       const out = document.getElementById('sim-output');
       if (cmd === 'status') {
-        out.innerHTML = `<span class="highlight-cyan">$ claudexctl status</span>\n{\n  <span class="highlight-green">"schemaVersion"</span>: 1,\n  <span class="highlight-green">"healthy"</span>: true,\n  <span class="highlight-green">"installation"</span>: { <span class="highlight-yellow">"state"</span>: "installed", <span class="highlight-yellow">"version"</span>: "7.2.130" },\n  <span class="highlight-green">"gateway"</span>: { <span class="highlight-yellow">"state"</span>: "healthy", <span class="highlight-yellow">"port"</span>: 8317 },\n  <span class="highlight-green">"providers"</span>: { <span class="highlight-yellow">"codex"</span>: "authenticated", <span class="highlight-yellow">"antigravity"</span>: "authenticated" },\n  <span class="highlight-green">"cursor"</span>: { <span class="highlight-yellow">"registration"</span>: "enabled", <span class="highlight-yellow">"login"</span>: "authenticated" }\n}`;
+        out.innerHTML = `<span class="highlight-cyan">$ claudey status</span>\n{\n  <span class="highlight-green">"schemaVersion"</span>: 1,\n  <span class="highlight-green">"healthy"</span>: true,\n  <span class="highlight-green">"installation"</span>: { <span class="highlight-yellow">"state"</span>: "installed", <span class="highlight-yellow">"version"</span>: "7.2.130" },\n  <span class="highlight-green">"gateway"</span>: { <span class="highlight-yellow">"state"</span>: "healthy", <span class="highlight-yellow">"port"</span>: 8317 },\n  <span class="highlight-green">"providers"</span>: { <span class="highlight-yellow">"codex"</span>: "authenticated", <span class="highlight-yellow">"antigravity"</span>: "authenticated" },\n  <span class="highlight-green">"cursor"</span>: { <span class="highlight-yellow">"registration"</span>: "enabled", <span class="highlight-yellow">"login"</span>: "authenticated" }\n}`;
       } else if (cmd === 'models') {
-        out.innerHTML = `<span class="highlight-cyan">$ claudexctl models all</span>\n{\n  <span class="highlight-green">"status"</span>: "available",\n  <span class="highlight-green">"providers"</span>: [\n    { <span class="highlight-magenta">"provider"</span>: "codex", <span class="highlight-magenta">"models"</span>: ["gpt-4o", "gpt-4o-mini", "o1-preview"] },\n    { <span class="highlight-magenta">"provider"</span>: "antigravity", <span class="highlight-magenta">"models"</span>: ["gemini-1.5-pro", "claude-3-5-sonnet"] },\n    { <span class="highlight-magenta">"provider"</span>: "cursor", <span class="highlight-magenta">"models"</span>: ["claude-3.5-sonnet", "gpt-4o"] }\n  ]\n}`;
+        out.innerHTML = `<span class="highlight-cyan">$ claudey models all</span>\n{\n  <span class="highlight-green">"status"</span>: "available",\n  <span class="highlight-green">"providers"</span>: [\n    { <span class="highlight-magenta">"provider"</span>: "codex", <span class="highlight-magenta">"models"</span>: ["gpt-4o", "gpt-4o-mini", "o1-preview"] },\n    { <span class="highlight-magenta">"provider"</span>: "antigravity", <span class="highlight-magenta">"models"</span>: ["gemini-1.5-pro", "claude-3-5-sonnet"] },\n    { <span class="highlight-magenta">"provider"</span>: "cursor", <span class="highlight-magenta">"models"</span>: ["claude-3.5-sonnet", "gpt-4o"] }\n  ]\n}`;
       } else if (cmd === 'doctor') {
-        out.innerHTML = `<span class="highlight-cyan">$ claudexctl doctor</span>\n{\n  <span class="highlight-green">"healthy"</span>: true,\n  <span class="highlight-green">"platform"</span>: { <span class="highlight-yellow">"os"</span>: "win32", <span class="highlight-yellow">"arch"</span>: "x64" },\n  <span class="highlight-green">"prerequisites"</span>: { <span class="highlight-yellow">"node"</span>: "v22.20.0", <span class="highlight-yellow">"claude"</span>: "2.1.229", <span class="highlight-yellow">"powershell"</span>: "5.1" },\n  <span class="highlight-green">"security"</span>: { <span class="highlight-yellow">"dacl"</span>: "protected", <span class="highlight-yellow">"secretsCanary"</span>: "clean" }\n}`;
+        out.innerHTML = `<span class="highlight-cyan">$ claudey doctor</span>\n{\n  <span class="highlight-green">"healthy"</span>: true,\n  <span class="highlight-green">"platform"</span>: { <span class="highlight-yellow">"os"</span>: "win32", <span class="highlight-yellow">"arch"</span>: "x64" },\n  <span class="highlight-green">"prerequisites"</span>: { <span class="highlight-yellow">"node"</span>: "v22.20.0", <span class="highlight-yellow">"claude"</span>: "2.1.229", <span class="highlight-yellow">"powershell"</span>: "5.1" },\n  <span class="highlight-green">"security"</span>: { <span class="highlight-yellow">"dacl"</span>: "protected", <span class="highlight-yellow">"secretsCanary"</span>: "clean" }\n}`;
       }
     }
   </script>

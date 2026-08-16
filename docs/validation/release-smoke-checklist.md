@@ -26,7 +26,7 @@ Use this checklist separately on every target listed in the validation README. N
 - [ ] Complete Codex browser auth.
 - [ ] Complete Codex device-code and no-browser flows when each installed probe says supported; otherwise record only `not-applicable` with that false probe.
 - [ ] Complete Antigravity browser auth and no-browser when supported under the same rule.
-- [ ] Verify live provider ownership/model discovery and bounded successful inference through `claudex` and `claude-agy`.
+- [ ] Verify live provider ownership/model discovery and bounded successful inference through `claude-codex` and `claude-agy`.
 - [ ] Prove the normal `claude` environment/settings remain isolated before and after both launchers.
 
 ## 4. Gateway and Cursor
