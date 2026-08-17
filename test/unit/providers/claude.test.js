@@ -31,7 +31,8 @@ function executableAdapter() {
 
 const fixtureRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'claudey-claude-unit-'));
 after(() => fs.rm(fixtureRoot, { recursive: true, force: true }));
-const CLAUDE = await resolveVerifiedExecutable({ command: 'claude', platform: 'win32', candidates: [{ path: process.execPath }], adapter: executableAdapter() });
+const CLAUDE = await resolveVerifiedExecutable({ command: 'claude', platform: process.platform, candidates: [{ path: process.execPath }], adapter: executableAdapter() });
+const FIXTURE_CWD = process.platform === 'win32' ? fixtureRoot : 'C:\\claudey-claude-unit';
 const TOKEN_BYTES = Buffer.alloc(32, 17);
 const TOKEN_TEXT = TOKEN_BYTES.toString('base64url');
 
@@ -47,7 +48,7 @@ function fixture(overrides = {}) {
       provider: 'codex',
       parsed: { model: 'gpt-5.6-sol', select: false, claudeArgs: [], nonInteractive: false },
       claude: CLAUDE,
-      cwd: fixtureRoot,
+      cwd: FIXTURE_CWD,
       isTTY: true,
       baseEnvironment: {
         PATH: 'safe-path', SystemRoot: 'C:\\Windows', HOME: 'C:\\Users\\person', TERM: 'xterm',
@@ -62,6 +63,8 @@ function fixture(overrides = {}) {
       listModels: async (provider) => { calls.push(`models:${provider}`); return { provider, status: 'available', models }; },
       selectModel: async (request) => { calls.push({ select: request }); return request.models[0].id; },
       runChild: async (invocation) => { calls.push({ invocation }); return { code: 0, signal: null }; },
+      syncOAuthAliases: async () => ({ synced: true, oauthModelAlias: {} }),
+      waitForAliasReady: async () => true,
       ...overrides
     }
   };
@@ -85,7 +88,7 @@ test('verifies Claude, ensures the gateway, validates a current exact provider m
   assert.deepEqual(invocation.args.slice(-6), ['--model', 'gpt-5.6-sol', '--fallback-model', 'gpt-5.6-sol', '--print', 'hello world']);
   assert.equal(invocation.shell, false);
   assert.equal(invocation.stdio, 'inherit');
-  assert.equal(invocation.cwd, fixtureRoot);
+  assert.equal(invocation.cwd, FIXTURE_CWD);
 });
 
 test('uses a live interactive selector, offers the preferred source model first only when present, and revalidates its exact result', async () => {
@@ -222,6 +225,60 @@ test('mixed --all session accepts a live model from any authenticated provider a
   assert.equal(settings.env.CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY, '1');
   assert.match(announcements.join('\n'), /\/model/);
   assert.match(announcements.join('\n'), /grok-4.5/);
+});
+
+test('mixed session keeps duplicate raw model IDs from different providers', async () => {
+  const announced = [];
+  const startPicker = async ({ models }) => {
+    assert.equal(models.filter((model) => model.id === 'gpt-5.6-sol').length, 2);
+    assert.deepEqual(
+      models.filter((model) => model.id === 'gpt-5.6-sol').map((model) => model.owned_by).sort(),
+      ['antigravity', 'codex']
+    );
+    return {
+      host: '127.0.0.1',
+      port: 19_001,
+      close: async () => {}
+    };
+  };
+  const f = fixture({
+    parsed: {
+      model: visibleModelId('antigravity', 'gpt-5.6-sol'),
+      select: false,
+      all: true,
+      claudeArgs: [],
+      nonInteractive: true
+    },
+    listModels: async (name) => {
+      if (name === 'codex') {
+        return { provider: name, status: 'available', models: [
+          { id: 'gpt-5.6-sol', object: 'model', created: 1, owned_by: 'codex' }
+        ] };
+      }
+      if (name === 'antigravity') {
+        return { provider: name, status: 'available', models: [
+          { id: 'gpt-5.6-sol', object: 'model', created: 2, owned_by: 'antigravity' }
+        ] };
+      }
+      return { provider: name, status: 'available', models: [
+        { id: 'grok-4.5', object: 'model', created: 3, owned_by: 'grok' }
+      ] };
+    },
+    startPicker,
+    announce: (text) => announced.push(text),
+    syncOAuthAliases: async () => ({ synced: true, oauthModelAlias: {} }),
+    waitForAliasReady: async () => true
+  });
+
+  const result = await launchClaudeProvider(f.value);
+
+  assert.equal(result.provider, 'antigravity');
+  assert.deepEqual(
+    f.calls.at(-1).invocation.args.slice(-4),
+    ['--model', visibleModelId('antigravity', 'gpt-5.6-sol'), '--fallback-model', visibleModelId('antigravity', 'gpt-5.6-sol')]
+  );
+  assert.match(announced.join('\n'), /gpt-5\.6-sol — Codex/u);
+  assert.match(announced.join('\n'), /gpt-5\.6-sol — Antigravity/u);
 });
 
 test('mixed --all session accepts a cloaked Anthropic id and keeps Claude-written session theme', async () => {

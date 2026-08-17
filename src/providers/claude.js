@@ -5,7 +5,7 @@ import path from 'node:path';
 import { ClaudeyError } from '../core/errors.js';
 import { getVerifiedInvocation, isVerifiedExecutableForCommand, revalidateExecutable } from '../core/executable.js';
 import { isSecret } from '../core/secrets.js';
-import { GATEWAY_PROVIDERS, sameModelId, visibleModelId } from './catalog.js';
+import { GATEWAY_PROVIDERS, resolveMixedCatalogModel, sameModelId, visibleModelId } from './catalog.js';
 import { listProviderModels } from './models.js';
 import { requestGatewayModels } from '../core/gateway-client.js';
 import { startPickerGateway } from './picker-gateway.js';
@@ -258,8 +258,9 @@ export async function launchClaudeProvider({
         const models = assertCatalog(await listModels(name, gateway), name);
         byProvider.set(name, models);
         for (const model of models) {
-          if (seen.has(model.id)) continue;
-          seen.add(model.id);
+          const key = `${model.owned_by}\0${model.id}`;
+          if (seen.has(key)) continue;
+          seen.add(key);
           merged.push(model);
         }
       } catch (error) {
@@ -286,7 +287,9 @@ export async function launchClaudeProvider({
     try { selected = await selectModel(Object.freeze({ provider: mixed ? 'all' : provider, models: Object.freeze(preferred) })); }
     catch { throw safety(); }
   }
-  const matched = typeof selected === 'string' ? resolveCatalogModel(catalog, selected) : null;
+  const matched = typeof selected === 'string'
+    ? (mixed ? resolveMixedCatalogModel(catalog, selected) : resolveCatalogModel(catalog, selected))
+    : null;
   if (!safeModel(selected) || !matched) {
     throw modelNotFound(mixed ? 'all' : provider, typeof selected === 'string' ? selected : 'invalid');
   }
@@ -371,7 +374,7 @@ export async function launchClaudeProvider({
     try { await picker?.close(); } catch { /* picker lifetime cannot own the child result */ }
   }
   if (!exited && !signaled) throw safety();
-  const owner = catalog.find(({ id }) => id === selected)?.owned_by ?? provider;
+  const owner = matched.owned_by;
   return Object.freeze({ provider: mixed ? owner : provider, model: selected, exitCode: childResult.code, signal: childResult.signal });
 }
 
