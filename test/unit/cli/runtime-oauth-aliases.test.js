@@ -1,4 +1,7 @@
 import assert from 'node:assert/strict';
+import fs from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
 import test from 'node:test';
 
 import { Secret } from '../../../src/core/secrets.js';
@@ -12,6 +15,29 @@ test('production launcher context wires oauth alias synchronization and readines
 
   assert.equal(typeof context.syncOAuthAliases, 'function');
   assert.equal(typeof context.waitForAliasReady, 'function');
+});
+
+test('syncManagedOAuthAliases production dependencies acquire the installation lock with managed paths', async (t) => {
+  const temporaryRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'claudey-runtime-oauth-lock-'));
+  const root = await fs.realpath(temporaryRoot);
+  t.after(() => fs.rm(temporaryRoot, { recursive: true, force: true }));
+  const paths = {
+    configRoot: path.join(root, 'config'),
+    authRoot: path.join(root, 'auth'),
+    stateRoot: path.join(root, 'state')
+  };
+  await Promise.all(Object.values(paths).map((directory) => fs.mkdir(directory, { recursive: true })));
+
+  await runtime.syncManagedOAuthAliases({
+    paths,
+    port: 8317,
+    token: TOKEN,
+    models: [{ id: 'gpt-5.6-sol', object: 'model', created: 1, owned_by: 'codex' }]
+  });
+
+  const written = await fs.readFile(path.join(paths.configRoot, 'config.yaml'), 'utf8');
+  assert.match(written, new RegExp(visibleModelId('codex', 'gpt-5.6-sol'), 'u'));
+  await assert.rejects(() => fs.readFile(path.join(paths.stateRoot, 'install.lock')), { code: 'ENOENT' });
 });
 
 test('syncManagedOAuthAliases atomically replaces managed config containing oauth-model-alias', async () => {
@@ -54,6 +80,10 @@ oauth-model-alias:
       display-name: "My custom alias"
       force-mapping: false
       fork: true
+    - name: "inherited-model"
+      alias: "no-force-alias"
+      display-name: "No force alias"
+      fork: false
     - name: "stale-model"
       alias: "${visibleModelId('codex', 'stale-model')}"
       display-name: "Stale managed alias"
@@ -93,6 +123,12 @@ oauth-model-alias:
   assert.match(written, /alias: "my-custom-alias"/u);
   assert.match(written, /force-mapping: false/u);
   assert.match(written, /fork: true/u);
+  const noForceStart = written.indexOf('name: "inherited-model"');
+  const noForceEnd = written.indexOf('name: "gpt-5.6-sol"', noForceStart);
+  assert.notEqual(noForceStart, -1);
+  assert.notEqual(noForceEnd, -1);
+  assert.doesNotMatch(written.slice(noForceStart, noForceEnd), /force-mapping:/u);
+  assert.match(written.slice(noForceStart, noForceEnd), /fork: false/u);
   assert.match(written, /alias: "personal-grok"/u);
   assert.doesNotMatch(written, /stale-model/u);
   assert.match(written, new RegExp(visibleModelId('codex', 'gpt-5.6-sol'), 'u'));

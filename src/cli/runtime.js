@@ -265,7 +265,7 @@ export async function syncManagedOAuthAliases({
   acquireLock = acquireOAuthAliasLock
 }) {
   const managed = buildManagedOAuthAliases(models);
-  const lock = await acquireLock({ kind: 'oauth-alias-sync', paths });
+  const lock = await acquireLock(paths);
   if (!lock || typeof lock.assertHeld !== 'function' || typeof lock.release !== 'function') {
     throw failure('SAFETY_REFUSAL', 'Configuration mutation requires the installation lock.');
   }
