@@ -44,8 +44,27 @@ test('picker catalog uses non-Fable anthropic IDs and keeps usage in the display
   assert.equal(/fable/i.test(catalog[0].id), false);
   assert.match(catalog[0].display_name, /grok-4\.5/);
   assert.match(catalog[0].display_name, /83% left/);
-  assert.equal(upstreamModelId(catalog[0].id, { anthropic: true }).startsWith('claude-fable-5-dd-'), true);
-  assert.equal(upstreamModelId(catalog[0].id, { anthropic: false }), 'grok-4.5');
+  assert.equal(upstreamModelId(catalog[0].id, { anthropic: true }), catalog[0].id);
+  assert.equal(upstreamModelId(catalog[0].id, { anthropic: false }), catalog[0].id);
+});
+
+test('picker catalog uses provider-labeled display names', () => {
+  const catalog = pickerCatalog([
+    { id: 'gpt-5.6-sol', object: 'model', created: 1, owned_by: 'codex', usage: { remainingPercent: 40, status: 'available' } },
+    { id: 'gpt-5.6-sol', object: 'model', created: 2, owned_by: 'antigravity' }
+  ]);
+  assert.equal(catalog.length, 2);
+  assert.equal(catalog[0].id, visibleModelId('codex', 'gpt-5.6-sol'));
+  assert.equal(catalog[0].display_name, 'gpt-5.6-sol — Codex · 40% left');
+  assert.equal(catalog[1].id, visibleModelId('antigravity', 'gpt-5.6-sol'));
+  assert.equal(catalog[1].display_name, 'gpt-5.6-sol — Antigravity');
+});
+
+test('provider-qualified visible IDs are forwarded upstream without stripping or cloaking', () => {
+  const visible = visibleModelId('codex', 'gpt-5.6-sol');
+  assert.equal(upstreamModelId(visible, { anthropic: true }), visible);
+  assert.equal(upstreamModelId(visible, { anthropic: false }), visible);
+  assert.equal(upstreamModelId('grok-4.5', { anthropic: true }).startsWith('claude-fable-5-dd-'), true);
 });
 
 test('picker gateway serves the rewritten catalog and rewrites inference model IDs', async () => {
@@ -82,28 +101,37 @@ test('picker gateway serves the rewritten catalog and rewrites inference model I
     const denied = await get(picker.port, { headers: { authorization: 'Bearer wrong' } });
     assert.equal(denied.status, 401);
 
-    const inference = await new Promise((resolve, reject) => {
-      const request = http.request({
-        host: '127.0.0.1',
-        port: picker.port,
-        path: '/v1/messages?beta=true',
-        method: 'POST',
-        headers: {
-          authorization: BEARER,
-          'anthropic-version': '2023-06-01',
-          'content-type': 'application/json'
-        }
-      }, (response) => {
-        const chunks = [];
-        response.on('data', (chunk) => chunks.push(chunk));
-        response.on('end', () => resolve({ status: response.statusCode, body: Buffer.concat(chunks).toString('utf8') }));
+    async function postInference(model) {
+      return new Promise((resolve, reject) => {
+        const request = http.request({
+          host: '127.0.0.1',
+          port: picker.port,
+          path: '/v1/messages?beta=true',
+          method: 'POST',
+          headers: {
+            authorization: BEARER,
+            'anthropic-version': '2023-06-01',
+            'content-type': 'application/json'
+          }
+        }, (response) => {
+          const chunks = [];
+          response.on('data', (chunk) => chunks.push(chunk));
+          response.on('end', () => resolve({ status: response.statusCode, body: Buffer.concat(chunks).toString('utf8') }));
+        });
+        request.on('error', reject);
+        request.end(JSON.stringify({ model, messages: [] }));
       });
-      request.on('error', reject);
-      request.end(JSON.stringify({ model: visibleModelId('grok', 'grok-4.5'), messages: [] }));
-    });
+    }
+
+    const grokVisible = visibleModelId('grok', 'grok-4.5');
+    const codexVisible = visibleModelId('codex', 'gpt-5.6-sol');
+    const inference = await postInference(grokVisible);
     assert.equal(inference.status, 200);
-    assert.equal(seen.length, 1);
-    assert.equal(JSON.parse(seen[0].body).model, 'claude-fable-5-dd-5.4-korg');
+    const codexInference = await postInference(codexVisible);
+    assert.equal(codexInference.status, 200);
+    assert.equal(seen.length, 2);
+    assert.equal(JSON.parse(seen[0].body).model, grokVisible);
+    assert.equal(JSON.parse(seen[1].body).model, codexVisible);
   } finally {
     await picker.close();
     await new Promise((resolve) => upstream.close(resolve));

@@ -38,6 +38,7 @@ function anthropicRequest(request) {
 }
 
 export function upstreamModelId(value, { anthropic = false } = {}) {
+  if (parseVisibleModelId(value)) return value;
   const raw = sourceModelId(value);
   return anthropic ? cloakModelId(raw) : raw;
 }
