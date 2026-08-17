@@ -13,9 +13,10 @@ import { attachUsage, collectProviderUsage } from '../providers/usage.js';
 import { ClaudeyError } from '../core/errors.js';
 import { createOfficialHttpsClient } from '../core/http.js';
 import { getManagedPaths } from '../core/paths.js';
+import { atomicReplace } from '../core/permissions.js';
 import { downloadVerifiedRelease, resolveRelease } from '../core/release.js';
 import { Secret } from '../core/secrets.js';
-import { buildGatewayConfig } from '../core/config.js';
+import { buildGatewayConfig, GATEWAY_CONFIG_CHILD } from '../core/config.js';
 import { probeAuthCapabilities } from '../providers/auth.js';
 import { buildManagedOAuthAliases } from '../providers/oauth-aliases.js';
 import { createDefaultExecutableAdapter, resolveVerifiedExecutable } from '../core/executable.js';
@@ -165,7 +166,14 @@ async function waitForAuthModels(installed) {
   return modelsReady(installed.port, installed.token);
 }
 
-export async function syncManagedOAuthAliases({ paths, port, token, models, fsApi = fs }) {
+export async function syncManagedOAuthAliases({
+  paths,
+  port,
+  token,
+  models,
+  fsApi = fs,
+  atomicReplace: replace = atomicReplace
+}) {
   const oauthModelAlias = buildManagedOAuthAliases(models);
   const bytes = buildGatewayConfig({
     port,
@@ -173,7 +181,12 @@ export async function syncManagedOAuthAliases({ paths, port, token, models, fsAp
     token,
     oauthModelAlias
   });
-  await fsApi.writeFile(path.join(paths.configRoot, 'config.yaml'), bytes, { mode: 0o600 });
+  await replace({
+    root: paths.configRoot,
+    child: GATEWAY_CONFIG_CHILD,
+    bytes,
+    mode: 0o600
+  }, { fsApi });
   return Object.freeze({ synced: true, oauthModelAlias });
 }
 

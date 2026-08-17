@@ -1,5 +1,4 @@
 import assert from 'node:assert/strict';
-import path from 'node:path';
 import test from 'node:test';
 
 import { Secret } from '../../../src/core/secrets.js';
@@ -15,25 +14,26 @@ test('production launcher context wires oauth alias synchronization and readines
   assert.equal(typeof context.waitForAliasReady, 'function');
 });
 
-test('syncManagedOAuthAliases writes managed config containing oauth-model-alias', async () => {
+test('syncManagedOAuthAliases atomically replaces managed config containing oauth-model-alias', async () => {
   assert.equal(typeof runtime.syncManagedOAuthAliases, 'function');
-  const writes = [];
+  const replacements = [];
   const paths = { configRoot: '/managed/config', authRoot: '/managed/auth' };
   const result = await runtime.syncManagedOAuthAliases({
     paths,
     port: 8317,
     token: TOKEN,
     models: [{ id: 'gpt-5.6-sol', object: 'model', created: 1, owned_by: 'codex' }],
-    fsApi: {
-      writeFile: async (...args) => writes.push(args)
-    }
+    atomicReplace: async (...args) => replacements.push(args)
   });
 
-  assert.equal(writes.length, 1);
-  assert.equal(writes[0][0], path.join(paths.configRoot, 'config.yaml'));
-  assert.deepEqual(writes[0][2], { mode: 0o600 });
-  assert.match(writes[0][1].toString('utf8'), /oauth-model-alias:/u);
-  assert.match(writes[0][1].toString('utf8'), new RegExp(visibleModelId('codex', 'gpt-5.6-sol'), 'u'));
+  assert.equal(replacements.length, 1);
+  assert.deepEqual({
+    root: replacements[0][0].root,
+    child: replacements[0][0].child,
+    mode: replacements[0][0].mode
+  }, { root: paths.configRoot, child: 'config.yaml', mode: 0o600 });
+  assert.match(replacements[0][0].bytes.toString('utf8'), /oauth-model-alias:/u);
+  assert.match(replacements[0][0].bytes.toString('utf8'), new RegExp(visibleModelId('codex', 'gpt-5.6-sol'), 'u'));
   assert.equal(result.synced, true);
   assert.equal(result.oauthModelAlias.codex[0].alias, visibleModelId('codex', 'gpt-5.6-sol'));
 });
