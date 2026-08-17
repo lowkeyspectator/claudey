@@ -290,7 +290,10 @@ export async function launchClaudeProvider({
   let selected = parsed.model;
   if (selected === undefined) {
     const preferred = mixed
-      ? rankPickerModels(catalog)
+      ? rankPickerModels(catalog).map((model) => Object.freeze({
+          ...model,
+          id: visibleModelId(model.owned_by, model.id)
+        }))
       : provider === 'codex' && catalog.some(({ id }) => id === PREFERRED_CODEX_MODEL)
         ? [catalog.find(({ id }) => id === PREFERRED_CODEX_MODEL), ...catalog.filter(({ id }) => id !== PREFERRED_CODEX_MODEL)]
         : [...catalog];

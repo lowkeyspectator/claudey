@@ -149,14 +149,19 @@ export async function openExclusive({
   }
 
   let released = false;
+  const assertHeld = async () => {
+    if (released) throw safetyRefusal('Installation lock has already been released.');
+    await assertContainedNoLinks({ root, child, platform }, safetyDeps);
+    const current = await readRecord(lockPath, fsApi);
+    if (!current || current.nonce !== record.nonce) throw safetyRefusal('Installation lock ownership changed.');
+  };
   return {
     record,
+    assertHeld,
     async release() {
       if (released) return;
       try {
-        await assertContainedNoLinks({ root, child, platform }, safetyDeps);
-        const current = await readRecord(lockPath, fsApi);
-        if (!current || current.nonce !== record.nonce) throw safetyRefusal('Lock ownership changed before release.');
+        await assertHeld();
         await assertContainedNoLinks({ root, child, platform }, safetyDeps);
         const finalRecord = await readRecord(lockPath, fsApi);
         if (!finalRecord || finalRecord.nonce !== record.nonce) throw safetyRefusal('Lock ownership changed before release.');

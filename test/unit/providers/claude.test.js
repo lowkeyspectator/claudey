@@ -281,6 +281,44 @@ test('mixed session keeps duplicate raw model IDs from different providers', asy
   assert.match(announced.join('\n'), /gpt-5\.6-sol — Antigravity/u);
 });
 
+test('mixed interactive selector qualifies duplicate IDs so either provider can be selected', async () => {
+  const listModels = async (name) => ({
+    provider: name,
+    status: 'available',
+    models: name === 'grok' ? [] : [
+      { id: 'shared-model', object: 'model', created: name === 'codex' ? 1 : 2, owned_by: name }
+    ]
+  });
+
+  for (const expectedProvider of ['codex', 'antigravity']) {
+    const selectedId = visibleModelId(expectedProvider, 'shared-model');
+    const f = fixture({
+      parsed: { model: undefined, select: true, all: true, claudeArgs: [], nonInteractive: false },
+      listModels,
+      selectModel: async ({ models }) => {
+        assert.deepEqual(
+          models.map(({ id }) => id).sort(),
+          [
+            visibleModelId('antigravity', 'shared-model'),
+            visibleModelId('codex', 'shared-model')
+          ].sort()
+        );
+        return selectedId;
+      },
+      syncOAuthAliases: async () => ({ synced: true, oauthModelAlias: {} }),
+      waitForAliasReady: async () => true,
+      startPicker: async () => ({ host: '127.0.0.1', port: 19_004, close: async () => {} })
+    });
+
+    const result = await launchClaudeProvider(f.value);
+    assert.equal(result.provider, expectedProvider);
+    assert.deepEqual(
+      f.calls.at(-1).invocation.args.slice(-4),
+      ['--model', selectedId, '--fallback-model', selectedId]
+    );
+  }
+});
+
 test('mixed launch syncs oauth aliases before starting the picker', async () => {
   const events = [];
   const f = fixture({

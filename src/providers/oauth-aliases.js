@@ -1,4 +1,4 @@
-import { isGatewayProvider, visibleModelId } from './catalog.js';
+import { isGatewayProvider, parseVisibleModelId, visibleModelId } from './catalog.js';
 import { providerTitle } from './usage.js';
 
 export function oauthAliasChannel(provider) {
@@ -12,14 +12,18 @@ export function buildManagedOAuthAliases(models) {
   const result = Object.create(null);
   if (!Array.isArray(models)) return result;
   for (const model of models) {
-    if (!model || typeof model.id !== 'string' || !isGatewayProvider(model.owned_by)) continue;
-    const channel = oauthAliasChannel(model.owned_by);
-    const title = providerTitle(model.owned_by);
+    if (!model || typeof model.id !== 'string') continue;
+    const visible = parseVisibleModelId(model.id);
+    const provider = visible?.provider ?? model.owned_by;
+    const rawId = visible?.id ?? model.id;
+    if (!isGatewayProvider(provider)) continue;
+    const channel = oauthAliasChannel(provider);
+    const title = providerTitle(provider);
     if (!channel || !title) continue;
     const entry = Object.freeze({
-      name: model.id,
-      alias: visibleModelId(model.owned_by, model.id),
-      displayName: `${model.id} — ${title}`,
+      name: rawId,
+      alias: visibleModelId(provider, rawId),
+      displayName: `${rawId} — ${title}`,
       forceMapping: true
     });
     if (!result[channel]) result[channel] = [];

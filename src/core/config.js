@@ -47,11 +47,12 @@ function renderOAuthModelAlias(oauthModelAlias) {
     for (const entry of oauthModelAlias[channel]) {
       const name = quoteYamlString(entry?.name, 'OAuth model alias name');
       const alias = quoteYamlString(entry?.alias, 'OAuth model alias');
-      const displayName = quoteYamlString(entry?.displayName, 'OAuth model alias display name');
       lines.push('    - name: ' + name);
       lines.push('      alias: ' + alias);
-      lines.push('      display-name: ' + displayName);
-      lines.push('      force-mapping: true');
+      if (entry?.displayName !== undefined) {
+        lines.push('      display-name: ' + quoteYamlString(entry.displayName, 'OAuth model alias display name'));
+      }
+      lines.push(`      force-mapping: ${entry?.forceMapping === false ? 'false' : 'true'}`);
     }
   }
   return `${lines.join('\n')}\n`;

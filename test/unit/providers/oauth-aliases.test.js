@@ -25,3 +25,22 @@ test('builds provider-scoped OAuth aliases from the live mixed catalog', () => {
   assert.equal(aliases.xai[0].alias, visibleModelId('grok', 'grok-4.5'));
   assert.equal(aliases.xai[0].displayName, 'grok-4.5 — Grok');
 });
+
+test('rebuilds identical raw-to-visible mappings from a previously aliased gateway catalog', () => {
+  const first = buildManagedOAuthAliases([
+    { id: 'gpt-5.6-sol', owned_by: 'codex' },
+    { id: 'gemini-3-flash', owned_by: 'antigravity' },
+    { id: 'grok-4.5', owned_by: 'grok' }
+  ]);
+  const second = buildManagedOAuthAliases([
+    { id: first.codex[0].alias, owned_by: 'openai' },
+    { id: first.antigravity[0].alias, owned_by: 'google' },
+    { id: first.xai[0].alias, owned_by: 'xai' }
+  ]);
+
+  assert.deepEqual(second, first);
+  assert.equal(
+    Object.values(second).flat().some((entry) => entry.name === entry.alias),
+    false
+  );
+});
