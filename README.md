@@ -1,8 +1,10 @@
 # Claudey
 
-**Run Claude Code on Codex, Antigravity, and Grok — one harness, one `/model` menu, live quota on every row.**
+**Use Claude Code with any of your subscriptions — Antigravity, Codex, or Grok.**
 
-Claudey is a per-user manager that keeps the full Claude Code experience (tools, Task subagents, agent teams) while routing inference through a **local CLIProxyAPI gateway** on your machine. Sign in to the providers you use, run `claudey`, and switch models inside Claude Code without touching global Claude settings.
+Same Claude Code app: tools, Task subagents, agent teams, `/model`. Different backends: Google Antigravity, OpenAI Codex, and/or xAI Grok — whichever you’re signed into. Mix them in one session or pin a single provider.
+
+Claudey runs a **local CLIProxyAPI gateway** on your machine, signs you in with explicit OAuth, and launches Claude Code so inference uses those subscriptions instead of (or alongside) Anthropic-only routing. Your normal `claude` install stays untouched.
 
 > **Pre-release:** do not rely on this for production until CI, provenance, security reporting, and manual validation gates all pass.
 
@@ -12,12 +14,13 @@ Claudey is a per-user manager that keeps the full Claude Code experience (tools,
 
 | You want… | Claudey gives you… |
 |---|---|
-| One Claude Code workflow across OpenAI, Google, and xAI | Mixed `claudey` session with provider-labeled `/model` options |
-| Remaining quota visible before you pick a model | Live usage on picker rows (`61%/7d · 100%/5h`, `100% left`, etc.) |
-| Your normal `claude` command untouched | Gateway env only on the child process Claudey launches |
+| Claude Code, not a different IDE/agent | Real Claude Code harness — only the model backend changes |
+| Antigravity **or** Codex **or** Grok (or all three) | Auth each subscription you have; use one launcher or a mixed session |
+| One `/model` menu across providers | Provider-labeled options with live remaining quota |
+| Your global Claude settings left alone | Gateway env only on the child process Claudey starts |
 | Fail-closed safety | Verified binaries, localhost-only gateway, explicit OAuth, no silent auth |
 
-**Who it’s for:** developers who already use Claude Code and want subscription-backed Codex, Antigravity, or Grok models in the same session — without maintaining separate proxy env vars by hand.
+**Who it’s for:** people who already have (or plan to use) Antigravity, Codex, and/or Grok subscriptions and want to drive them from Claude Code.
 
 **Who it’s not for:** system-wide installs, containers as the install target, or routing Cursor Composer through the same gateway picker (see [Model segments](#model-segments) below).
 
@@ -42,12 +45,14 @@ Or from this checkout:
 claudey onboard --yes
 ```
 
-### 2. Sign in to providers
+### 2. Sign in to the subscriptions you use
+
+Any combination works — auth only what you have:
 
 ```text
-claudey auth grok
-claudey auth antigravity
-claudey auth codex
+claudey auth antigravity   # Google Antigravity
+claudey auth codex         # OpenAI Codex
+claudey auth grok          # xAI Grok
 ```
 
 OAuth is always interactive — never silent, never in CI.
