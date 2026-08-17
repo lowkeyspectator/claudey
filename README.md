@@ -1,163 +1,212 @@
 # Claudey
 
-## Beginner quick start
+**Run Claude Code on Codex, Antigravity, and Grok — one harness, one `/model` menu, live quota on every row.**
 
-1. Install [Claude Code](https://claude.com/download) (any current 2.1.229+ release is fine).
-2. From this folder, or after install, run:
+Claudey is a per-user manager that keeps the full Claude Code experience (tools, Task subagents, agent teams) while routing inference through a **local CLIProxyAPI gateway** on your machine. Sign in to the providers you use, run `claudey`, and switch models inside Claude Code without touching global Claude settings.
+
+> **Pre-release:** do not rely on this for production until CI, provenance, security reporting, and manual validation gates all pass.
+
+---
+
+## Why Claudey
+
+| You want… | Claudey gives you… |
+|---|---|
+| One Claude Code workflow across OpenAI, Google, and xAI | Mixed `claudey` session with provider-labeled `/model` options |
+| Remaining quota visible before you pick a model | Live usage on picker rows (`61%/7d · 100%/5h`, `100% left`, etc.) |
+| Your normal `claude` command untouched | Gateway env only on the child process Claudey launches |
+| Fail-closed safety | Verified binaries, localhost-only gateway, explicit OAuth, no silent auth |
+
+**Who it’s for:** developers who already use Claude Code and want subscription-backed Codex, Antigravity, or Grok models in the same session — without maintaining separate proxy env vars by hand.
+
+**Who it’s not for:** system-wide installs, containers as the install target, or routing Cursor Composer through the same gateway picker (see [Model segments](#model-segments) below).
+
+---
+
+## Get started
+
+**Prerequisites:** [Claude Code](https://claude.com/download) 2.1.229+, Node.js 22.20+.
+
+### 1. Install
+
+From a [verified release](docs/validation/README.md):
+
+```text
+./install.sh --yes          # macOS / Linux
+.\install.ps1 -Yes          # Windows
+```
+
+Or from this checkout:
 
 ```text
 claudey onboard --yes
+```
+
+### 2. Sign in to providers
+
+```text
 claudey auth grok
 claudey auth antigravity
 claudey auth codex
-claudey
 ```
 
-`claudey` starts Claude Code with every signed-in provider. Use `claudey --yolo` to skip permission prompts. Newer Claude Code versions are accepted as they release; only a verified `claude` binary at or above 2.1.229 is required.
+OAuth is always interactive — never silent, never in CI.
 
-Claudey is a per-user, zero-runtime-dependency Node.js manager for running Claude Code against models exposed by a locally managed CLIProxyAPI gateway. `claudey` is the primary unified executable functioning as both an interactive Claude Code CLI proxy launcher (`claudey --yolo`, `claudey --model ...`, `claudey --select`) and as the management orchestration CLI (`claudey setup`, `claudey status`, `claudey auth`, `claudey models`, `claudey doctor`, etc.). `claudeyctl` is available as a dedicated management binary and alias. Single-provider launchers include `claude-codex` (OpenAI Codex backend), `claude-agy` (Google Antigravity backend), `claude-grok` (xAI Grok backend), and the optional Claude Code plugin delegates bounded tasks to Cursor Agent. All launchers keep the Claude Code harness — tools, Task subagents, and agent teams — on the selected live model.
+### 3. Launch
 
-The normal `claude` remains isolated: Claudey does not replace it, edit Claude settings to add proxy variables, or persist gateway credentials in the global environment. Routing variables exist only in the child launched by `claudey`, `claude-codex`, `claude-agy`, or `claude-grok`.
+```text
+claudey              # mixed session — all signed-in gateway providers
+claudey --yolo       # same, with skip-permissions mode
+claudey --select     # pick a model before launch
+```
 
-> **Pre-release status:** do not publish or rely on a release until all blocking CI, provenance, private security-reporting, and manual validation gates pass.
+Inside Claude Code, use **`/model`** to switch. Each option looks like:
 
-## Trust and account warning
+```text
+gemini-3-flash - Antigravity | 61%/7d · 100%/5h
+grok-4.6 - Grok | 100% left
+gpt-5.6-sol - Codex | 40% left
+```
 
-CLIProxyAPI is a third-party executable with access to OAuth credentials and prompt traffic. It is not audited or endorsed by OpenAI, Anthropic, Google, or Cursor. Subscription OAuth through a proxy may have provider terms or account consequences. Review the upstream project and your provider terms before opting in.
+Verify catalogs and usage anytime:
 
-OAuth is always explicit OAuth initiated by a person. Claudey never authenticates silently and refuses auth in CI or noninteractive mode. Cursor is also opt-in: `setup --with-cursor` enables integration only after a verified local Cursor Agent is available, while explicit Cursor installation is a separate command that shows the final official URL and SHA-256 before execution.
+```text
+claudey models all --json
+claudey doctor
+```
 
-## Supported platforms and upstream assets
+---
 
-`VERSION` excludes the leading `v`. Standard CLIProxyAPI archives are selected; `no-plugin` archives are not.
+## Model segments
 
-| Platform | Minimum baseline | Node target | CLIProxyAPI asset suffix |
+Mixed `/model` is **gateway-backed only**. Cursor Composer lives on a separate path.
+
+| Segment | Example models | Usage in `/model` | How to verify |
 |---|---|---|---|
-| Windows x64 | Windows 10 1809 | `win32/x64` | `_windows_amd64.zip` |
-| Windows ARM64 | Windows 10 1809 ARM64 | `win32/arm64` | `_windows_aarch64.zip` |
-| macOS Intel | macOS 13 | `darwin/x64` | `_darwin_amd64.tar.gz` |
-| macOS Apple silicon | macOS 13 | `darwin/arm64` | `_darwin_aarch64.tar.gz` |
-| Linux x64 | Ubuntu 20.04+/Debian 10+ glibc | `linux/x64` | `_linux_amd64.tar.gz` |
-| Linux ARM64 | Ubuntu 20.04+/Debian 10+ glibc | `linux/arm64` | `_linux_aarch64.tar.gz` |
-| WSL 1/2 | supported glibc distribution | Linux architecture | matching Linux suffix |
+| **Codex** | `gpt-5.6-sol`, `gpt-5.3-codex-spark` | `% left`, named extra windows | `claudey models codex --json` |
+| **Antigravity** | `gemini-3-flash`, `claude-sonnet-4-6` | Dual pool: `%/7d · %/5h` | `claudey models antigravity --json` |
+| **Grok** | `grok-4.6`, `grok-4.5` | `% left` (weekly period) | `claudey models grok --json` |
+| **Cursor / Composer** | `composer-2.5`, `composer-2.5-fast` | *Not in mixed `/model`* | `claudey models cursor --json` |
 
-Musl, unrecognized distributions, other architectures, containers as an installation target, and system-wide installation are not supported. WSL is a separate installation: do not share Windows binaries, configuration, state, OAuth files, or PID records through a mounted Windows path. WSL 1 networking and WSL 2 localhost forwarding can create a port collision with the Windows gateway; Claudey refuses to adopt or kill the unrelated listener.
+**Composer note:** Cursor models use Cursor auth and Cursor’s runtime. They appear under `claudey models cursor`, not in the gateway mixed picker, because mixed sessions forward inference to CLIProxy — not to Cursor Agent. Full explanation: [Usage labels and the mixed model picker](docs/usage-and-model-picker.md#segment-d--cursor--composer-not-in-mixed-model).
 
-## Prerequisites
+**Duplicate model names across providers:** mixed sessions keep both (e.g. same id from Codex and Antigravity) with provider labels and provider-qualified routing — see [provider-labeled selection design](docs/superpowers/specs/2026-08-16-provider-labeled-model-selection-design.md).
 
-- Node.js 22.20.0 or newer on a currently supported Node release line.
-- Claude Code 2.1.229 or newer, installed separately and verifiable by identity and capabilities.
-- Windows PowerShell 5.1+ on Windows; system `tar` on macOS/Linux.
-- Git only for the approved Cursor worktree tool.
-- Cursor Agent only when Cursor integration is requested.
+---
 
-CLIProxyAPI 7.2.130 is the initial compatibility baseline. Newer upstream versions are accepted only after their installed capability probes pass. Model names and dynamic entitlements are account-specific and are always discovered live.
-
-## Bootstrap
-
-Download the bootstrap and the release manifest from the same release, verify the published checksums and provenance, then run one of:
+## How it works
 
 ```text
-./install.sh [--version VERSION] [--yes] [--no-path] [--rollback-manager]
-.\install.ps1 [-Version VERSION] [-Yes] [-NoPath] [-RollbackManager]
+You → claudey → Claude Code (tools, subagents, /model)
+                    ↓
+              picker gateway (localhost)
+                    ↓
+              CLIProxyAPI (127.0.0.1, bearer token)
+                    ↓
+         Codex · Antigravity · Grok  (OAuth per provider)
 ```
 
-The scripts install only inside the current user's managed roots and then run `claudey setup`. They do not require administrator/root access and do not start OAuth. Re-running the bootstrap is the manager self-update path.
+- **`claudey`** — mixed launcher + management CLI (`setup`, `auth`, `models`, `doctor`, …).
+- **`claudeyctl`** — same management commands, dedicated binary alias.
+- **`claude-codex`**, **`claude-agy`**, **`claude-grok`** — single-provider Claude Code launchers.
+- **Optional Cursor plugin** — bounded delegation to Cursor Agent (separate from gateway `/model`).
 
-On Windows, an execution policy may block a downloaded script. Do not weaken a machine or organization policy. Inspect the script and verified release metadata, and use only an organization-approved process-scoped invocation if policy permits. See [troubleshooting](docs/troubleshooting.md).
+Models are always discovered **live** from authenticated catalogs — nothing is bundled or guessed.
 
-## Public command reference
+---
 
-Global management flags are `--json`, `--no-color`, `--verbose`, and `--non-interactive`; `CI=true` is noninteractive.
-
-```text
-claudey onboard [--yes]
-claudey setup [--version VERSION] [--port PORT] [--with-cursor] [--no-start] [--no-path] [--yes]
-claudey install [--version VERSION] [--port PORT] [--yes]
-claudey auth codex [--device-code | --no-browser] [--callback-port PORT]
-claudey auth antigravity [--no-browser] [--callback-port PORT]
-claudey auth grok [--device-code | --no-browser] [--callback-port PORT]
-claudey auth all [options]
-claudey start [--foreground]
-claudey stop
-claudey restart
-claudey status [--json]
-claudey update [--check | --version VERSION] [--yes]
-claudey rollback [--version VERSION] [--yes]
-claudey models [codex | antigravity | grok | cursor | all] [--json]
-claudey doctor [--json]
-claudey config set port PORT [--yes]
-claudey cursor enable [--scope user | local]
-claudey cursor disable [--scope user | local]
-claudey cursor install [--yes]
-claudey cursor login
-claudey cursor repo add [PATH]
-claudey cursor repo list
-claudey cursor repo remove [PATH]
-claudey cursor writes enable --yes
-claudey cursor writes disable
-claudey cursor approve APPROVAL_ID
-claudey uninstall [--dry-run] [--purge-auth] [--yes]
-```
-
-Note: All management commands can also be run using the `claudeyctl` executable alias.
-
-Launchers:
+## Launchers
 
 ```text
 claudey [--model MODEL | --select | --yolo] [-- CLAUDE_ARGS...]
 claude-codex [--model MODEL | --select | --all | --yolo] [-- CLAUDE_ARGS...]
-claude-agy [--model MODEL | --select | --yolo] [-- CLAUDE_ARGS...]
-claude-grok [--model MODEL | --select | --yolo] [-- CLAUDE_ARGS...]
+claude-agy   [--model MODEL | --select | --yolo] [-- CLAUDE_ARGS...]
+claude-grok  [--model MODEL | --select | --yolo] [-- CLAUDE_ARGS...]
 ```
 
-`claudey` starts a mixed session by default. `--yolo` enables Claude Code skip-permissions mode (`--dangerously-skip-permissions`). The delimiter is required before other Claude arguments. Values are forwarded as discrete arguments, never reconstructed as a shell command. In a noninteractive terminal, `--model` is required.
+- **`--yolo`** — Claude Code skip-permissions mode (`--dangerously-skip-permissions`).
+- Use **`--`** before forwarding arbitrary Claude arguments (noninteractive mode requires **`--model`**).
+- Checkout dev entrypoint: `node bin/claudey.js launcher claudey --`
 
-### Model picker usage labels
+---
 
-In mixed sessions, `/model` options look like `model-id - Provider | usage` (for example `gemini-3-flash - Antigravity | 61%/7d · 100%/5h` or `grok-4.6 - Grok | 100% left`). Codex, Antigravity, and Grok are gateway-backed. **Cursor Composer is not** in that list — use `claudey models cursor` and Cursor integration commands instead.
+## Platforms
 
-Per-provider verify steps, failure tables, and the Composer boundary: [Usage labels and the mixed model picker](docs/usage-and-model-picker.md). Design notes: [2026-08-17 provider usage and picker hardening](docs/superpowers/specs/2026-08-17-provider-usage-and-picker-hardening-design.md).
+| Platform | Minimum | Notes |
+|---|---|---|
+| macOS 13+ (Intel / Apple silicon) | Node 22.20+, Claude Code 2.1.229+ | Managed state under `~/Library/Application Support/claudeyctl/` |
+| Windows 10 1809+ (x64 / ARM64) | PowerShell 5.1+ | See [troubleshooting](docs/troubleshooting.md) for execution policy |
+| Linux x64 / ARM64 (glibc) | Ubuntu 20.04+ / Debian 10+ | No musl, no system-wide install |
+| WSL 1/2 | Separate install from Windows | Do not share OAuth/state across the boundary |
 
-From this repository checkout on Windows, the same commands are:
+CLIProxyAPI compatibility is probed at install time; newer upstream versions are accepted only after capability checks pass.
+
+---
+
+## Trust and security
+
+CLIProxyAPI is a **third-party** local proxy with access to OAuth credentials and prompt traffic. It is not audited or endorsed by OpenAI, Anthropic, Google, or xAI. Subscription OAuth through a proxy may have provider terms implications — review upstream CLIProxyAPI and your provider terms before opting in.
+
+Claudey’s defaults:
+
+- Gateway binds **`127.0.0.1` only**; bearer token required on every request.
+- OAuth tokens stay out of logs, JSON, and command lines.
+- Cursor write delegation is **off** until you explicitly enable it with per-run approval.
+
+Details: [Security](docs/security.md) · [Cursor boundary](#cursor-optional) below.
+
+---
+
+## Cursor (optional)
+
+Cursor integration is opt-in (`claudey setup --with-cursor`). Ask/plan use protected snapshots; writes require `claudey cursor writes enable --yes` and a single-use approval per run.
 
 ```text
-node bin/claudey.js setup --yes --no-path
-node bin/claudey.js auth codex
-node bin/claudey.js auth antigravity
-node bin/claudey.js auth grok
-node bin/claudey.js launcher claudey --
-node bin/claudey.js launcher claude-codex --
-node bin/claudey.js launcher claude-agy --
-node bin/claudey.js launcher claude-grok --
+claudey cursor login
+claudey models cursor --json
 ```
 
-Each launcher starts the real Claude Code harness with the selected live model pinned for the main agent, Task subagents, and haiku/sonnet/opus/fable aliases. The normal `claude` command is left unchanged.
+Cursor never auto-commits, merges, or pushes on your behalf.
 
-`claudey` starts one session against every authenticated provider and fills Claude Code `/model` from a local picker catalog (utility names such as `auto-review` are omitted). Each row is labeled with the live model id, provider, and remaining capacity when that is known. Switch with `/model`. Auth each provider first so its models appear. Use `claudey --yolo` when you want skip-permissions mode.
+---
 
-## Authentication and model selection
+## Common commands
 
-`auth codex` supports browser login and only offers device-code/no-browser modes proven by the installed upstream capability probe. `auth antigravity` behaves the same for its supported browser/no-browser modes. `auth grok` uses the installed CLIProxyAPI xAI/Grok login flags (`--grok-login` when present, otherwise `--xai-login`) and offers device-code when the installed binary reports it. A callback-port collision is reported; Claudey never kills its owner.
+Management (also available as `claudeyctl`):
 
-Models come from authenticated live catalogs with exact provider ownership metadata. No catalog is bundled and no model name is guessed. Upstream drift or changed flags fail closed with a remediation. A provider may disappear from a user's dynamic entitlements at any time.
+```text
+claudey setup | start | stop | status | update | rollback | doctor
+claudey auth {codex|antigravity|grok|all} [options]
+claudey models {codex|antigravity|grok|cursor|all} [--json]
+claudey config set port PORT --yes
+claudey uninstall [--dry-run] [--purge-auth] [--yes]
+```
 
-## Local gateway security
+Global flags: `--json`, `--no-color`, `--verbose`, `--non-interactive` (`CI=true` forces noninteractive).
 
-The gateway binds exactly to `127.0.0.1`; every model and inference request requires a generated bearer token. Localhost is not treated as authentication. Claudey records and revalidates process identity and refuses an unrelated listener. Tokens and OAuth data are excluded from command lines, logs, JSON, profiles, backups, and Cursor environments; provenance-based redaction is backed by secret-canary tests.
+Full command list and Windows checkout equivalents remain in git history and [troubleshooting](docs/troubleshooting.md).
 
-A checksum beside an artifact proves transfer integrity, not publisher identity. The release manifest, SBOM, checksum set, and provenance must agree on exact digests. Even provenance cannot make a compromised upstream binary trustworthy; it establishes how the Claudey artifacts were built.
+---
 
-## Cursor boundary
+## Documentation
 
-Cursor integration is optional. Ask and plan run against protected snapshots. Write delegation is absent until `cursor writes enable --yes`, and every run then needs a separate interactive, single-use approval bound to the exact repository, model, prompt, base commit, and installation.
+| Topic | Doc |
+|---|---|
+| Usage labels, per-provider verify steps, failure tables | [docs/usage-and-model-picker.md](docs/usage-and-model-picker.md) |
+| Antigravity / Grok usage fixes (2026-08-17) | [docs/superpowers/specs/2026-08-17-provider-usage-and-picker-hardening-design.md](docs/superpowers/specs/2026-08-17-provider-usage-and-picker-hardening-design.md) |
+| Provider-labeled mixed selection | [docs/superpowers/specs/2026-08-16-provider-labeled-model-selection-design.md](docs/superpowers/specs/2026-08-16-provider-labeled-model-selection-design.md) |
+| Errors, recovery, rollback | [docs/troubleshooting.md](docs/troubleshooting.md) |
+| Security model | [docs/security.md](docs/security.md) |
+| Release validation | [docs/validation/README.md](docs/validation/README.md) |
 
-A same-user process is not a sandbox. A trusted Cursor binary can still read other files accessible to the account even when its working directory is disposable. Claudey never automatically commits, merges, pushes, copies changes back, or deletes a worktree.
+---
 
-## Recovery, rollback, and uninstall
+## Recovery
 
-Install/update operations journal their phases and preserve the last verified release. On interrupted recovery, rerun the same command or `claudey doctor`; do not delete state by hand. `rollback` is transactional and the default rollback point is single-use. Manager rollback uses the bootstrap `--rollback-manager`/`-RollbackManager` option.
+Interrupted install or odd gateway state:
 
-Start with `claudey uninstall --dry-run`. Default uninstall removes only unchanged, authenticated manifest-owned paths and preserves OAuth data, modified or unlisted files, dirty repositories, and Cursor worktrees. OAuth purge needs `--purge-auth` plus explicit confirmation. Repeated stop/disable/uninstall operations are safe no-ops.
+```text
+claudey doctor
+```
 
-See [security](docs/security.md), [troubleshooting](docs/troubleshooting.md), and [release validation](docs/validation/README.md).
+Do not delete locks, journals, or OAuth files by hand. Rollback: `claudey rollback --yes`. Uninstall preview: `claudey uninstall --dry-run`.
