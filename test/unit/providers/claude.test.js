@@ -321,6 +321,44 @@ test('mixed launch syncs oauth aliases before starting the picker', async () => 
   ]);
 });
 
+test('mixed --model rejects ambiguous raw IDs and accepts unique raw IDs', async () => {
+  const listModels = async (name) => {
+    if (name === 'codex') {
+      return { provider: name, status: 'available', models: [
+        { id: 'shared-model', object: 'model', created: 1, owned_by: 'codex' },
+        { id: 'only-codex', object: 'model', created: 2, owned_by: 'codex' }
+      ] };
+    }
+    if (name === 'antigravity') {
+      return { provider: name, status: 'available', models: [
+        { id: 'shared-model', object: 'model', created: 3, owned_by: 'antigravity' }
+      ] };
+    }
+    return { provider: name, status: 'available', models: [] };
+  };
+
+  await assert.rejects(
+    () => launchClaudeProvider(fixture({
+      parsed: { model: 'shared-model', select: false, all: true, claudeArgs: [], nonInteractive: true },
+      listModels,
+      syncOAuthAliases: async () => ({ synced: true, oauthModelAlias: {} }),
+      waitForAliasReady: async () => true
+    }).value),
+    (error) => error.code === 'MODEL_AMBIGUOUS'
+  );
+
+  const unique = fixture({
+    parsed: { model: 'only-codex', select: false, all: true, claudeArgs: [], nonInteractive: true },
+    listModels,
+    syncOAuthAliases: async () => ({ synced: true, oauthModelAlias: {} }),
+    waitForAliasReady: async () => true,
+    startPicker: async () => ({ host: '127.0.0.1', port: 19_003, close: async () => {} })
+  });
+  const result = await launchClaudeProvider(unique.value);
+  assert.equal(result.provider, 'codex');
+  assert.equal(result.model, 'only-codex');
+});
+
 test('mixed launch fails closed when alias readiness never arrives', async () => {
   const f = fixture({
     parsed: {
