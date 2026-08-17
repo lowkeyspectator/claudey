@@ -10,6 +10,7 @@ import { resolveVerifiedExecutable } from '../../../src/core/executable.js';
 import { Secret } from '../../../src/core/secrets.js';
 import { ClaudeyError } from '../../../src/core/errors.js';
 import { visibleModelId } from '../../../src/providers/catalog.js';
+import { buildManagedOAuthAliases } from '../../../src/providers/oauth-aliases.js';
 import * as claudeProvider from '../../../src/providers/claude.js';
 
 const { launchClaudeProvider, runClaudeProcess } = claudeProvider;
@@ -31,7 +32,8 @@ function executableAdapter() {
 
 const fixtureRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'claudey-claude-unit-'));
 after(() => fs.rm(fixtureRoot, { recursive: true, force: true }));
-const CLAUDE = await resolveVerifiedExecutable({ command: 'claude', platform: 'win32', candidates: [{ path: process.execPath }], adapter: executableAdapter() });
+const CLAUDE = await resolveVerifiedExecutable({ command: 'claude', platform: process.platform, candidates: [{ path: process.execPath }], adapter: executableAdapter() });
+const FIXTURE_CWD = process.platform === 'win32' ? fixtureRoot : 'C:\\claudey-claude-unit';
 const TOKEN_BYTES = Buffer.alloc(32, 17);
 const TOKEN_TEXT = TOKEN_BYTES.toString('base64url');
 
@@ -47,7 +49,7 @@ function fixture(overrides = {}) {
       provider: 'codex',
       parsed: { model: 'gpt-5.6-sol', select: false, claudeArgs: [], nonInteractive: false },
       claude: CLAUDE,
-      cwd: fixtureRoot,
+      cwd: FIXTURE_CWD,
       isTTY: true,
       baseEnvironment: {
         PATH: 'safe-path', SystemRoot: 'C:\\Windows', HOME: 'C:\\Users\\person', TERM: 'xterm',
@@ -62,6 +64,8 @@ function fixture(overrides = {}) {
       listModels: async (provider) => { calls.push(`models:${provider}`); return { provider, status: 'available', models }; },
       selectModel: async (request) => { calls.push({ select: request }); return request.models[0].id; },
       runChild: async (invocation) => { calls.push({ invocation }); return { code: 0, signal: null }; },
+      syncOAuthAliases: async () => ({ synced: true, oauthModelAlias: {} }),
+      waitForAliasReady: async () => true,
       ...overrides
     }
   };
@@ -85,7 +89,7 @@ test('verifies Claude, ensures the gateway, validates a current exact provider m
   assert.deepEqual(invocation.args.slice(-6), ['--model', 'gpt-5.6-sol', '--fallback-model', 'gpt-5.6-sol', '--print', 'hello world']);
   assert.equal(invocation.shell, false);
   assert.equal(invocation.stdio, 'inherit');
-  assert.equal(invocation.cwd, fixtureRoot);
+  assert.equal(invocation.cwd, FIXTURE_CWD);
 });
 
 test('uses a live interactive selector, offers the preferred source model first only when present, and revalidates its exact result', async () => {
@@ -100,6 +104,29 @@ test('uses a live interactive selector, offers the preferred source model first 
   });
   await assert.rejects(launchClaudeProvider(hostile.value), (error) => error.code === 'MODEL_NOT_FOUND');
   assert.equal(hostile.calls.some((call) => call?.invocation), false);
+});
+
+test('single-provider launch normalizes a managed visible catalog alias to its raw upstream model', async () => {
+  const f = fixture({
+    listModels: async (provider) => ({
+      provider,
+      status: 'available',
+      models: [{
+        id: visibleModelId('codex', 'gpt-5.6-sol'),
+        object: 'model',
+        created: 1,
+        owned_by: 'codex'
+      }]
+    })
+  });
+
+  const result = await launchClaudeProvider(f.value);
+
+  assert.equal(result.model, 'gpt-5.6-sol');
+  assert.deepEqual(
+    f.calls.at(-1).invocation.args.slice(-4),
+    ['--model', 'gpt-5.6-sol', '--fallback-model', 'gpt-5.6-sol']
+  );
 });
 
 test('requires an explicit model in noninteractive mode and refuses noninteractive selection before any side effect', async () => {
@@ -222,6 +249,246 @@ test('mixed --all session accepts a live model from any authenticated provider a
   assert.equal(settings.env.CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY, '1');
   assert.match(announcements.join('\n'), /\/model/);
   assert.match(announcements.join('\n'), /grok-4.5/);
+});
+
+test('mixed session keeps duplicate raw model IDs from different providers', async () => {
+  const announced = [];
+  const startPicker = async ({ models }) => {
+    assert.equal(models.filter((model) => model.id === 'gpt-5.6-sol').length, 2);
+    assert.deepEqual(
+      models.filter((model) => model.id === 'gpt-5.6-sol').map((model) => model.owned_by).sort(),
+      ['antigravity', 'codex']
+    );
+    return {
+      host: '127.0.0.1',
+      port: 19_001,
+      close: async () => {}
+    };
+  };
+  const f = fixture({
+    parsed: {
+      model: visibleModelId('antigravity', 'gpt-5.6-sol'),
+      select: false,
+      all: true,
+      claudeArgs: [],
+      nonInteractive: true
+    },
+    listModels: async (name) => {
+      if (name === 'codex') {
+        return { provider: name, status: 'available', models: [
+          { id: 'gpt-5.6-sol', object: 'model', created: 1, owned_by: 'codex' }
+        ] };
+      }
+      if (name === 'antigravity') {
+        return { provider: name, status: 'available', models: [
+          { id: 'gpt-5.6-sol', object: 'model', created: 2, owned_by: 'antigravity' }
+        ] };
+      }
+      return { provider: name, status: 'available', models: [
+        { id: 'grok-4.5', object: 'model', created: 3, owned_by: 'grok' }
+      ] };
+    },
+    startPicker,
+    announce: (text) => announced.push(text),
+    syncOAuthAliases: async () => ({ synced: true, oauthModelAlias: {} }),
+    waitForAliasReady: async () => true
+  });
+
+  const result = await launchClaudeProvider(f.value);
+
+  assert.equal(result.provider, 'antigravity');
+  assert.deepEqual(
+    f.calls.at(-1).invocation.args.slice(-4),
+    ['--model', visibleModelId('antigravity', 'gpt-5.6-sol'), '--fallback-model', visibleModelId('antigravity', 'gpt-5.6-sol')]
+  );
+  assert.match(announced.join('\n'), /gpt-5\.6-sol — Codex/u);
+  assert.match(announced.join('\n'), /gpt-5\.6-sol — Antigravity/u);
+});
+
+test('mixed launch normalizes managed visible aliases before labels, alias sync, and picker consumption', async () => {
+  const codexVisible = visibleModelId('codex', 'gpt-5.6-sol');
+  let pickerModelsSeen;
+  let aliasesSeen;
+  const f = fixture({
+    parsed: { model: codexVisible, select: false, all: true, claudeArgs: [], nonInteractive: true },
+    listModels: async (name) => ({
+      provider: name,
+      status: 'available',
+      models: name === 'codex' ? [{
+        id: codexVisible,
+        object: 'model',
+        created: 1,
+        owned_by: 'codex'
+      }] : []
+    }),
+    syncOAuthAliases: async ({ models }) => {
+      aliasesSeen = buildManagedOAuthAliases(models);
+      return { synced: true, oauthModelAlias: aliasesSeen };
+    },
+    waitForAliasReady: async () => true,
+    startPicker: async ({ models }) => {
+      pickerModelsSeen = models;
+      return { host: '127.0.0.1', port: 19_005, close: async () => {} };
+    }
+  });
+
+  const result = await launchClaudeProvider(f.value);
+
+  assert.deepEqual(pickerModelsSeen.map(({ id, owned_by }) => ({ id, owned_by })), [
+    { id: 'gpt-5.6-sol', owned_by: 'codex' }
+  ]);
+  assert.deepEqual(aliasesSeen.codex[0], {
+    name: 'gpt-5.6-sol',
+    alias: codexVisible,
+    displayName: 'gpt-5.6-sol — Codex',
+    forceMapping: true
+  });
+  assert.deepEqual(result, { provider: 'codex', model: 'gpt-5.6-sol', exitCode: 0, signal: null });
+});
+
+test('mixed interactive selector qualifies duplicate IDs so either provider can be selected', async () => {
+  const listModels = async (name) => ({
+    provider: name,
+    status: 'available',
+    models: name === 'grok' ? [] : [
+      { id: 'shared-model', object: 'model', created: name === 'codex' ? 1 : 2, owned_by: name }
+    ]
+  });
+
+  for (const expectedProvider of ['codex', 'antigravity']) {
+    const selectedId = visibleModelId(expectedProvider, 'shared-model');
+    const f = fixture({
+      parsed: { model: undefined, select: true, all: true, claudeArgs: [], nonInteractive: false },
+      listModels,
+      selectModel: async ({ models }) => {
+        assert.deepEqual(
+          models.map(({ id }) => id).sort(),
+          [
+            visibleModelId('antigravity', 'shared-model'),
+            visibleModelId('codex', 'shared-model')
+          ].sort()
+        );
+        return selectedId;
+      },
+      syncOAuthAliases: async () => ({ synced: true, oauthModelAlias: {} }),
+      waitForAliasReady: async () => true,
+      startPicker: async () => ({ host: '127.0.0.1', port: 19_004, close: async () => {} })
+    });
+
+    const result = await launchClaudeProvider(f.value);
+    assert.equal(result.provider, expectedProvider);
+    assert.deepEqual(
+      f.calls.at(-1).invocation.args.slice(-4),
+      ['--model', selectedId, '--fallback-model', selectedId]
+    );
+  }
+});
+
+test('mixed launch syncs oauth aliases before starting the picker', async () => {
+  const events = [];
+  const f = fixture({
+    parsed: {
+      model: visibleModelId('codex', 'gpt-5.6-sol'),
+      select: false,
+      all: true,
+      claudeArgs: [],
+      nonInteractive: true
+    },
+    listModels: async (name) => ({
+      provider: name,
+      status: 'available',
+      models: name === 'codex'
+        ? [{ id: 'gpt-5.6-sol', object: 'model', created: 1, owned_by: 'codex' }]
+        : []
+    }),
+    syncOAuthAliases: async ({ models }) => {
+      events.push(['sync', models.map((model) => `${model.owned_by}:${model.id}`)]);
+      return { synced: true, oauthModelAlias: { codex: [{ alias: visibleModelId('codex', 'gpt-5.6-sol') }] } };
+    },
+    waitForAliasReady: async ({ aliases }) => {
+      events.push(['wait', aliases]);
+      return true;
+    },
+    startPicker: async () => {
+      events.push(['picker']);
+      return { host: '127.0.0.1', port: 19_002, close: async () => {} };
+    }
+  });
+
+  await launchClaudeProvider(f.value);
+
+  assert.deepEqual(events, [
+    ['sync', ['codex:gpt-5.6-sol']],
+    ['wait', { codex: [{ alias: visibleModelId('codex', 'gpt-5.6-sol') }] }],
+    ['picker']
+  ]);
+});
+
+test('mixed --model rejects ambiguous raw IDs and accepts unique raw IDs', async () => {
+  const listModels = async (name) => {
+    if (name === 'codex') {
+      return { provider: name, status: 'available', models: [
+        { id: 'shared-model', object: 'model', created: 1, owned_by: 'codex' },
+        { id: 'only-codex', object: 'model', created: 2, owned_by: 'codex' }
+      ] };
+    }
+    if (name === 'antigravity') {
+      return { provider: name, status: 'available', models: [
+        { id: 'shared-model', object: 'model', created: 3, owned_by: 'antigravity' }
+      ] };
+    }
+    return { provider: name, status: 'available', models: [] };
+  };
+
+  await assert.rejects(
+    () => launchClaudeProvider(fixture({
+      parsed: { model: 'shared-model', select: false, all: true, claudeArgs: [], nonInteractive: true },
+      listModels,
+      syncOAuthAliases: async () => ({ synced: true, oauthModelAlias: {} }),
+      waitForAliasReady: async () => true
+    }).value),
+    (error) => error.code === 'MODEL_AMBIGUOUS'
+  );
+
+  const unique = fixture({
+    parsed: { model: 'only-codex', select: false, all: true, claudeArgs: [], nonInteractive: true },
+    listModels,
+    syncOAuthAliases: async () => ({ synced: true, oauthModelAlias: {} }),
+    waitForAliasReady: async () => true,
+    startPicker: async () => ({ host: '127.0.0.1', port: 19_003, close: async () => {} })
+  });
+  const result = await launchClaudeProvider(unique.value);
+  assert.equal(result.provider, 'codex');
+  assert.equal(result.model, 'only-codex');
+});
+
+test('mixed launch fails closed when alias readiness never arrives', async () => {
+  const f = fixture({
+    parsed: {
+      model: visibleModelId('codex', 'gpt-5.6-sol'),
+      select: false,
+      all: true,
+      claudeArgs: [],
+      nonInteractive: true
+    },
+    listModels: async (name) => ({
+      provider: name,
+      status: 'available',
+      models: name === 'codex'
+        ? [{ id: 'gpt-5.6-sol', object: 'model', created: 1, owned_by: 'codex' }]
+        : []
+    }),
+    syncOAuthAliases: async () => ({ synced: true, oauthModelAlias: {} }),
+    waitForAliasReady: async () => false,
+    startPicker: async () => {
+      throw new Error('picker must not start');
+    }
+  });
+
+  await assert.rejects(
+    launchClaudeProvider(f.value),
+    (error) => error.code === 'GATEWAY_UNHEALTHY'
+  );
 });
 
 test('mixed --all session accepts a cloaked Anthropic id and keeps Claude-written session theme', async () => {

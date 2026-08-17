@@ -1,3 +1,5 @@
+import { ClaudeyError } from '../core/errors.js';
+
 export const GATEWAY_PROVIDERS = Object.freeze(['codex', 'antigravity', 'grok']);
 
 export const ANTHROPIC_CLOAK_PREFIX = 'claude-fable-5-dd-';
@@ -70,4 +72,40 @@ export function sameModelId(left, right) {
   const sourceLeft = sourceModelId(left);
   const sourceRight = sourceModelId(right);
   return sourceLeft === sourceRight || cloakModelId(sourceLeft) === cloakModelId(sourceRight);
+}
+
+export function resolveMixedCatalogModel(catalog, requested) {
+  if (!Array.isArray(catalog) || typeof requested !== 'string' || requested.length === 0) {
+    throw new ClaudeyError('MODEL_NOT_FOUND', `"${requested}" is not available.`, {
+      details: { model: requested }
+    });
+  }
+
+  const parsed = parseVisibleModelId(requested);
+  if (parsed) {
+    const match = catalog.find((model) => model?.owned_by === parsed.provider && sameModelId(model.id, parsed.id));
+    if (!match) {
+      throw new ClaudeyError('MODEL_NOT_FOUND', `"${requested}" is not available.`, {
+        details: { model: requested, provider: parsed.provider }
+      });
+    }
+    return match;
+  }
+
+  const matches = catalog.filter((model) => sameModelId(model?.id, requested));
+  if (matches.length === 1) return matches[0];
+  if (matches.length > 1) {
+    const alternatives = matches.map((model) => visibleModelId(model.owned_by, model.id));
+    throw new ClaudeyError(
+      'MODEL_AMBIGUOUS',
+      `"${requested}" is available from multiple providers.`,
+      {
+        hint: `Use one of: ${alternatives.join(', ')}`,
+        details: { model: requested, alternatives }
+      }
+    );
+  }
+  throw new ClaudeyError('MODEL_NOT_FOUND', `"${requested}" is not available.`, {
+    details: { model: requested }
+  });
 }

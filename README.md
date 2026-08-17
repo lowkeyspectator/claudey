@@ -128,7 +128,7 @@ node bin/claudey.js launcher claude-grok --
 
 Each launcher starts the real Claude Code harness with the selected live model pinned for the main agent, Task subagents, and haiku/sonnet/opus/fable aliases. The normal `claude` command is left unchanged.
 
-`claudey` starts one session against every authenticated provider and fills Claude Code `/model` from a local picker catalog (utility names such as `auto-review` are omitted). Each row is labeled with the live model id and remaining capacity when that is known. Switch with `/model`. Auth each provider first so its models appear. Use `claudey --yolo` when you want skip-permissions mode.
+`claudey` starts one session against every authenticated provider and fills Claude Code `/model` from a local picker catalog (utility names such as `auto-review` are omitted). Each row is labeled with the live model id, provider, and remaining capacity when that is known. Switch with `/model`. Auth each provider first so its models appear. Use `claudey --yolo` when you want skip-permissions mode.
 
 ## Authentication and model selection
 

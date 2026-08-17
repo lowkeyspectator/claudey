@@ -57,4 +57,6 @@ test('beginner launch errors keep public codes and simple next steps', () => {
   const missing = beginnerLaunchError(new ClaudeyError('PREREQUISITE_MISSING', 'A verified Claude Code executable is required.'));
   assert.equal(missing.code, 'PREREQUISITE_MISSING');
   assert.match(missing.hint, /claude.com\/download/);
+  const ambiguous = beginnerLaunchError(new ClaudeyError('MODEL_AMBIGUOUS', '"gpt-5.6-sol" is available from multiple providers.'));
+  assert.equal(ambiguous.code, 'MODEL_AMBIGUOUS');
 });

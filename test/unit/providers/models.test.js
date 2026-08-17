@@ -3,6 +3,7 @@ import test from 'node:test';
 
 import { ClaudeyError } from '../../../src/core/errors.js';
 import { Secret } from '../../../src/core/secrets.js';
+import { visibleModelId } from '../../../src/providers/catalog.js';
 import {
   listAllGatewayModels,
   listProviderModels,
@@ -86,6 +87,20 @@ test('maps live xAI ownership onto the grok provider without guessing from the m
     status: 'available',
     models: [{ id: 'grok-4.5', object: 'model', created: 4, owned_by: 'grok' }]
   });
+});
+
+test('normalizes managed visible aliases and their encoded provider from the live catalog', async () => {
+  const fixture = context({
+    requestModels: async () => ({ object: 'list', data: [
+      { id: visibleModelId('codex', 'gpt-5.6-sol'), object: 'model', created: 1, owned_by: 'anthropic' }
+    ] })
+  });
+
+  const result = await listProviderModels('codex', fixture.value);
+
+  assert.deepEqual(result.models, [
+    { id: 'gpt-5.6-sol', object: 'model', created: 1, owned_by: 'codex' }
+  ]);
 });
 
 test('rejects malformed catalogs, ambiguous attribution, duplicates, and provider-name heuristics', async () => {

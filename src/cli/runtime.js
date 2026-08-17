@@ -8,15 +8,17 @@ import { setTimeout as delay } from 'node:timers/promises';
 
 import { migrateLegacyBrand } from '../core/brand-migration.js';
 import { requestGatewayModels } from '../core/gateway-client.js';
-import { providerOwns } from '../providers/catalog.js';
+import { providerOwns, VISIBLE_MODEL_PREFIX } from '../providers/catalog.js';
 import { attachUsage, collectProviderUsage } from '../providers/usage.js';
 import { ClaudeyError } from '../core/errors.js';
 import { createOfficialHttpsClient } from '../core/http.js';
+import { acquireInstallationLock } from '../core/lock.js';
 import { getManagedPaths } from '../core/paths.js';
 import { downloadVerifiedRelease, resolveRelease } from '../core/release.js';
 import { Secret } from '../core/secrets.js';
-import { buildGatewayConfig } from '../core/config.js';
+import { buildGatewayConfig, writeGatewayConfig } from '../core/config.js';
 import { probeAuthCapabilities } from '../providers/auth.js';
+import { buildManagedOAuthAliases } from '../providers/oauth-aliases.js';
 import { createDefaultExecutableAdapter, resolveVerifiedExecutable } from '../core/executable.js';
 import { defaultClaudeCandidates } from './launchers/claude-codex.js';
 
@@ -164,6 +166,179 @@ async function waitForAuthModels(installed) {
   return modelsReady(installed.port, installed.token);
 }
 
+function yamlScalar(value) {
+  const source = value.trim();
+  if (source.startsWith('"')) {
+    const quoted = /^("(?:\\.|[^"\\])*")(?:\s+#.*)?$/u.exec(source);
+    if (!quoted) return undefined;
+    try {
+      const parsed = JSON.parse(quoted[1]);
+      return typeof parsed === 'string' ? parsed : undefined;
+    } catch {
+      return undefined;
+    }
+  }
+  if (source.startsWith("'")) {
+    const quoted = /^'((?:''|[^'])*)'(?:\s+#.*)?$/u.exec(source);
+    return quoted ? quoted[1].replaceAll("''", "'") : undefined;
+  }
+  const plain = source.replace(/\s+#.*$/u, '').trim();
+  return plain.length > 0 ? plain : undefined;
+}
+
+function yamlBoolean(value) {
+  if (typeof value !== 'string') return undefined;
+  const normalized = value.toLowerCase();
+  if (normalized === 'true') return true;
+  if (normalized === 'false') return false;
+  return undefined;
+}
+
+function existingOAuthAliases(config) {
+  const result = Object.create(null);
+  if (typeof config !== 'string') return result;
+  const lines = config.split(/\r?\n/u);
+  const start = lines.findIndex((line) => line === 'oauth-model-alias:');
+  if (start < 0) return result;
+  let channel;
+  let entry;
+  const append = () => {
+    if (!channel || typeof entry?.name !== 'string' || typeof entry?.alias !== 'string') return;
+    if (!result[channel]) result[channel] = [];
+    result[channel].push(Object.freeze(entry));
+  };
+  for (let index = start + 1; index < lines.length; index += 1) {
+    const line = lines[index];
+    if (line.length > 0 && !/^\s/u.test(line)) break;
+    const channelMatch = /^  ([A-Za-z0-9._-]+):\s*(?:#.*)?$/u.exec(line);
+    if (channelMatch) {
+      append();
+      entry = undefined;
+      channel = channelMatch[1];
+      continue;
+    }
+    const fieldMatch = /^(    - |      )(name|alias|display-name|force-mapping|fork):\s*(.*?)\s*$/u.exec(line);
+    if (!fieldMatch || !channel) continue;
+    if (fieldMatch[1].startsWith('    -')) {
+      append();
+      entry = {};
+    } else if (!entry) {
+      continue;
+    }
+    const value = yamlScalar(fieldMatch[3]);
+    if (fieldMatch[2] === 'name') entry.name = value;
+    else if (fieldMatch[2] === 'alias') entry.alias = value;
+    else if (fieldMatch[2] === 'display-name') entry.displayName = value;
+    else if (fieldMatch[2] === 'force-mapping') entry.forceMapping = yamlBoolean(value);
+    else if (fieldMatch[2] === 'fork') entry.fork = yamlBoolean(value);
+  }
+  append();
+  return result;
+}
+
+function mergeOAuthAliases(existing, managed) {
+  const result = Object.create(null);
+  for (const [channel, entries] of Object.entries(existing)) {
+    const foreign = entries.filter((entry) => !entry.alias.startsWith(VISIBLE_MODEL_PREFIX));
+    if (foreign.length > 0) result[channel] = [...foreign];
+  }
+  for (const [channel, entries] of Object.entries(managed)) {
+    const combined = result[channel] ?? [];
+    for (const entry of entries) {
+      if (!combined.some((current) => current.alias === entry.alias)) combined.push(entry);
+    }
+    result[channel] = combined;
+  }
+  for (const channel of Object.keys(result)) Object.freeze(result[channel]);
+  return Object.freeze(result);
+}
+
+async function acquireOAuthAliasLock(paths) {
+  const executableCanonicalPath = await fs.realpath(process.execPath);
+  return acquireInstallationLock({
+    root: paths.stateRoot,
+    child: 'install.lock',
+    owner: {
+      pid: process.pid,
+      processStartTime: Date.now() - (process.uptime() * 1_000),
+      executableCanonicalPath
+    },
+    inspectOwner: async (pid) => {
+      try {
+        process.kill(pid, 0);
+      } catch (error) {
+        if (error?.code === 'ESRCH') return { exists: false };
+      }
+      return { exists: true, unknown: true };
+    }
+  });
+}
+
+export async function syncManagedOAuthAliases({
+  paths,
+  port,
+  token,
+  models,
+  fsApi = fs,
+  atomicReplace: replace,
+  acquireLock = acquireOAuthAliasLock
+}) {
+  const managed = buildManagedOAuthAliases(models);
+  const lock = await acquireLock(paths);
+  if (!lock || typeof lock.assertHeld !== 'function' || typeof lock.release !== 'function') {
+    throw failure('SAFETY_REFUSAL', 'Configuration mutation requires the installation lock.');
+  }
+  try {
+    await lock.assertHeld();
+    let prior = '';
+    try {
+      prior = await fsApi.readFile(configFile(paths), 'utf8');
+    } catch (error) {
+      if (error?.code !== 'ENOENT') throw error;
+    }
+    const oauthModelAlias = mergeOAuthAliases(existingOAuthAliases(prior), managed);
+    await writeGatewayConfig({
+      port,
+      authDir: paths.authRoot,
+      token,
+      oauthModelAlias
+    }, paths, {
+      assertLockHeld: () => lock.assertHeld(),
+      atomicReplace: replace,
+      atomicDeps: { fsApi }
+    });
+    return Object.freeze({ synced: true, oauthModelAlias: managed });
+  } finally {
+    await lock.release();
+  }
+}
+
+export async function waitForManagedAliases({
+  host = '127.0.0.1',
+  port,
+  token,
+  aliases,
+  requestModels = requestGatewayModels,
+  timeoutMs = 8_000,
+  delayMs = 100
+}) {
+  const expected = new Set();
+  for (const entries of Object.values(aliases ?? {})) {
+    for (const entry of entries) expected.add(entry.alias);
+  }
+  if (expected.size === 0) return true;
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() <= deadline) {
+    try {
+      const catalog = await requestModels({ host, port, token, allowPreAuthEmpty: true });
+      const present = new Set((catalog?.data ?? []).map((model) => model?.id).filter(Boolean));
+      if ([...expected].every((alias) => present.has(alias))) return true;
+    } catch { /* gateway is still loading managed aliases */ }
+    await delay(delayMs);
+  }
+  return false;
+}
+
 async function readPid(paths) {
   try {
     const text = (await fs.readFile(pidFile(paths), 'utf8')).trim();
@@ -243,6 +418,21 @@ function createLauncherContext(environment) {
       await startGatewayProcess(installed);
       return { host: '127.0.0.1', port: installed.port, token: installed.token };
     },
+    syncOAuthAliases: async ({ models }) => {
+      const installed = await loadInstallation(environment);
+      return syncManagedOAuthAliases({
+        paths: installed.paths,
+        port: installed.port,
+        token: installed.token,
+        models
+      });
+    },
+    waitForAliasReady: async ({ gateway, aliases }) => waitForManagedAliases({
+      host: gateway.host,
+      port: gateway.port,
+      token: gateway.token,
+      aliases
+    }),
     selectModel: async ({ models }) => models[0]?.id
   };
 }

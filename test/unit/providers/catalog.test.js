@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
+import { ClaudeyError } from '../../../src/core/errors.js';
 import {
   ANTHROPIC_CLOAK_PREFIX,
   GATEWAY_PROVIDERS,
@@ -11,6 +12,7 @@ import {
   isSafeOwnedBy,
   parseVisibleModelId,
   providerOwns,
+  resolveMixedCatalogModel,
   sameModelId,
   sourceModelId,
   uncloakModelId,
@@ -53,4 +55,27 @@ test('cloaks non-Claude IDs the way CLIProxyAPI presents them to Claude Code', (
   assert.equal(sameModelId(`${VISIBLE_MODEL_PREFIX}grok-grok-4.5`, `${ANTHROPIC_CLOAK_PREFIX}5.4-korg`), true);
   assert.match(visibleModelId('grok', 'grok-4.5'), /anthropic/i);
   assert.equal(/fable/i.test(visibleModelId('grok', 'grok-4.5')), false);
+});
+
+test('mixed resolve keeps provider-qualified matches and rejects ambiguous raw IDs', () => {
+  const catalog = [
+    { id: 'gpt-5.6-sol', object: 'model', created: 1, owned_by: 'codex' },
+    { id: 'gpt-5.6-sol', object: 'model', created: 2, owned_by: 'antigravity' },
+    { id: 'grok-4.5', object: 'model', created: 3, owned_by: 'grok' }
+  ];
+
+  assert.equal(
+    resolveMixedCatalogModel(catalog, visibleModelId('antigravity', 'gpt-5.6-sol')).owned_by,
+    'antigravity'
+  );
+  assert.equal(resolveMixedCatalogModel(catalog, 'grok-4.5').owned_by, 'grok');
+
+  assert.throws(
+    () => resolveMixedCatalogModel(catalog, 'gpt-5.6-sol'),
+    (error) => error instanceof ClaudeyError
+      && error.code === 'MODEL_AMBIGUOUS'
+      && error.details.model === 'gpt-5.6-sol'
+      && error.details.alternatives.includes(visibleModelId('codex', 'gpt-5.6-sol'))
+      && error.details.alternatives.includes(visibleModelId('antigravity', 'gpt-5.6-sol'))
+  );
 });

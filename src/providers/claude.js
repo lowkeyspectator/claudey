@@ -5,7 +5,7 @@ import path from 'node:path';
 import { ClaudeyError } from '../core/errors.js';
 import { getVerifiedInvocation, isVerifiedExecutableForCommand, revalidateExecutable } from '../core/executable.js';
 import { isSecret } from '../core/secrets.js';
-import { GATEWAY_PROVIDERS, sameModelId, visibleModelId } from './catalog.js';
+import { GATEWAY_PROVIDERS, parseVisibleModelId, resolveMixedCatalogModel, sameModelId, visibleModelId } from './catalog.js';
 import { listProviderModels } from './models.js';
 import { requestGatewayModels } from '../core/gateway-client.js';
 import { startPickerGateway } from './picker-gateway.js';
@@ -21,6 +21,14 @@ async function defaultListModels(provider, gateway) {
     ensureHealthy: async () => ({ state: 'healthy' }),
     requestModels: requestGatewayModels
   });
+}
+
+async function defaultSyncOAuthAliases() {
+  return { synced: false, oauthModelAlias: {} };
+}
+
+async function defaultWaitForAliasReady() {
+  return true;
 }
 
 const PREFERRED_CODEX_MODEL = 'gpt-5.6-sol';
@@ -81,13 +89,19 @@ function hasModelOverride(args) {
 function assertCatalog(result, provider) {
   if (!result || typeof result !== 'object' || result.provider !== provider || result.status !== 'available' || !Array.isArray(result.models)) throw unhealthy();
   const seen = new Set();
-  const models = result.models.map((model) => {
+  const models = [];
+  for (const model of result.models) {
     if (!model || typeof model !== 'object' || !safeModel(model.id)
       || model.object !== 'model' || !Number.isSafeInteger(model.created) || model.created < 0
-      || model.owned_by !== provider || seen.has(model.id)) throw unhealthy();
-    seen.add(model.id);
-    return Object.freeze({ id: model.id, object: 'model', created: model.created, owned_by: provider });
-  });
+      || typeof model.owned_by !== 'string') throw unhealthy();
+    const visible = parseVisibleModelId(model.id);
+    const id = visible?.id ?? model.id;
+    const owner = visible?.provider ?? model.owned_by;
+    if (!safeModel(id) || owner !== provider) throw unhealthy();
+    if (seen.has(id)) continue;
+    seen.add(id);
+    models.push(Object.freeze({ id, object: 'model', created: model.created, owned_by: owner }));
+  }
   if (models.length === 0) throw failure('AUTH_REQUIRED', `Provider "${provider}" is not authenticated.`, { details: { provider } });
   return models;
 }
@@ -230,6 +244,8 @@ export async function launchClaudeProvider({
   announce,
   sessionSettingsDir,
   sessionAuthDir,
+  syncOAuthAliases = defaultSyncOAuthAliases,
+  waitForAliasReady = defaultWaitForAliasReady,
   startPicker = startPickerGateway,
   signal
 } = {}) {
@@ -258,8 +274,9 @@ export async function launchClaudeProvider({
         const models = assertCatalog(await listModels(name, gateway), name);
         byProvider.set(name, models);
         for (const model of models) {
-          if (seen.has(model.id)) continue;
-          seen.add(model.id);
+          const key = `${model.owned_by}\0${model.id}`;
+          if (seen.has(key)) continue;
+          seen.add(key);
           merged.push(model);
         }
       } catch (error) {
@@ -279,14 +296,19 @@ export async function launchClaudeProvider({
   let selected = parsed.model;
   if (selected === undefined) {
     const preferred = mixed
-      ? rankPickerModels(catalog)
+      ? rankPickerModels(catalog).map((model) => Object.freeze({
+          ...model,
+          id: visibleModelId(model.owned_by, model.id)
+        }))
       : provider === 'codex' && catalog.some(({ id }) => id === PREFERRED_CODEX_MODEL)
         ? [catalog.find(({ id }) => id === PREFERRED_CODEX_MODEL), ...catalog.filter(({ id }) => id !== PREFERRED_CODEX_MODEL)]
         : [...catalog];
     try { selected = await selectModel(Object.freeze({ provider: mixed ? 'all' : provider, models: Object.freeze(preferred) })); }
     catch { throw safety(); }
   }
-  const matched = typeof selected === 'string' ? resolveCatalogModel(catalog, selected) : null;
+  const matched = typeof selected === 'string'
+    ? (mixed ? resolveMixedCatalogModel(catalog, selected) : resolveCatalogModel(catalog, selected))
+    : null;
   if (!safeModel(selected) || !matched) {
     throw modelNotFound(mixed ? 'all' : provider, typeof selected === 'string' ? selected : 'invalid');
   }
@@ -305,7 +327,15 @@ export async function launchClaudeProvider({
   let aliases;
   const routed = mixed ? routedVisibleId(matched) : selected;
   if (mixed) {
-    if (typeof startPicker !== 'function') throw safety();
+    if (typeof syncOAuthAliases !== 'function' || typeof waitForAliasReady !== 'function' || typeof startPicker !== 'function') throw safety();
+    let aliasesReady;
+    try {
+      const aliasResult = await syncOAuthAliases({ models: decorated, gateway });
+      aliasesReady = await waitForAliasReady({ gateway, aliases: aliasResult?.oauthModelAlias });
+    } catch {
+      throw unhealthy();
+    }
+    if (aliasesReady !== true) throw unhealthy();
     try { picker = await startPicker({ ...gateway, models: pickerModels(decorated) }); }
     catch { throw safety(); }
     const configDir = typeof sessionSettingsDir === 'string' ? sessionSettingsDir : undefined;
@@ -371,7 +401,7 @@ export async function launchClaudeProvider({
     try { await picker?.close(); } catch { /* picker lifetime cannot own the child result */ }
   }
   if (!exited && !signaled) throw safety();
-  const owner = catalog.find(({ id }) => id === selected)?.owned_by ?? provider;
+  const owner = matched.owned_by;
   return Object.freeze({ provider: mixed ? owner : provider, model: selected, exitCode: childResult.code, signal: childResult.signal });
 }
 
