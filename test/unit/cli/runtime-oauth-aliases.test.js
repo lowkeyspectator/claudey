@@ -53,6 +53,7 @@ oauth-model-alias:
       alias: "my-custom-alias"
       display-name: "My custom alias"
       force-mapping: false
+      fork: true
     - name: "stale-model"
       alias: "${visibleModelId('codex', 'stale-model')}"
       display-name: "Stale managed alias"
@@ -91,6 +92,7 @@ oauth-model-alias:
   assert.deepEqual(events, ['acquire', 'held', 'read', 'held', 'write', 'release']);
   assert.match(written, /alias: "my-custom-alias"/u);
   assert.match(written, /force-mapping: false/u);
+  assert.match(written, /fork: true/u);
   assert.match(written, /alias: "personal-grok"/u);
   assert.doesNotMatch(written, /stale-model/u);
   assert.match(written, new RegExp(visibleModelId('codex', 'gpt-5.6-sol'), 'u'));

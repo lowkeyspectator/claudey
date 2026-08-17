@@ -10,6 +10,7 @@ import { resolveVerifiedExecutable } from '../../../src/core/executable.js';
 import { Secret } from '../../../src/core/secrets.js';
 import { ClaudeyError } from '../../../src/core/errors.js';
 import { visibleModelId } from '../../../src/providers/catalog.js';
+import { buildManagedOAuthAliases } from '../../../src/providers/oauth-aliases.js';
 import * as claudeProvider from '../../../src/providers/claude.js';
 
 const { launchClaudeProvider, runClaudeProcess } = claudeProvider;
@@ -103,6 +104,29 @@ test('uses a live interactive selector, offers the preferred source model first 
   });
   await assert.rejects(launchClaudeProvider(hostile.value), (error) => error.code === 'MODEL_NOT_FOUND');
   assert.equal(hostile.calls.some((call) => call?.invocation), false);
+});
+
+test('single-provider launch normalizes a managed visible catalog alias to its raw upstream model', async () => {
+  const f = fixture({
+    listModels: async (provider) => ({
+      provider,
+      status: 'available',
+      models: [{
+        id: visibleModelId('codex', 'gpt-5.6-sol'),
+        object: 'model',
+        created: 1,
+        owned_by: 'codex'
+      }]
+    })
+  });
+
+  const result = await launchClaudeProvider(f.value);
+
+  assert.equal(result.model, 'gpt-5.6-sol');
+  assert.deepEqual(
+    f.calls.at(-1).invocation.args.slice(-4),
+    ['--model', 'gpt-5.6-sol', '--fallback-model', 'gpt-5.6-sol']
+  );
 });
 
 test('requires an explicit model in noninteractive mode and refuses noninteractive selection before any side effect', async () => {
@@ -279,6 +303,47 @@ test('mixed session keeps duplicate raw model IDs from different providers', asy
   );
   assert.match(announced.join('\n'), /gpt-5\.6-sol — Codex/u);
   assert.match(announced.join('\n'), /gpt-5\.6-sol — Antigravity/u);
+});
+
+test('mixed launch normalizes managed visible aliases before labels, alias sync, and picker consumption', async () => {
+  const codexVisible = visibleModelId('codex', 'gpt-5.6-sol');
+  let pickerModelsSeen;
+  let aliasesSeen;
+  const f = fixture({
+    parsed: { model: codexVisible, select: false, all: true, claudeArgs: [], nonInteractive: true },
+    listModels: async (name) => ({
+      provider: name,
+      status: 'available',
+      models: name === 'codex' ? [{
+        id: codexVisible,
+        object: 'model',
+        created: 1,
+        owned_by: 'codex'
+      }] : []
+    }),
+    syncOAuthAliases: async ({ models }) => {
+      aliasesSeen = buildManagedOAuthAliases(models);
+      return { synced: true, oauthModelAlias: aliasesSeen };
+    },
+    waitForAliasReady: async () => true,
+    startPicker: async ({ models }) => {
+      pickerModelsSeen = models;
+      return { host: '127.0.0.1', port: 19_005, close: async () => {} };
+    }
+  });
+
+  const result = await launchClaudeProvider(f.value);
+
+  assert.deepEqual(pickerModelsSeen.map(({ id, owned_by }) => ({ id, owned_by })), [
+    { id: 'gpt-5.6-sol', owned_by: 'codex' }
+  ]);
+  assert.deepEqual(aliasesSeen.codex[0], {
+    name: 'gpt-5.6-sol',
+    alias: codexVisible,
+    displayName: 'gpt-5.6-sol — Codex',
+    forceMapping: true
+  });
+  assert.deepEqual(result, { provider: 'codex', model: 'gpt-5.6-sol', exitCode: 0, signal: null });
 });
 
 test('mixed interactive selector qualifies duplicate IDs so either provider can be selected', async () => {

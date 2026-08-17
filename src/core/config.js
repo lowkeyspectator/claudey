@@ -53,6 +53,9 @@ function renderOAuthModelAlias(oauthModelAlias) {
         lines.push('      display-name: ' + quoteYamlString(entry.displayName, 'OAuth model alias display name'));
       }
       lines.push(`      force-mapping: ${entry?.forceMapping === false ? 'false' : 'true'}`);
+      if (entry?.fork !== undefined) {
+        lines.push(`      fork: ${entry.fork === true ? 'true' : 'false'}`);
+      }
     }
   }
   return `${lines.join('\n')}\n`;

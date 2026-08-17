@@ -1,7 +1,7 @@
 import { ClaudeyError, exitCodeFor } from '../core/errors.js';
 import { isSecret } from '../core/secrets.js';
 import { validateAuthenticatedModelCatalog } from './capabilities.js';
-import { GATEWAY_PROVIDERS, isGatewayProvider, providerOwns } from './catalog.js';
+import { GATEWAY_PROVIDERS, isGatewayProvider, parseVisibleModelId, providerOwns } from './catalog.js';
 
 function failure(code, message, options) {
   return new ClaudeyError(code, message, options);
@@ -63,10 +63,15 @@ export async function listProviderModels(provider, context = {}) {
     } catch { throw unhealthy(); }
     if (!validateAuthenticatedModelCatalog(catalog, { allowPreAuthEmpty: true })) throw unhealthy();
     const models = catalog.data
+      .map((model) => {
+        const visible = parseVisibleModelId(model.id);
+        return visible ? { ...model, id: visible.id, owned_by: visible.provider } : model;
+      })
       .filter((model) => providerOwns(provider, model.owned_by))
       .map((model) => Object.freeze({
         id: model.id, object: model.object, created: Number.isSafeInteger(model.created) ? model.created : 0, owned_by: provider
       }))
+      .filter((model, index, all) => all.findIndex((candidate) => candidate.id === model.id) === index)
       .sort((left, right) => left.id < right.id ? -1 : left.id > right.id ? 1 : 0);
     if (models.length > 0) return Object.freeze({ provider, status: 'available', models: Object.freeze(models) });
     if (Date.now() >= deadline) throw authRequired(provider);

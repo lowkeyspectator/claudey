@@ -206,7 +206,7 @@ function existingOAuthAliases(config) {
       channel = channelMatch[1];
       continue;
     }
-    const fieldMatch = /^(    - |      )(name|alias|display-name|force-mapping):\s*(.*?)\s*$/u.exec(line);
+    const fieldMatch = /^(    - |      )(name|alias|display-name|force-mapping|fork):\s*(.*?)\s*$/u.exec(line);
     if (!fieldMatch || !channel) continue;
     if (fieldMatch[1].startsWith('    -')) {
       append();
@@ -219,6 +219,7 @@ function existingOAuthAliases(config) {
     else if (fieldMatch[2] === 'alias') entry.alias = value;
     else if (fieldMatch[2] === 'display-name') entry.displayName = value;
     else if (fieldMatch[2] === 'force-mapping') entry.forceMapping = value !== 'false';
+    else if (fieldMatch[2] === 'fork') entry.fork = value !== 'false';
   }
   append();
   return result;

@@ -5,7 +5,7 @@ import path from 'node:path';
 import { ClaudeyError } from '../core/errors.js';
 import { getVerifiedInvocation, isVerifiedExecutableForCommand, revalidateExecutable } from '../core/executable.js';
 import { isSecret } from '../core/secrets.js';
-import { GATEWAY_PROVIDERS, resolveMixedCatalogModel, sameModelId, visibleModelId } from './catalog.js';
+import { GATEWAY_PROVIDERS, parseVisibleModelId, resolveMixedCatalogModel, sameModelId, visibleModelId } from './catalog.js';
 import { listProviderModels } from './models.js';
 import { requestGatewayModels } from '../core/gateway-client.js';
 import { startPickerGateway } from './picker-gateway.js';
@@ -89,13 +89,19 @@ function hasModelOverride(args) {
 function assertCatalog(result, provider) {
   if (!result || typeof result !== 'object' || result.provider !== provider || result.status !== 'available' || !Array.isArray(result.models)) throw unhealthy();
   const seen = new Set();
-  const models = result.models.map((model) => {
+  const models = [];
+  for (const model of result.models) {
     if (!model || typeof model !== 'object' || !safeModel(model.id)
       || model.object !== 'model' || !Number.isSafeInteger(model.created) || model.created < 0
-      || model.owned_by !== provider || seen.has(model.id)) throw unhealthy();
-    seen.add(model.id);
-    return Object.freeze({ id: model.id, object: 'model', created: model.created, owned_by: provider });
-  });
+      || typeof model.owned_by !== 'string') throw unhealthy();
+    const visible = parseVisibleModelId(model.id);
+    const id = visible?.id ?? model.id;
+    const owner = visible?.provider ?? model.owned_by;
+    if (!safeModel(id) || owner !== provider) throw unhealthy();
+    if (seen.has(id)) continue;
+    seen.add(id);
+    models.push(Object.freeze({ id, object: 'model', created: model.created, owned_by: owner }));
+  }
   if (models.length === 0) throw failure('AUTH_REQUIRED', `Provider "${provider}" is not authenticated.`, { details: { provider } });
   return models;
 }
