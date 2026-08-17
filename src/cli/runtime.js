@@ -169,18 +169,29 @@ async function waitForAuthModels(installed) {
 function yamlScalar(value) {
   const source = value.trim();
   if (source.startsWith('"')) {
+    const quoted = /^("(?:\\.|[^"\\])*")(?:\s+#.*)?$/u.exec(source);
+    if (!quoted) return undefined;
     try {
-      const parsed = JSON.parse(source);
+      const parsed = JSON.parse(quoted[1]);
       return typeof parsed === 'string' ? parsed : undefined;
     } catch {
       return undefined;
     }
   }
-  if (source.startsWith("'") && source.endsWith("'")) {
-    return source.slice(1, -1).replaceAll("''", "'");
+  if (source.startsWith("'")) {
+    const quoted = /^'((?:''|[^'])*)'(?:\s+#.*)?$/u.exec(source);
+    return quoted ? quoted[1].replaceAll("''", "'") : undefined;
   }
   const plain = source.replace(/\s+#.*$/u, '').trim();
   return plain.length > 0 ? plain : undefined;
+}
+
+function yamlBoolean(value) {
+  if (typeof value !== 'string') return undefined;
+  const normalized = value.toLowerCase();
+  if (normalized === 'true') return true;
+  if (normalized === 'false') return false;
+  return undefined;
 }
 
 function existingOAuthAliases(config) {
@@ -218,8 +229,8 @@ function existingOAuthAliases(config) {
     if (fieldMatch[2] === 'name') entry.name = value;
     else if (fieldMatch[2] === 'alias') entry.alias = value;
     else if (fieldMatch[2] === 'display-name') entry.displayName = value;
-    else if (fieldMatch[2] === 'force-mapping') entry.forceMapping = value !== 'false';
-    else if (fieldMatch[2] === 'fork') entry.fork = value !== 'false';
+    else if (fieldMatch[2] === 'force-mapping') entry.forceMapping = yamlBoolean(value);
+    else if (fieldMatch[2] === 'fork') entry.fork = yamlBoolean(value);
   }
   append();
   return result;
@@ -251,6 +262,14 @@ async function acquireOAuthAliasLock(paths) {
       pid: process.pid,
       processStartTime: Date.now() - (process.uptime() * 1_000),
       executableCanonicalPath
+    },
+    inspectOwner: async (pid) => {
+      try {
+        process.kill(pid, 0);
+      } catch (error) {
+        if (error?.code === 'ESRCH') return { exists: false };
+      }
+      return { exists: true, unknown: true };
     }
   });
 }

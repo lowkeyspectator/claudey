@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { spawn } from 'node:child_process';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -17,7 +18,7 @@ test('production launcher context wires oauth alias synchronization and readines
   assert.equal(typeof context.waitForAliasReady, 'function');
 });
 
-test('syncManagedOAuthAliases production dependencies acquire the installation lock with managed paths', async (t) => {
+test('syncManagedOAuthAliases production lock helper recovers an expired lock owned by a dead process', async (t) => {
   const temporaryRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'claudey-runtime-oauth-lock-'));
   const root = await fs.realpath(temporaryRoot);
   t.after(() => fs.rm(temporaryRoot, { recursive: true, force: true }));
@@ -27,6 +28,24 @@ test('syncManagedOAuthAliases production dependencies acquire the installation l
     stateRoot: path.join(root, 'state')
   };
   await Promise.all(Object.values(paths).map((directory) => fs.mkdir(directory, { recursive: true })));
+  const exited = spawn(process.execPath, ['-e', ''], { stdio: 'ignore' });
+  const deadPid = exited.pid;
+  await new Promise((resolve, reject) => {
+    exited.once('error', reject);
+    exited.once('exit', resolve);
+  });
+  assert.throws(() => process.kill(deadPid, 0), (error) => error?.code === 'ESRCH');
+  await fs.writeFile(path.join(paths.stateRoot, 'install.lock'), JSON.stringify({
+    schemaVersion: 1,
+    kind: 'installation-lock',
+    nonce: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+    acquiredAt: new Date(Date.now() - (10 * 60_000)).toISOString(),
+    owner: {
+      pid: deadPid,
+      processStartTime: 1,
+      executableCanonicalPath: process.execPath
+    }
+  }), { mode: 0o600 });
 
   await runtime.syncManagedOAuthAliases({
     paths,
@@ -68,7 +87,7 @@ test('syncManagedOAuthAliases atomically replaces managed config containing oaut
   assert.equal(result.oauthModelAlias.codex[0].alias, visibleModelId('codex', 'gpt-5.6-sol'));
 });
 
-test('syncManagedOAuthAliases preserves foreign aliases while replacing managed aliases under the installation lock', async () => {
+test('syncManagedOAuthAliases preserves foreign aliases, case-insensitive booleans, and quoted scalars with comments', async () => {
   const events = [];
   const replacements = [];
   const paths = { configRoot: '/managed/config', authRoot: '/managed/auth', stateRoot: '/managed/state' };
@@ -76,9 +95,9 @@ test('syncManagedOAuthAliases preserves foreign aliases while replacing managed 
 oauth-model-alias:
   codex:
     - name: "user-model"
-      alias: "my-custom-alias"
+      alias: "my-custom-alias" # keep this foreign alias
       display-name: "My custom alias"
-      force-mapping: false
+      force-mapping: FALSE
       fork: true
     - name: "inherited-model"
       alias: "no-force-alias"
