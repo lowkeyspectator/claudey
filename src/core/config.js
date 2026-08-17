@@ -34,7 +34,30 @@ function bearerText(token) {
   });
 }
 
-export function buildGatewayConfig({ port = 8317, authDir, token }) {
+function renderOAuthModelAlias(oauthModelAlias) {
+  if (!oauthModelAlias || typeof oauthModelAlias !== 'object') return '';
+  const channels = Object.keys(oauthModelAlias).filter((channel) => {
+    const entries = oauthModelAlias[channel];
+    return Array.isArray(entries) && entries.length > 0;
+  });
+  if (channels.length === 0) return '';
+  const lines = ['oauth-model-alias:'];
+  for (const channel of channels) {
+    lines.push(`  ${channel}:`);
+    for (const entry of oauthModelAlias[channel]) {
+      const name = quoteYamlString(entry?.name, 'OAuth model alias name');
+      const alias = quoteYamlString(entry?.alias, 'OAuth model alias');
+      const displayName = quoteYamlString(entry?.displayName, 'OAuth model alias display name');
+      lines.push('    - name: ' + name);
+      lines.push('      alias: ' + alias);
+      lines.push('      display-name: ' + displayName);
+      lines.push('      force-mapping: true');
+    }
+  }
+  return `${lines.join('\n')}\n`;
+}
+
+export function buildGatewayConfig({ port = 8317, authDir, token, oauthModelAlias }) {
   const checkedPort = assertPort(port);
   const quotedAuthDir = quoteYamlString(authDir, 'Gateway auth directory');
   const quotedToken = quoteYamlString(bearerText(token), 'Gateway bearer token');
@@ -58,7 +81,7 @@ pprof:
 plugins:
   enabled: false
 ws-auth: true
-`;
+${renderOAuthModelAlias(oauthModelAlias)}`;
   return Buffer.from(yaml, 'utf8');
 }
 

@@ -113,6 +113,37 @@ test('delegates protected same-root atomic replacement and preserves prior state
   assert.equal(prior.at(-1), 0x0a);
 });
 
+test('renders managed oauth-model-alias entries into gateway config YAML', () => {
+  const bytes = buildGatewayConfig({
+    port: 8317,
+    authDir: '/private/auth',
+    token: token(),
+    oauthModelAlias: {
+      codex: [{
+        name: 'gpt-5.6-sol',
+        alias: 'anthropic-cdx-codex-gpt-5.6-sol',
+        displayName: 'gpt-5.6-sol — Codex',
+        forceMapping: true
+      }],
+      xai: [{
+        name: 'grok-4.5',
+        alias: 'anthropic-cdx-grok-grok-4.5',
+        displayName: 'grok-4.5 — Grok',
+        forceMapping: true
+      }]
+    }
+  }).toString('utf8');
+
+  assert.match(bytes, /oauth-model-alias:/u);
+  assert.match(bytes, /codex:/u);
+  assert.match(bytes, /name: "gpt-5\.6-sol"/u);
+  assert.match(bytes, /alias: "anthropic-cdx-codex-gpt-5\.6-sol"/u);
+  assert.match(bytes, /display-name: "gpt-5\.6-sol — Codex"/u);
+  assert.match(bytes, /force-mapping: true/u);
+  assert.match(bytes, /xai:/u);
+  assert.match(bytes, /alias: "anthropic-cdx-grok-grok-4\.5"/u);
+});
+
 test('gateway configuration is the only generated artifact carrying token or port literals', () => {
   const secretCanary = Secret.fromBytes(Buffer.from('TASK4_BEARER_CANARY_123456789012'));
   const config = buildGatewayConfig({ port: 54321, authDir: '/private/auth', token: secretCanary }).toString('utf8');
