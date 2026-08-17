@@ -373,10 +373,21 @@ export async function collectProviderUsage({
   return Object.freeze(collected);
 }
 
+export function providerTitle(provider) {
+  if (provider === 'codex') return 'Codex';
+  if (provider === 'antigravity') return 'Antigravity';
+  if (provider === 'grok') return 'Grok';
+  return null;
+}
+
 export function formatUsageLine(model) {
   const usage = model?.usage;
-  if (!usage) return model.id;
-  const parts = [model.id];
+  const title = providerTitle(model?.owned_by);
+  const base = typeof model?.id === 'string'
+    ? (title ? `${model.id} — ${title}` : model.id)
+    : '';
+  if (!usage) return base;
+  const parts = [base];
   if (Number.isFinite(usage.remainingPercent)) parts.push(`${usage.remainingPercent}% left`);
   else if (usage.window) parts.push(String(usage.window));
   if (usage.status && usage.status !== 'available' && usage.status !== 'unknown') parts.push(usage.status);

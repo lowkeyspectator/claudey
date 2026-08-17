@@ -4,7 +4,27 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
-import { attachUsage, collectProviderUsage, usageForModel } from '../../../src/providers/usage.js';
+import { attachUsage, collectProviderUsage, formatUsageLine, providerTitle, usageForModel } from '../../../src/providers/usage.js';
+
+test('labels models with provider titles and keeps usage after the provider', () => {
+  assert.equal(providerTitle('codex'), 'Codex');
+  assert.equal(providerTitle('antigravity'), 'Antigravity');
+  assert.equal(providerTitle('grok'), 'Grok');
+  assert.equal(providerTitle('cursor'), null);
+
+  assert.equal(
+    formatUsageLine({ id: 'gpt-5.6-sol', owned_by: 'codex', usage: { remainingPercent: 40, status: 'available' } }),
+    'gpt-5.6-sol — Codex · 40% left'
+  );
+  assert.equal(
+    formatUsageLine({ id: 'gpt-5.6-sol', owned_by: 'antigravity' }),
+    'gpt-5.6-sol — Antigravity'
+  );
+  assert.equal(
+    formatUsageLine({ id: 'grok-4.5', owned_by: 'grok', usage: { remainingPercent: 83, status: 'available' } }),
+    'grok-4.5 — Grok · 83% left'
+  );
+});
 
 test('attaches Grok, Antigravity, and Cursor remaining percent onto unmatched catalog ids', () => {
   const grok = usageForModel({ id: 'grok-4.6', owned_by: 'grok' }, {
