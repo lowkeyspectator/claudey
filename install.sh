@@ -1,7 +1,7 @@
 #!/bin/sh
 set -eu
 
-PROJECT_ORIGIN='https://github.com/ramsaijanapana/claude_code_cliProxy'
+PROJECT_ORIGIN='https://github.com/ramsaijanapana/claudey'
 manager_version=''
 accept_yes=0
 no_path=0
@@ -159,7 +159,8 @@ case "${HOME-}" in /*) ;; *)
   exit 7
 ;; esac
 case "$HOME" in /|*'
-'*|*''* )
+'*|*'
+'* )
   printf '%s\n' 'error[SAFETY_REFUSAL]: HOME cannot be a filesystem root or mounted Windows path.' >&2
   exit 7
 ;; esac
@@ -254,7 +255,8 @@ else
   cldy_data_home=${XDG_DATA_HOME:-"$HOME/.local/share"}
   cldy_state_home=${XDG_STATE_HOME:-"$HOME/.local/state"}
   case "$cldy_data_home:$cldy_state_home" in *'
-'*|*''*|*:/|/:*)
+'*|*'
+'*|*:/|/:*)
     printf '%s\n' 'error[SAFETY_REFUSAL]: XDG roots must be safe non-root POSIX paths.' >&2
     exit 7
   ;; esac

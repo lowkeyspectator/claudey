@@ -170,7 +170,7 @@ function testEnvironment(temporary) {
 async function renderedInstaller(temporary, origin) {
   const target = path.join(temporary, 'install.ps1');
   const source = (await fs.readFile(installer, 'utf8')).replace(
-    "$ProjectOrigin = 'https://github.com/ramsaijanapana/claude_code_cliProxy'", `$ProjectOrigin = '${origin}'`);
+    "$ProjectOrigin = 'https://github.com/ramsaijanapana/claudey'", `$ProjectOrigin = '${origin}'`);
   await fs.writeFile(target, source);
   return target;
 }

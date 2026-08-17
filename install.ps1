@@ -3,7 +3,7 @@ param()
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
-$ProjectOrigin = 'https://github.com/ramsaijanapana/claude_code_cliProxy'
+$ProjectOrigin = 'https://github.com/ramsaijanapana/claudey'
 $ManagerVersion = ''
 $AcceptYes = $false
 $DisablePath = $false

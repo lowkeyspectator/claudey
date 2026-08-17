@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://github.com/ramsaijanapana/claude_code_cliProxy/schemas/validation-report.schema.json",
+  "$id": "https://github.com/ramsaijanapana/claudey/schemas/validation-report.schema.json",
   "title": "Claudey release validation report",
   "type": "object",
   "additionalProperties": false,

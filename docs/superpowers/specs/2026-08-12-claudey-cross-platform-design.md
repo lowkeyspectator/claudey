@@ -4,7 +4,7 @@ Date: 2026-08-12
 
 Status: Approved architecture, written specification pending final review
 
-Repository: https://github.com/ramsaijanapana/claude_code_cliProxy
+Repository: https://github.com/ramsaijanapana/claudey
 
 ## 1. Summary
 

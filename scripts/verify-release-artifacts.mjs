@@ -53,7 +53,7 @@ function validateSbom(bytes, manifest) {
   if (!exact(value, ['spdxVersion', 'dataLicense', 'SPDXID', 'name', 'documentNamespace', 'creationInfo',
     'packages', 'files', 'relationships']) || value.spdxVersion !== 'SPDX-2.3' || value.dataLicense !== 'CC0-1.0'
     || value.SPDXID !== 'SPDXRef-DOCUMENT' || value.name !== `claudey-manager-${manifest.managerVersion}`
-    || value.documentNamespace !== `https://github.com/ramsaijanapana/claude_code_cliProxy/spdx/${manifest.managerVersion}/${manifest.sourceRevision}`
+    || value.documentNamespace !== `https://github.com/ramsaijanapana/claudey/spdx/${manifest.managerVersion}/${manifest.sourceRevision}`
     || !Array.isArray(value.packages) || value.packages.length !== 1
     || value.packages[0]?.name !== 'claudey-manager' || value.packages[0]?.versionInfo !== manifest.managerVersion
     || !Array.isArray(value.files) || value.files.length < 1 || !Array.isArray(value.relationships)

@@ -219,7 +219,7 @@ test('native POSIX bootstrap verifies, activates, updates, forwards exact setup 
   const origin = `http://127.0.0.1:${server.address().port}`;
   const rendered = path.join(temporary, 'install.sh');
   const source = (await fs.readFile(installer, 'utf8')).replace(
-    "PROJECT_ORIGIN='https://github.com/ramsaijanapana/claude_code_cliProxy'", `PROJECT_ORIGIN='${origin}'`);
+    "PROJECT_ORIGIN='https://github.com/ramsaijanapana/claudey'", `PROJECT_ORIGIN='${origin}'`);
   await fs.writeFile(rendered, source, { mode: 0o755 });
   const env = { PATH: process.env.PATH, HOME: home, XDG_DATA_HOME: path.join(home, 'data'),
     XDG_CONFIG_HOME: path.join(home, 'config'), XDG_STATE_HOME: path.join(home, 'state'), LANG: 'C.UTF-8' };

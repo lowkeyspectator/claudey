@@ -45,7 +45,7 @@ export function buildSpdxDocument({ managerVersion, sourceRevision, inventory } 
     const document = {
     spdxVersion: 'SPDX-2.3', dataLicense: 'CC0-1.0', SPDXID: 'SPDXRef-DOCUMENT',
     name: `claudey-manager-${managerVersion}`,
-    documentNamespace: `https://github.com/ramsaijanapana/claude_code_cliProxy/spdx/${managerVersion}/${sourceRevision}`,
+    documentNamespace: `https://github.com/ramsaijanapana/claudey/spdx/${managerVersion}/${sourceRevision}`,
     creationInfo: { created: '1970-01-01T00:00:00Z', creators: ['Tool: claudeyctl-sbom-1'] },
     packages: [{ SPDXID: packageId, name: 'claudey-manager', versionInfo: managerVersion,
       downloadLocation: 'NOASSERTION', filesAnalyzed: true, licenseConcluded: 'NOASSERTION',
