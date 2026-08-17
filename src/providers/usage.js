@@ -96,31 +96,128 @@ async function collectCodexUsage(record, fetchImpl) {
   };
 }
 
-async function collectAntigravityUsage(record, fetchImpl) {
-  if (!record.projectId) return { provider: 'antigravity', status: 'unavailable' };
-  const payload = await fetchJson(fetchImpl, 'https://daily-cloudcode-pa.googleapis.com/v1internal:retrieveUserQuota', {
-    method: 'POST',
-    headers: { authorization: `Bearer ${record.accessToken}`, 'content-type': 'application/json' },
-    body: JSON.stringify({ project: record.projectId })
-  });
+const ANTIGRAVITY_QUOTA_BASES = Object.freeze([
+  'https://daily-cloudcode-pa.sandbox.googleapis.com',
+  'https://daily-cloudcode-pa.googleapis.com',
+  'https://cloudcode-pa.googleapis.com'
+]);
+
+function antigravityHeaders(accessToken) {
+  return {
+    authorization: `Bearer ${accessToken}`,
+    'content-type': 'application/json',
+    accept: 'application/json',
+    'user-agent': 'antigravity'
+  };
+}
+
+function fractionPercent(value) {
+  const remaining = Number(value);
+  if (!Number.isFinite(remaining)) return null;
+  return Math.max(0, Math.min(100, Math.round(remaining * 100)));
+}
+
+function summaryWindowLabel(window) {
+  if (window === 'weekly') return '7d';
+  if (window === '5h') return '5h';
+  return windowLabel(typeof window === 'number' ? window : null) ?? (typeof window === 'string' ? window : null);
+}
+
+function poolExtrasFromSummary(payload) {
+  const groups = Array.isArray(payload?.groups) ? payload.groups : [];
+  const extras = [];
+  for (const group of groups) {
+    if (!group || typeof group !== 'object') continue;
+    const buckets = Array.isArray(group.buckets) ? group.buckets : [];
+    const windows = [];
+    for (const bucket of buckets) {
+      if (!bucket || typeof bucket !== 'object') continue;
+      const remainingPercent = fractionPercent(bucket.remainingFraction);
+      const window = summaryWindowLabel(bucket.window)
+        ?? (typeof bucket.bucketId === 'string' && /weekly/i.test(bucket.bucketId) ? '7d' : null)
+        ?? (typeof bucket.bucketId === 'string' && /5h/i.test(bucket.bucketId) ? '5h' : null);
+      if (remainingPercent == null || !window) continue;
+      windows.push({
+        window,
+        remainingPercent,
+        resetAt: typeof bucket.resetTime === 'string' ? bucket.resetTime : null
+      });
+    }
+    if (windows.length === 0) continue;
+    windows.sort((left, right) => {
+      const order = { '7d': 0, '5h': 1 };
+      return (order[left.window] ?? 9) - (order[right.window] ?? 9);
+    });
+    const remainingPercent = Math.min(...windows.map((item) => item.remainingPercent));
+    const primary = windows.find((item) => item.remainingPercent === remainingPercent) ?? windows[0];
+    const names = [];
+    const bucketIds = buckets.map((bucket) => String(bucket?.bucketId ?? '')).join(' ');
+    const label = `${group.displayName ?? ''} ${group.description ?? ''} ${bucketIds}`.toLowerCase();
+    if (/gemini/i.test(label)) names.push('gemini');
+    if (/claude/i.test(label)) names.push('claude');
+    if (/\bgpt\b|3p/i.test(label)) names.push('gpt');
+    if (names.length === 0) continue;
+    for (const name of names) {
+      extras.push({
+        name,
+        remainingPercent,
+        resetAt: primary.resetAt,
+        window: primary.window,
+        windows: windows.map((item) => Object.freeze({ ...item })),
+        allowed: remainingPercent > 0
+      });
+    }
+  }
+  return extras;
+}
+
+function modelExtrasFromQuota(payload) {
   const buckets = Array.isArray(payload?.buckets) ? payload.buckets : [];
-  const extras = buckets.map((bucket) => {
-    const remaining = Number(bucket?.remainingFraction);
+  return buckets.map((bucket) => {
+    const remainingPercent = fractionPercent(bucket?.remainingFraction);
     return {
       name: typeof bucket?.modelId === 'string' ? bucket.modelId : '',
-      remainingPercent: Number.isFinite(remaining) ? Math.round(remaining * 100) : null,
+      remainingPercent,
       resetAt: typeof bucket?.resetTime === 'string' ? bucket.resetTime : null,
-      window: null,
-      allowed: Number.isFinite(remaining) ? remaining > 0 : null
+      window: '5h',
+      windows: remainingPercent == null ? undefined : [{
+        window: '5h',
+        remainingPercent,
+        resetAt: typeof bucket?.resetTime === 'string' ? bucket.resetTime : null
+      }],
+      allowed: remainingPercent == null ? null : remainingPercent > 0
     };
   }).filter((item) => item.name);
+}
+
+async function fetchAntigravityJson(fetchImpl, pathSuffix, record) {
+  const options = {
+    method: 'POST',
+    headers: antigravityHeaders(record.accessToken),
+    body: JSON.stringify({ project: record.projectId })
+  };
+  for (const base of ANTIGRAVITY_QUOTA_BASES) {
+    const payload = await fetchJson(fetchImpl, `${base}${pathSuffix}`, options);
+    if (payload && typeof payload === 'object') return payload;
+  }
+  return null;
+}
+
+async function collectAntigravityUsage(record, fetchImpl) {
+  if (!record.projectId) return { provider: 'antigravity', status: 'unavailable' };
+  const summary = await fetchAntigravityJson(fetchImpl, '/v1internal:retrieveUserQuotaSummary', record);
+  let extras = poolExtrasFromSummary(summary);
+  if (extras.length === 0) {
+    const quota = await fetchAntigravityJson(fetchImpl, '/v1internal:retrieveUserQuota', record);
+    extras = modelExtrasFromQuota(quota);
+  }
   return {
     provider: 'antigravity',
     status: extras.length > 0 ? 'available' : 'unavailable',
     plan: null,
     remainingPercent: extras.length > 0 ? Math.min(...extras.map((item) => item.remainingPercent ?? 100)) : null,
     resetAt: extras[0]?.resetAt ?? null,
-    window: null,
+    window: extras[0]?.window ?? null,
     extras
   };
 }
@@ -138,18 +235,41 @@ function periodWindow(type) {
   return null;
 }
 
+function nestedVal(value) {
+  if (value && typeof value === 'object' && Number.isFinite(Number(value.val))) return Number(value.val);
+  return Number.isFinite(Number(value)) ? Number(value) : null;
+}
+
+function grokUsedPercent(config) {
+  if (!config || typeof config !== 'object') return null;
+  const explicit = config.creditUsagePercent ?? config.credit_usage_percent;
+  if (Number.isFinite(Number(explicit))) return Number(explicit);
+  const used = nestedVal(config.onDemandUsed ?? config.on_demand_used);
+  const cap = nestedVal(config.onDemandCap ?? config.on_demand_cap);
+  if (used != null && cap != null && cap > 0) return (used / cap) * 100;
+  const period = config.currentPeriod ?? config.current_period;
+  // CodexBar / xAI: a parseable current period with no percent fields means 0% used.
+  if (period && typeof period === 'object' && (period.type || period.end || period.start)) return 0;
+  return null;
+}
+
 async function collectGrokUsage(record, fetchImpl) {
-  const headers = { authorization: `Bearer ${record.accessToken}`, accept: 'application/json' };
+  const headers = {
+    authorization: `Bearer ${record.accessToken}`,
+    accept: 'application/json',
+    'x-xai-token-auth': 'xai-grok-cli'
+  };
   if (record.accountId) headers['x-userid'] = record.accountId;
   const user = await fetchJson(fetchImpl, 'https://cli-chat-proxy.grok.com/v1/user', { headers });
   if (typeof user?.userId === 'string' && user.userId.length > 0) headers['x-userid'] = user.userId;
   const billing = await fetchJson(fetchImpl, 'https://cli-chat-proxy.grok.com/v1/billing?format=credits', { headers });
   const config = billing?.config && typeof billing.config === 'object' ? billing.config : {};
-  const remainingPercent = remainingFromUsedPercent(config.creditUsagePercent ?? config.credit_usage_percent);
+  const remainingPercent = remainingFromUsedPercent(grokUsedPercent(config));
   const period = config.currentPeriod ?? config.current_period ?? {};
   const resetAt = typeof period.end === 'string' ? period.end
     : typeof config.billingPeriodEnd === 'string' ? config.billingPeriodEnd
       : typeof config.billing_period_end === 'string' ? config.billing_period_end : null;
+  const window = periodWindow(period.type);
   const extras = [];
   if (Array.isArray(config.productUsage)) {
     for (const item of config.productUsage) {
@@ -160,7 +280,7 @@ async function collectGrokUsage(record, fetchImpl) {
         name,
         remainingPercent: remainingFromUsedPercent(item.usagePercent ?? item.usage_percent),
         resetAt,
-        window: periodWindow(period.type),
+        window,
         allowed: remainingFromUsedPercent(item.usagePercent ?? item.usage_percent) !== 0
       });
     }
@@ -175,7 +295,7 @@ async function collectGrokUsage(record, fetchImpl) {
         name: model.id,
         remainingPercent,
         resetAt,
-        window: Number.isFinite(model.context_length) ? `${model.context_length} ctx` : periodWindow(period.type),
+        window,
         allowed: remainingPercent !== 0
       });
     }
@@ -188,7 +308,7 @@ async function collectGrokUsage(record, fetchImpl) {
     plan: typeof billing?.subscriptionTier === 'string' ? billing.subscriptionTier : 'xai-oauth',
     remainingPercent,
     resetAt,
-    window: periodWindow(period.type),
+    window,
     extras
   };
 }
@@ -314,10 +434,14 @@ export function usageForModel(model, collected = {}) {
   if (!pack) return Object.freeze({ remainingPercent: null, resetAt: null, window: null, status: 'unknown' });
   const extra = matchExtra(model.id, pack.extras ?? []);
   if (extra) {
+    const windows = Array.isArray(extra.windows)
+      ? Object.freeze(extra.windows.map((item) => Object.freeze({ ...item })))
+      : undefined;
     return Object.freeze({
       remainingPercent: extra.remainingPercent ?? pack.remainingPercent ?? null,
       resetAt: extra.resetAt ?? pack.resetAt ?? null,
       window: extra.window ?? pack.window ?? null,
+      ...(windows ? { windows } : {}),
       status: extra.allowed === false ? 'exhausted' : extra.allowed === true ? 'available' : pack.status
     });
   }
@@ -384,12 +508,20 @@ export function formatUsageLine(model) {
   const usage = model?.usage;
   const title = providerTitle(model?.owned_by);
   const base = typeof model?.id === 'string'
-    ? (title ? `${model.id} — ${title}` : model.id)
+    ? (title ? `${model.id} - ${title}` : model.id)
     : '';
   if (!usage) return base;
   const parts = [base];
-  if (Number.isFinite(usage.remainingPercent)) parts.push(`${usage.remainingPercent}% left`);
-  else if (usage.window) parts.push(String(usage.window));
+  const windows = Array.isArray(usage.windows)
+    ? usage.windows.filter((item) => item && Number.isFinite(item.remainingPercent) && item.window)
+    : [];
+  if (windows.length > 1) {
+    parts.push(windows.map((item) => `${item.remainingPercent}%/${item.window}`).join(' · '));
+  } else if (Number.isFinite(usage.remainingPercent)) {
+    parts.push(`${usage.remainingPercent}% left`);
+  } else if (usage.window) {
+    parts.push(String(usage.window));
+  }
   if (usage.status && usage.status !== 'available' && usage.status !== 'unknown') parts.push(usage.status);
-  return parts.join(' · ');
+  return parts.join(' | ');
 }

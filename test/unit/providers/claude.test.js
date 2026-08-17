@@ -33,7 +33,7 @@ function executableAdapter() {
 const fixtureRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'claudey-claude-unit-'));
 after(() => fs.rm(fixtureRoot, { recursive: true, force: true }));
 const CLAUDE = await resolveVerifiedExecutable({ command: 'claude', platform: process.platform, candidates: [{ path: process.execPath }], adapter: executableAdapter() });
-const FIXTURE_CWD = process.platform === 'win32' ? fixtureRoot : 'C:\\claudey-claude-unit';
+const FIXTURE_CWD = fixtureRoot;
 const TOKEN_BYTES = Buffer.alloc(32, 17);
 const TOKEN_TEXT = TOKEN_BYTES.toString('base64url');
 
@@ -187,6 +187,7 @@ test('constructs only an internal child-scoped routing environment and leaves th
     ANTHROPIC_CUSTOM_MODEL_OPTION: 'gpt-5.6-sol',
     ANTHROPIC_CUSTOM_MODEL_OPTION_NAME: 'gpt-5.6-sol',
     CLAUDE_CODE_SUBAGENT_MODEL: 'gpt-5.6-sol',
+    CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST: '1',
     CLAUDE_CODE_ALWAYS_ENABLE_EFFORT: '1',
     CLAUDE_CODE_MAX_TOOL_USE_CONCURRENCY: '3',
     CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: '1',
@@ -241,12 +242,16 @@ test('mixed --all session accepts a live model from any authenticated provider a
   assert.match(env.ANTHROPIC_BASE_URL, /^http:\/\/127\.0\.0\.1:\d+$/);
   assert.notEqual(env.ANTHROPIC_BASE_URL, 'http://127.0.0.1:8317');
   assert.equal(env.CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY, '1');
+  assert.equal(env.CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST, '1');
   assert.equal(Object.hasOwn(env, 'CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC'), false);
   assert.deepEqual(invocation.args.slice(-4), ['--model', visible, '--fallback-model', visible]);
   const settings = JSON.parse(await fs.readFile(path.join(sessionSettingsDir, 'settings.json'), 'utf8'));
   assert.equal(settings.model, visible);
-  assert.equal(Object.hasOwn(settings, 'availableModels'), false);
+  assert.equal(settings.enforceAvailableModels, true);
+  assert.ok(Array.isArray(settings.availableModels));
+  assert.ok(settings.availableModels.includes(visible));
   assert.equal(settings.env.CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY, '1');
+  assert.equal(settings.env.CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST, '1');
   assert.match(announcements.join('\n'), /\/model/);
   assert.match(announcements.join('\n'), /grok-4.5/);
 });
@@ -301,8 +306,8 @@ test('mixed session keeps duplicate raw model IDs from different providers', asy
     f.calls.at(-1).invocation.args.slice(-4),
     ['--model', visibleModelId('antigravity', 'gpt-5.6-sol'), '--fallback-model', visibleModelId('antigravity', 'gpt-5.6-sol')]
   );
-  assert.match(announced.join('\n'), /gpt-5\.6-sol — Codex/u);
-  assert.match(announced.join('\n'), /gpt-5\.6-sol — Antigravity/u);
+  assert.match(announced.join('\n'), /gpt-5\.6-sol - Codex/u);
+  assert.match(announced.join('\n'), /gpt-5\.6-sol - Antigravity/u);
 });
 
 test('mixed launch normalizes managed visible aliases before labels, alias sync, and picker consumption', async () => {
@@ -340,7 +345,7 @@ test('mixed launch normalizes managed visible aliases before labels, alias sync,
   assert.deepEqual(aliasesSeen.codex[0], {
     name: 'gpt-5.6-sol',
     alias: codexVisible,
-    displayName: 'gpt-5.6-sol — Codex',
+    displayName: 'gpt-5.6-sol - Codex',
     forceMapping: true
   });
   assert.deepEqual(result, { provider: 'codex', model: 'gpt-5.6-sol', exitCode: 0, signal: null });
@@ -527,7 +532,12 @@ test('mixed --all session accepts a cloaked Anthropic id and keeps Claude-writte
   const settings = JSON.parse(await fs.readFile(path.join(sessionSettingsDir, 'settings.json'), 'utf8'));
   assert.equal(settings.theme, 'light');
   assert.equal(settings.model, visibleModelId('grok', 'grok-4.5'));
-  assert.equal(Object.hasOwn(settings, 'availableModels'), false);
+  assert.equal(settings.enforceAvailableModels, true);
+  assert.deepEqual(settings.availableModels.sort(), [
+    visibleModelId('codex', 'gpt-5.6-sol'),
+    visibleModelId('antigravity', 'gemini-3-flash'),
+    visibleModelId('grok', 'grok-4.5')
+  ].sort());
 });
 
 test('sanitizes lifecycle and model-service diagnostics while preserving only stable public error classes', async () => {

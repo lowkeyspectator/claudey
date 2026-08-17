@@ -733,9 +733,23 @@ export function createProductionContainer(environment = process.env) {
   };
 }
 
+async function expandLinkedCandidate(candidate) {
+  const target = typeof candidate === 'string' ? candidate : candidate?.path;
+  if (typeof target !== 'string') return [candidate];
+  try {
+    if (!(await fs.lstat(target)).isSymbolicLink()) return [candidate];
+    const canonical = await fs.realpath(target);
+    return canonical === target ? [candidate] : [candidate, { path: canonical }];
+  } catch {
+    return [candidate];
+  }
+}
+
 export async function resolveClaudeExecutable(environment = process.env, options = {}) {
   const adapter = options.adapter ?? createDefaultExecutableAdapter();
-  const candidates = options.candidates ?? defaultClaudeCandidates(process.platform, environment);
+  const declared = options.candidates ?? defaultClaudeCandidates(process.platform, environment);
+  const candidates = [];
+  for (const declaredCandidate of declared) candidates.push(...await expandLinkedCandidate(declaredCandidate));
   for (const candidate of candidates) {
     try {
       const resolved = await resolveVerifiedExecutable({

@@ -313,7 +313,8 @@ function mediaType(contentType) {
 function allowedContentType(kind, contentType) {
   const value = mediaType(contentType);
   if (kind === 'zip') return ['application/zip', 'application/x-zip-compressed', 'application/octet-stream'].includes(value);
-  return ['application/gzip', 'application/x-gzip', 'application/octet-stream'].includes(value);
+  return ['application/gzip', 'application/x-gzip', 'application/x-gtar', 'application/x-compressed-tar',
+    'application/octet-stream'].includes(value);
 }
 
 function allowedChecksumContentType(contentType) {

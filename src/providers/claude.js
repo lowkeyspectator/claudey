@@ -78,7 +78,9 @@ function safeModel(value) {
 
 function safeCwd(value) {
   if (typeof value !== 'string' || value.length < 1 || value.length > 32_767 || /[\u0000-\u001f\u007f]/.test(value)) return false;
-  if (path.win32.isAbsolute(value)) return !value.startsWith('\\\\') && value.slice(2).includes(':') === false && path.win32.normalize(value) === value;
+  if (process.platform === 'win32') {
+    return path.win32.isAbsolute(value) && !value.startsWith('\\\\') && value.slice(2).includes(':') === false && path.win32.normalize(value) === value;
+  }
   return path.posix.isAbsolute(value) && !value.startsWith('//') && path.posix.normalize(value) === value;
 }
 
@@ -165,10 +167,22 @@ function routedVisibleId(model) {
   return visibleModelId(model.owned_by, model.id);
 }
 
-async function writePickerSettings(directory, { selected }) {
+async function writePickerSettings(directory, { selected, models = [] } = {}) {
   if (typeof directory !== 'string' || directory.length < 2 || /[\u0000-\u001f\u007f]/.test(directory)) throw safety();
   const model = routedVisibleId(selected);
   if (!safeModel(model)) throw safety();
+  const availableModels = [];
+  const seen = new Set();
+  for (const entry of Array.isArray(models) ? models : []) {
+    if (!entry || typeof entry !== 'object' || !GATEWAY_PROVIDERS.includes(entry.owned_by) || !safeModel(entry.id)) continue;
+    const visible = parseVisibleModelId(entry.id)
+      ? entry.id
+      : visibleModelId(entry.owned_by, entry.id);
+    if (!safeModel(visible) || seen.has(visible)) continue;
+    seen.add(visible);
+    availableModels.push(visible);
+  }
+  if (!seen.has(model)) availableModels.unshift(model);
   const settingsPath = path.join(directory, 'settings.json');
   let theme;
   try {
@@ -179,8 +193,11 @@ async function writePickerSettings(directory, { selected }) {
   } catch { /* missing or invalid session settings are replaced */ }
   const payload = `${JSON.stringify({
     model,
+    availableModels,
+    enforceAvailableModels: true,
     env: {
-      CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY: '1'
+      CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY: '1',
+      CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST: '1'
     },
     ...(theme ? { theme } : {})
   }, null, 2)}\n`;
@@ -221,6 +238,8 @@ function buildClaudeChildEnvironment({ environment, host, port, token, model, al
     if (pinSubagent) result.CLAUDE_CODE_SUBAGENT_MODEL = model;
   }
   if (typeof aliases?.configDir === 'string' && aliases.configDir.length > 0) result.CLAUDE_CONFIG_DIR = aliases.configDir;
+  // Prevent ~/.claude/settings.json from overwriting launcher ANTHROPIC_BASE_URL / auth.
+  result.CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST = '1';
   result.CLAUDE_CODE_ALWAYS_ENABLE_EFFORT = '1';
   result.CLAUDE_CODE_MAX_TOOL_USE_CONCURRENCY = '3';
   result.CLAUDE_CODE_SUBPROCESS_ENV_SCRUB = '1';
@@ -340,7 +359,7 @@ export async function launchClaudeProvider({
     catch { throw safety(); }
     const configDir = typeof sessionSettingsDir === 'string' ? sessionSettingsDir : undefined;
     if (configDir) {
-      try { await writePickerSettings(configDir, { selected: matched }); }
+      try { await writePickerSettings(configDir, { selected: matched, models: pickerModels(decorated) }); }
       catch {
         try { await picker.close(); } catch { /* picker close cannot own launch */ }
         throw safety();

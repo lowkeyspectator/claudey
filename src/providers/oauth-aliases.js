@@ -23,7 +23,7 @@ export function buildManagedOAuthAliases(models) {
     const entry = Object.freeze({
       name: rawId,
       alias: visibleModelId(provider, rawId),
-      displayName: `${rawId} — ${title}`,
+      displayName: `${rawId} - ${title}`,
       forceMapping: true
     });
     if (!result[channel]) result[channel] = [];

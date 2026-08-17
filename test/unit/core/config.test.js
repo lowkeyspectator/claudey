@@ -122,13 +122,13 @@ test('renders managed oauth-model-alias entries into gateway config YAML', () =>
       codex: [{
         name: 'gpt-5.6-sol',
         alias: 'anthropic-cdx-codex-gpt-5.6-sol',
-        displayName: 'gpt-5.6-sol — Codex',
+        displayName: 'gpt-5.6-sol - Codex',
         forceMapping: true
       }],
       xai: [{
         name: 'grok-4.5',
         alias: 'anthropic-cdx-grok-grok-4.5',
-        displayName: 'grok-4.5 — Grok',
+        displayName: 'grok-4.5 - Grok',
         forceMapping: true
       }]
     }
@@ -138,7 +138,7 @@ test('renders managed oauth-model-alias entries into gateway config YAML', () =>
   assert.match(bytes, /codex:/u);
   assert.match(bytes, /name: "gpt-5\.6-sol"/u);
   assert.match(bytes, /alias: "anthropic-cdx-codex-gpt-5\.6-sol"/u);
-  assert.match(bytes, /display-name: "gpt-5\.6-sol — Codex"/u);
+  assert.match(bytes, /display-name: "gpt-5\.6-sol - Codex"/u);
   assert.match(bytes, /force-mapping: true/u);
   assert.match(bytes, /xai:/u);
   assert.match(bytes, /alias: "anthropic-cdx-grok-grok-4\.5"/u);

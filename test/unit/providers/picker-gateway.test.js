@@ -55,9 +55,9 @@ test('picker catalog uses provider-labeled display names', () => {
   ]);
   assert.equal(catalog.length, 2);
   assert.equal(catalog[0].id, visibleModelId('codex', 'gpt-5.6-sol'));
-  assert.equal(catalog[0].display_name, 'gpt-5.6-sol — Codex · 40% left');
+  assert.equal(catalog[0].display_name, 'gpt-5.6-sol - Codex | 40% left');
   assert.equal(catalog[1].id, visibleModelId('antigravity', 'gpt-5.6-sol'));
-  assert.equal(catalog[1].display_name, 'gpt-5.6-sol — Antigravity');
+  assert.equal(catalog[1].display_name, 'gpt-5.6-sol - Antigravity');
 });
 
 test('provider-qualified visible IDs are forwarded upstream without stripping or cloaking', () => {

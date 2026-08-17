@@ -18,12 +18,12 @@ test('builds provider-scoped OAuth aliases from the live mixed catalog', () => {
   assert.deepEqual(aliases.codex, [{
     name: 'gpt-5.6-sol',
     alias: visibleModelId('codex', 'gpt-5.6-sol'),
-    displayName: 'gpt-5.6-sol — Codex',
+    displayName: 'gpt-5.6-sol - Codex',
     forceMapping: true
   }]);
   assert.equal(aliases.antigravity[0].alias, visibleModelId('antigravity', 'gpt-5.6-sol'));
   assert.equal(aliases.xai[0].alias, visibleModelId('grok', 'grok-4.5'));
-  assert.equal(aliases.xai[0].displayName, 'grok-4.5 — Grok');
+  assert.equal(aliases.xai[0].displayName, 'grok-4.5 - Grok');
 });
 
 test('rebuilds identical raw-to-visible mappings from a previously aliased gateway catalog', () => {

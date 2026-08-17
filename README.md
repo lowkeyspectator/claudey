@@ -113,6 +113,12 @@ claude-grok [--model MODEL | --select | --yolo] [-- CLAUDE_ARGS...]
 
 `claudey` starts a mixed session by default. `--yolo` enables Claude Code skip-permissions mode (`--dangerously-skip-permissions`). The delimiter is required before other Claude arguments. Values are forwarded as discrete arguments, never reconstructed as a shell command. In a noninteractive terminal, `--model` is required.
 
+### Model picker usage labels
+
+In mixed sessions, `/model` options look like `model-id - Provider | usage` (for example `gemini-3-flash - Antigravity | 61%/7d · 100%/5h` or `grok-4.6 - Grok | 100% left`). Codex, Antigravity, and Grok are gateway-backed. **Cursor Composer is not** in that list — use `claudey models cursor` and Cursor integration commands instead.
+
+Per-provider verify steps, failure tables, and the Composer boundary: [Usage labels and the mixed model picker](docs/usage-and-model-picker.md). Design notes: [2026-08-17 provider usage and picker hardening](docs/superpowers/specs/2026-08-17-provider-usage-and-picker-hardening-design.md).
+
 From this repository checkout on Windows, the same commands are:
 
 ```text
