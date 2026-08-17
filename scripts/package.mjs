@@ -29,7 +29,7 @@ const RUNTIME_SOURCE_FILES = new Set([
   'src/cli/launchers/claude-agy.js', 'src/cli/launchers/claude-grok.js', 'src/cli/launchers/claudey.js', 'src/cli/launchers/claude-codex.js',
   'src/cli/first-run.js',
   'src/cli/main.js', 'src/cli/output.js', 'src/cli/parse.js', 'src/cli/runtime.js', 'src/core/activation.js',
-  'src/core/archive.js', 'src/core/http.js',
+  'src/core/archive.js', 'src/core/brand-migration.js', 'src/core/http.js', 'src/core/identity.js',
   'src/core/checksum.js', 'src/core/config.js', 'src/core/errors.js', 'src/core/executable.js',
   'src/core/fs-safe.js', 'src/core/gateway-client.js', 'src/core/journal.js', 'src/core/lifecycle.js',
   'src/core/limits.js', 'src/core/lock.js', 'src/core/manifest.js', 'src/core/path-mutation.js',

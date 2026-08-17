@@ -44,7 +44,8 @@ async function readAuthRecords(authDir) {
     records.push({
       type: parsed.type,
       accessToken: parsed.access_token,
-      accountId: typeof parsed.account_id === 'string' ? parsed.account_id : null,
+      accountId: typeof parsed.account_id === 'string' ? parsed.account_id
+        : typeof parsed.sub === 'string' ? parsed.sub : null,
       projectId: typeof parsed.project_id === 'string' ? parsed.project_id : null
     });
   }
@@ -124,37 +125,187 @@ async function collectAntigravityUsage(record, fetchImpl) {
   };
 }
 
+function remainingFromUsedPercent(used) {
+  const value = Number(used);
+  if (!Number.isFinite(value)) return null;
+  return Math.max(0, Math.min(100, Math.round(100 - value)));
+}
+
+function periodWindow(type) {
+  if (typeof type !== 'string') return null;
+  if (/WEEKLY/i.test(type)) return '7d';
+  if (/MONTHLY/i.test(type)) return '30d';
+  return null;
+}
+
 async function collectGrokUsage(record, fetchImpl) {
-  const payload = await fetchJson(fetchImpl, 'https://api.x.ai/v1/models', {
+  const headers = { authorization: `Bearer ${record.accessToken}`, accept: 'application/json' };
+  if (record.accountId) headers['x-userid'] = record.accountId;
+  const user = await fetchJson(fetchImpl, 'https://cli-chat-proxy.grok.com/v1/user', { headers });
+  if (typeof user?.userId === 'string' && user.userId.length > 0) headers['x-userid'] = user.userId;
+  const billing = await fetchJson(fetchImpl, 'https://cli-chat-proxy.grok.com/v1/billing?format=credits', { headers });
+  const config = billing?.config && typeof billing.config === 'object' ? billing.config : {};
+  const remainingPercent = remainingFromUsedPercent(config.creditUsagePercent ?? config.credit_usage_percent);
+  const period = config.currentPeriod ?? config.current_period ?? {};
+  const resetAt = typeof period.end === 'string' ? period.end
+    : typeof config.billingPeriodEnd === 'string' ? config.billingPeriodEnd
+      : typeof config.billing_period_end === 'string' ? config.billing_period_end : null;
+  const extras = [];
+  if (Array.isArray(config.productUsage)) {
+    for (const item of config.productUsage) {
+      if (!item || typeof item !== 'object') continue;
+      const name = typeof item.product === 'string' ? item.product : '';
+      if (!name) continue;
+      extras.push({
+        name,
+        remainingPercent: remainingFromUsedPercent(item.usagePercent ?? item.usage_percent),
+        resetAt,
+        window: periodWindow(period.type),
+        allowed: remainingFromUsedPercent(item.usagePercent ?? item.usage_percent) !== 0
+      });
+    }
+  }
+  const models = await fetchJson(fetchImpl, 'https://api.x.ai/v1/models', {
     headers: { authorization: `Bearer ${record.accessToken}`, accept: 'application/json' }
   });
-  const extras = Array.isArray(payload?.data)
-    ? payload.data.filter((model) => model && typeof model.id === 'string').map((model) => ({
-      name: model.id,
-      remainingPercent: null,
-      resetAt: null,
-      window: Number.isFinite(model.context_length) ? `${model.context_length} ctx` : null,
-      allowed: true
-    }))
-    : [];
+  if (Array.isArray(models?.data)) {
+    for (const model of models.data) {
+      if (!model || typeof model.id !== 'string') continue;
+      extras.push({
+        name: model.id,
+        remainingPercent,
+        resetAt,
+        window: Number.isFinite(model.context_length) ? `${model.context_length} ctx` : periodWindow(period.type),
+        allowed: remainingPercent !== 0
+      });
+    }
+  }
+  const status = remainingPercent === 0 ? 'exhausted'
+    : remainingPercent != null || extras.length > 0 ? 'available' : 'unavailable';
   return {
     provider: 'grok',
-    status: extras.length > 0 ? 'available' : 'unavailable',
-    plan: 'xai-oauth',
-    remainingPercent: null,
-    resetAt: null,
-    window: extras[0]?.window ?? null,
+    status,
+    plan: typeof billing?.subscriptionTier === 'string' ? billing.subscriptionTier : 'xai-oauth',
+    remainingPercent,
+    resetAt,
+    window: periodWindow(period.type),
     extras
+  };
+}
+
+function cursorStateDatabase(env = process.env) {
+  if (typeof env.APPDATA === 'string' && env.APPDATA.length > 0) {
+    return path.join(env.APPDATA, 'Cursor', 'User', 'globalStorage', 'state.vscdb');
+  }
+  if (typeof env.HOME === 'string' && env.HOME.length > 0 && process.platform === 'darwin') {
+    return path.join(env.HOME, 'Library', 'Application Support', 'Cursor', 'User', 'globalStorage', 'state.vscdb');
+  }
+  if (typeof env.HOME === 'string' && env.HOME.length > 0) {
+    const config = typeof env.XDG_CONFIG_HOME === 'string' && env.XDG_CONFIG_HOME.length > 0
+      ? env.XDG_CONFIG_HOME : path.join(env.HOME, '.config');
+    return path.join(config, 'Cursor', 'User', 'globalStorage', 'state.vscdb');
+  }
+  return null;
+}
+
+async function loadSqlite() {
+  try {
+    return await import('node:sqlite');
+  } catch {
+    return null;
+  }
+}
+
+async function defaultReadCursorToken(env) {
+  const target = cursorStateDatabase(env);
+  if (!target) return null;
+  const sqlite = await loadSqlite();
+  if (!sqlite?.DatabaseSync) return null;
+  try {
+    const database = new sqlite.DatabaseSync(target, { readOnly: true });
+    try {
+      const row = database.prepare("SELECT value FROM ItemTable WHERE key = 'cursorAuth/accessToken'").get();
+      if (!row || (typeof row.value !== 'string' && typeof row.value !== 'object')) return null;
+      const value = String(row.value ?? '');
+      if (value.length < 8) return null;
+      return value.replace(/^"|"$/g, '');
+    } finally {
+      database.close();
+    }
+  } catch {
+    return null;
+  }
+}
+
+async function collectCursorUsage({ fetchImpl, environment = process.env, readCursorToken } = {}) {
+  const token = await (readCursorToken ?? defaultReadCursorToken)(environment);
+  if (!token) return { provider: 'cursor', status: 'unavailable' };
+  const payload = await fetchJson(fetchImpl, 'https://api2.cursor.sh/aiserver.v1.DashboardService/GetCurrentPeriodUsage', {
+    method: 'POST',
+    headers: {
+      authorization: `Bearer ${token}`,
+      'content-type': 'application/json',
+      'connect-protocol-version': '1'
+    },
+    body: '{}'
+  });
+  if (!payload || typeof payload !== 'object') return { provider: 'cursor', status: 'unavailable' };
+  const plan = payload.planUsage && typeof payload.planUsage === 'object' ? payload.planUsage : {};
+  const remainingPercent = remainingFromUsedPercent(plan.totalPercentUsed);
+  const autoRemaining = remainingFromUsedPercent(plan.autoPercentUsed);
+  const apiRemaining = remainingFromUsedPercent(plan.apiPercentUsed);
+  const cycleEnd = payload.billingCycleEnd;
+  const resetAt = typeof cycleEnd === 'number' && Number.isFinite(cycleEnd) ? new Date(cycleEnd).toISOString()
+    : typeof cycleEnd === 'string' && /^\d+$/u.test(cycleEnd) ? new Date(Number(cycleEnd)).toISOString()
+      : typeof cycleEnd === 'string' ? cycleEnd : null;
+  const extras = [];
+  if (Array.isArray(payload?.autoBucketModels)) {
+    for (const name of payload.autoBucketModels) {
+      if (typeof name !== 'string' || name.length === 0) continue;
+      extras.push({
+        name,
+        remainingPercent: autoRemaining,
+        resetAt,
+        window: 'auto',
+        allowed: autoRemaining !== 0
+      });
+    }
+  }
+  const status = remainingPercent === 0 || plan.totalPercentUsed >= 100 ? 'exhausted'
+    : remainingPercent != null ? 'available' : 'unavailable';
+  return {
+    provider: 'cursor',
+    status,
+    plan: typeof payload?.displayMessage === 'string' ? 'cursor' : 'cursor',
+    remainingPercent: remainingPercent ?? apiRemaining ?? autoRemaining,
+    resetAt,
+    window: 'cycle',
+    extras: extras.length > 0 ? extras : [{
+      name: 'api',
+      remainingPercent: apiRemaining,
+      resetAt,
+      window: 'api',
+      allowed: apiRemaining !== 0
+    }]
   };
 }
 
 function matchExtra(modelId, extras) {
   const needle = normalizeName(modelId);
   if (!needle) return null;
-  return extras.find((item) => {
+  const scored = extras.map((item) => {
     const name = normalizeName(item.name);
-    return name && (name === needle || name.includes(needle) || needle.includes(name));
-  }) ?? null;
+    if (!name) return { item, score: 0 };
+    if (name === needle) return { item, score: 3 };
+    if (needle.includes(name) || name.includes(needle)) return { item, score: 2 };
+    const family = name.replace(/(thinking|agent|preview|fast|low|high|medium|xhigh|extra)+/g, '');
+    const other = needle.replace(/(thinking|agent|preview|fast|low|high|medium|xhigh|extra)+/g, '');
+    if (family && other && (family === other || family.includes(other) || other.includes(family))) {
+      return { item, score: 1 };
+    }
+    return { item, score: 0 };
+  }).filter((entry) => entry.score > 0).sort((left, right) => right.score - left.score);
+  return scored[0]?.item ?? null;
 }
 
 export function usageForModel(model, collected = {}) {
@@ -164,14 +315,11 @@ export function usageForModel(model, collected = {}) {
   const extra = matchExtra(model.id, pack.extras ?? []);
   if (extra) {
     return Object.freeze({
-      remainingPercent: extra.remainingPercent,
-      resetAt: extra.resetAt,
-      window: extra.window,
+      remainingPercent: extra.remainingPercent ?? pack.remainingPercent ?? null,
+      resetAt: extra.resetAt ?? pack.resetAt ?? null,
+      window: extra.window ?? pack.window ?? null,
       status: extra.allowed === false ? 'exhausted' : extra.allowed === true ? 'available' : pack.status
     });
-  }
-  if (provider !== 'codex') {
-    return Object.freeze({ remainingPercent: null, resetAt: pack.resetAt, window: pack.window, status: pack.status });
   }
   return Object.freeze({
     remainingPercent: pack.remainingPercent ?? null,
@@ -186,7 +334,12 @@ export function attachUsage(result, collected) {
   if (Array.isArray(result.models)) {
     return Object.freeze({
       ...result,
-      models: Object.freeze(result.models.map((model) => Object.freeze({ ...model, usage: usageForModel(model, collected) })))
+      models: Object.freeze(result.models.map((model) => {
+        const record = typeof model === 'string'
+          ? { id: model, owned_by: result.provider }
+          : model;
+        return Object.freeze({ ...record, usage: usageForModel(record, collected) });
+      }))
     });
   }
   if (Array.isArray(result.providers)) {
@@ -198,7 +351,9 @@ export function attachUsage(result, collected) {
   return result;
 }
 
-export async function collectProviderUsage({ authDir, fetchImpl = fetch } = {}) {
+export async function collectProviderUsage({
+  authDir, fetchImpl = fetch, environment = process.env, readCursorToken
+} = {}) {
   const records = await readAuthRecords(authDir);
   const collected = {};
   for (const record of records) {
@@ -209,6 +364,11 @@ export async function collectProviderUsage({ authDir, fetchImpl = fetch } = {}) 
     } catch {
       collected[record.type === 'xai' ? 'grok' : record.type] = { provider: record.type, status: 'unavailable' };
     }
+  }
+  try {
+    collected.cursor = await collectCursorUsage({ fetchImpl, environment, readCursorToken });
+  } catch {
+    collected.cursor = { provider: 'cursor', status: 'unavailable' };
   }
   return Object.freeze(collected);
 }

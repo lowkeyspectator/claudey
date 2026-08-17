@@ -1,4 +1,4 @@
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import net from 'node:net';
@@ -248,12 +248,16 @@ function createLauncherContext(environment) {
 }
 
 function createGatewayQueryContext(environment) {
+  const cursor = createCursorQueryContext(environment);
   const context = {
     host: '127.0.0.1',
     port: 8317,
     token: Secret.fromBytes(Buffer.alloc(32, 1)),
     requestModels: requestGatewayModels,
     modelReadyWaitMs: 8_000,
+    cursor,
+    verifyCursorPrerequisite: (...args) => cursor.verifyCursorPrerequisite(...args),
+    listCursorModels: (...args) => cursor.listCursorModels(...args),
     async ensureHealthy() {
       const installed = await loadInstallation(environment);
       await startGatewayProcess(installed);
@@ -263,7 +267,10 @@ function createGatewayQueryContext(environment) {
       return { state: 'healthy' };
     },
     async attachUsage(result) {
-      const collected = await collectProviderUsage({ authDir: managedPaths(environment).authRoot });
+      const collected = await collectProviderUsage({
+        authDir: managedPaths(environment).authRoot,
+        environment
+      });
       return attachUsage(result, collected);
     }
   };
@@ -470,10 +477,51 @@ export async function runProductionLifecycle(command, options = {}, environment 
   return { operation: command === 'restart' ? 'restart' : 'start', state: options.foreground ? 'foreground' : 'started' };
 }
 
+function createCursorQueryContext(environment = process.env) {
+  const run = (args) => {
+    if (process.platform === 'win32' && environment.LOCALAPPDATA) {
+      return spawnSync('C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe', [
+        '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File',
+        path.join(environment.LOCALAPPDATA, 'cursor-agent', 'cursor-agent.ps1'),
+        ...args
+      ], { encoding: 'utf8', windowsHide: true, timeout: 12_000, shell: false });
+    }
+    return spawnSync('cursor-agent', args, {
+      encoding: 'utf8', windowsHide: true, timeout: 12_000, shell: false
+    });
+  };
+  return {
+    async verifyCursorPrerequisite() {
+      try {
+        const result = run(['status', '--format', 'json']);
+        if (result.status !== 0 || typeof result.stdout !== 'string') return false;
+        const parsed = JSON.parse(result.stdout);
+        return parsed?.isAuthenticated === true;
+      } catch { return false; }
+    },
+    async listCursorModels() {
+      const result = run(['models']);
+      if (result.status !== 0 || typeof result.stdout !== 'string') {
+        throw new ClaudeyError('CAPABILITY_UNSUPPORTED', 'The live Cursor model catalog is unavailable.');
+      }
+      const models = [];
+      for (const line of result.stdout.split(/\r?\n/u)) {
+        const match = /^([A-Za-z0-9][A-Za-z0-9._:/-]{0,255})\s+-\s+/u.exec(line.trim());
+        if (match) models.push(match[1]);
+      }
+      if (models.length === 0) {
+        throw new ClaudeyError('CAPABILITY_UNSUPPORTED', 'The live Cursor model catalog is unavailable.');
+      }
+      return { models };
+    }
+  };
+}
+
 export function createProductionContainer(environment = process.env) {
   let launcher;
   let models;
   let auth;
+  let cursor;
   const getLauncher = () => {
     if (!launcher) launcher = createLauncherContext(environment);
     return launcher;
@@ -487,6 +535,7 @@ export function createProductionContainer(environment = process.env) {
       get 'claude-grok'() { return getLauncher(); },
       get models() { return models ??= createGatewayQueryContext(environment); },
       get auth() { return auth ??= createAuthContext(environment); },
+      get cursor() { return cursor ??= createCursorQueryContext(environment); },
       setup: { production: true },
       lifecycle: { production: true },
       status: { production: true }

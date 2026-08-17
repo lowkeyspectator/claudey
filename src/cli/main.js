@@ -59,8 +59,26 @@ function publicCode(error) {
   catch { return 'SAFETY_REFUSAL'; }
 }
 
+async function attachCursorUsage(result, context) {
+  const attach = context.gateway?.attachUsage ?? context.attachUsage;
+  if (typeof attach !== 'function' || !Array.isArray(result?.models)) return result;
+  try {
+    const wrapped = await attach({
+      provider: 'cursor',
+      models: result.models.map((model) => (
+        typeof model === 'string' ? { id: model, owned_by: 'cursor' } : model
+      ))
+    });
+    return { ...result, models: wrapped.models };
+  } catch {
+    return result;
+  }
+}
+
 async function runRoutedModels(command, context = {}) {
-  if (command[1] === 'cursor') return schemaResult(await runCursorModelsCommand(context.cursor ?? context));
+  if (command[1] === 'cursor') {
+    return schemaResult(await attachCursorUsage(await runCursorModelsCommand(context.cursor ?? context), context));
+  }
   if (command[1] !== 'all') return schemaResult(await runModelsCommand(command, context.gateway ?? context));
 
   let gatewayProviders = [];
@@ -82,10 +100,20 @@ async function runRoutedModels(command, context = {}) {
   let cursorError;
   try {
     const result = await runCursorModelsCommand(context.cursor ?? context);
-    cursor = Object.freeze({ provider: 'cursor', status: 'available', models: result.models });
+    cursor = Object.freeze({
+      provider: 'cursor',
+      status: 'available',
+      models: Object.freeze((result.models ?? []).map((model) => (
+        typeof model === 'string' ? Object.freeze({ id: model, owned_by: 'cursor' }) : model
+      )))
+    });
   } catch (error) {
     cursorError = error;
     cursor = Object.freeze({ provider: 'cursor', status: 'unavailable', code: publicCode(error), models: Object.freeze([]) });
+  }
+  const attachUsage = context.gateway?.attachUsage ?? context.attachUsage;
+  if (typeof attachUsage === 'function') {
+    try { cursor = await attachUsage(cursor); } catch { /* usage is best-effort */ }
   }
   const providers = Object.freeze([...gatewayProviders, cursor]);
   const successes = providers.filter(({ status }) => status === 'available').length;

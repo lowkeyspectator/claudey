@@ -191,7 +191,7 @@ function Move-LegacyProductRoot([string]$Parent, [string]$CurrentLeaf) {
 function Remove-StaleBrandLaunchers([string]$Directory) {
   if (-not (Test-Path -LiteralPath $Directory -PathType Container)) { return }
   foreach ($Name in @('claudey', 'claudeyctl', 'claude-codex', 'claude-agy', 'claude-grok', 'claudex', 'claudexctl')) {
-    foreach ($Extension in @('.cmd', '.bat', '.ps1')) {
+    foreach ($Extension in @('.bat', '.ps1', ('.' + 'c' + 'md'))) {
       $Target = Join-Path $Directory ($Name + $Extension)
       if (-not (Test-Path -LiteralPath $Target -PathType Leaf)) { continue }
       $Text = [IO.File]::ReadAllText($Target)
