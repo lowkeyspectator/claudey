@@ -17,6 +17,7 @@ import { downloadVerifiedRelease, resolveRelease } from '../core/release.js';
 import { Secret } from '../core/secrets.js';
 import { buildGatewayConfig } from '../core/config.js';
 import { probeAuthCapabilities } from '../providers/auth.js';
+import { buildManagedOAuthAliases } from '../providers/oauth-aliases.js';
 import { createDefaultExecutableAdapter, resolveVerifiedExecutable } from '../core/executable.js';
 import { defaultClaudeCandidates } from './launchers/claude-codex.js';
 
@@ -164,6 +165,44 @@ async function waitForAuthModels(installed) {
   return modelsReady(installed.port, installed.token);
 }
 
+export async function syncManagedOAuthAliases({ paths, port, token, models, fsApi = fs }) {
+  const oauthModelAlias = buildManagedOAuthAliases(models);
+  const bytes = buildGatewayConfig({
+    port,
+    authDir: paths.authRoot,
+    token,
+    oauthModelAlias
+  });
+  await fsApi.writeFile(path.join(paths.configRoot, 'config.yaml'), bytes, { mode: 0o600 });
+  return Object.freeze({ synced: true, oauthModelAlias });
+}
+
+export async function waitForManagedAliases({
+  host = '127.0.0.1',
+  port,
+  token,
+  aliases,
+  requestModels = requestGatewayModels,
+  timeoutMs = 8_000,
+  delayMs = 100
+}) {
+  const expected = new Set();
+  for (const entries of Object.values(aliases ?? {})) {
+    for (const entry of entries) expected.add(entry.alias);
+  }
+  if (expected.size === 0) return true;
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() <= deadline) {
+    try {
+      const catalog = await requestModels({ host, port, token, allowPreAuthEmpty: true });
+      const present = new Set((catalog?.data ?? []).map((model) => model?.id).filter(Boolean));
+      if ([...expected].every((alias) => present.has(alias))) return true;
+    } catch { /* gateway is still loading managed aliases */ }
+    await delay(delayMs);
+  }
+  return false;
+}
+
 async function readPid(paths) {
   try {
     const text = (await fs.readFile(pidFile(paths), 'utf8')).trim();
@@ -243,6 +282,21 @@ function createLauncherContext(environment) {
       await startGatewayProcess(installed);
       return { host: '127.0.0.1', port: installed.port, token: installed.token };
     },
+    syncOAuthAliases: async ({ models }) => {
+      const installed = await loadInstallation(environment);
+      return syncManagedOAuthAliases({
+        paths: installed.paths,
+        port: installed.port,
+        token: installed.token,
+        models
+      });
+    },
+    waitForAliasReady: async ({ gateway, aliases }) => waitForManagedAliases({
+      host: gateway.host,
+      port: gateway.port,
+      token: gateway.token,
+      aliases
+    }),
     selectModel: async ({ models }) => models[0]?.id
   };
 }

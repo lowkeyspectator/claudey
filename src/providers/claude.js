@@ -23,6 +23,14 @@ async function defaultListModels(provider, gateway) {
   });
 }
 
+async function defaultSyncOAuthAliases() {
+  return { synced: false, oauthModelAlias: {} };
+}
+
+async function defaultWaitForAliasReady() {
+  return true;
+}
+
 const PREFERRED_CODEX_MODEL = 'gpt-5.6-sol';
 const SAFE_ENVIRONMENT = new Map([
   ['PATH', 'PATH'], ['SYSTEMROOT', 'SystemRoot'], ['WINDIR', 'WINDIR'], ['COMSPEC', 'ComSpec'], ['PATHEXT', 'PATHEXT'],
@@ -230,6 +238,8 @@ export async function launchClaudeProvider({
   announce,
   sessionSettingsDir,
   sessionAuthDir,
+  syncOAuthAliases = defaultSyncOAuthAliases,
+  waitForAliasReady = defaultWaitForAliasReady,
   startPicker = startPickerGateway,
   signal
 } = {}) {
@@ -308,7 +318,15 @@ export async function launchClaudeProvider({
   let aliases;
   const routed = mixed ? routedVisibleId(matched) : selected;
   if (mixed) {
-    if (typeof startPicker !== 'function') throw safety();
+    if (typeof syncOAuthAliases !== 'function' || typeof waitForAliasReady !== 'function' || typeof startPicker !== 'function') throw safety();
+    let aliasesReady;
+    try {
+      const aliasResult = await syncOAuthAliases({ models: decorated, gateway });
+      aliasesReady = await waitForAliasReady({ gateway, aliases: aliasResult?.oauthModelAlias });
+    } catch {
+      throw unhealthy();
+    }
+    if (aliasesReady !== true) throw unhealthy();
     try { picker = await startPicker({ ...gateway, models: pickerModels(decorated) }); }
     catch { throw safety(); }
     const configDir = typeof sessionSettingsDir === 'string' ? sessionSettingsDir : undefined;

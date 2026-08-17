@@ -281,6 +281,75 @@ test('mixed session keeps duplicate raw model IDs from different providers', asy
   assert.match(announced.join('\n'), /gpt-5\.6-sol — Antigravity/u);
 });
 
+test('mixed launch syncs oauth aliases before starting the picker', async () => {
+  const events = [];
+  const f = fixture({
+    parsed: {
+      model: visibleModelId('codex', 'gpt-5.6-sol'),
+      select: false,
+      all: true,
+      claudeArgs: [],
+      nonInteractive: true
+    },
+    listModels: async (name) => ({
+      provider: name,
+      status: 'available',
+      models: name === 'codex'
+        ? [{ id: 'gpt-5.6-sol', object: 'model', created: 1, owned_by: 'codex' }]
+        : []
+    }),
+    syncOAuthAliases: async ({ models }) => {
+      events.push(['sync', models.map((model) => `${model.owned_by}:${model.id}`)]);
+      return { synced: true, oauthModelAlias: { codex: [{ alias: visibleModelId('codex', 'gpt-5.6-sol') }] } };
+    },
+    waitForAliasReady: async ({ aliases }) => {
+      events.push(['wait', aliases]);
+      return true;
+    },
+    startPicker: async () => {
+      events.push(['picker']);
+      return { host: '127.0.0.1', port: 19_002, close: async () => {} };
+    }
+  });
+
+  await launchClaudeProvider(f.value);
+
+  assert.deepEqual(events, [
+    ['sync', ['codex:gpt-5.6-sol']],
+    ['wait', { codex: [{ alias: visibleModelId('codex', 'gpt-5.6-sol') }] }],
+    ['picker']
+  ]);
+});
+
+test('mixed launch fails closed when alias readiness never arrives', async () => {
+  const f = fixture({
+    parsed: {
+      model: visibleModelId('codex', 'gpt-5.6-sol'),
+      select: false,
+      all: true,
+      claudeArgs: [],
+      nonInteractive: true
+    },
+    listModels: async (name) => ({
+      provider: name,
+      status: 'available',
+      models: name === 'codex'
+        ? [{ id: 'gpt-5.6-sol', object: 'model', created: 1, owned_by: 'codex' }]
+        : []
+    }),
+    syncOAuthAliases: async () => ({ synced: true, oauthModelAlias: {} }),
+    waitForAliasReady: async () => false,
+    startPicker: async () => {
+      throw new Error('picker must not start');
+    }
+  });
+
+  await assert.rejects(
+    launchClaudeProvider(f.value),
+    (error) => error.code === 'GATEWAY_UNHEALTHY'
+  );
+});
+
 test('mixed --all session accepts a cloaked Anthropic id and keeps Claude-written session theme', async () => {
   const sessionSettingsDir = path.join(fixtureRoot, 'claude-session-theme');
   await fs.mkdir(sessionSettingsDir, { recursive: true });
