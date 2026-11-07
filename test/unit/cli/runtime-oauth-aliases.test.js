@@ -12,7 +12,11 @@ import * as runtime from '../../../src/cli/runtime.js';
 const TOKEN = Secret.fromBytes(Buffer.alloc(32, 23));
 
 test('production launcher context wires oauth alias synchronization and readiness hooks', () => {
-  const context = runtime.createProductionContainer({ HOME: '/tmp/claudey-runtime-home' }).contexts.claudey;
+  const context = runtime.createProductionContainer({
+    HOME: '/tmp/claudey-runtime-home',
+    APPDATA: 'C:\\claudey-test\\Roaming',
+    LOCALAPPDATA: 'C:\\claudey-test\\Local'
+  }).contexts.claudey;
 
   assert.equal(typeof context.syncOAuthAliases, 'function');
   assert.equal(typeof context.waitForAliasReady, 'function');
@@ -183,4 +187,38 @@ test('waitForManagedAliases waits until every expected alias appears in the gate
   assert.equal(ready, true);
   assert.equal(calls.length, 2);
   assert.equal(calls.every((call) => call.allowPreAuthEmpty === true), true);
+});
+
+test('ensureManagedAliasesVisible restarts the gateway once when aliases are missing, then accepts the reloaded catalog', async () => {
+  const timeouts = [];
+  let probes = 0;
+  let restarts = 0;
+  const ready = await runtime.ensureManagedAliasesVisible({
+    gateway: { host: '127.0.0.1', port: 8317, token: TOKEN },
+    aliases: { xai: [{ alias: 'anthropic-cdx-grok-grok-4.7' }] },
+    firstTimeoutMs: 25,
+    secondTimeoutMs: 40,
+    wait: async ({ timeoutMs, aliases }) => {
+      probes += 1;
+      timeouts.push(timeoutMs);
+      assert.equal(aliases.xai[0].alias, 'anthropic-cdx-grok-grok-4.7');
+      return probes > 1;
+    },
+    restart: async () => { restarts += 1; }
+  });
+  assert.equal(ready, true);
+  assert.equal(restarts, 1);
+  assert.deepEqual(timeouts, [25, 40]);
+});
+
+test('ensureManagedAliasesVisible does not restart when the alias catalog is already visible', async () => {
+  let restarts = 0;
+  const ready = await runtime.ensureManagedAliasesVisible({
+    gateway: { host: '127.0.0.1', port: 8317, token: TOKEN },
+    aliases: { xai: [{ alias: 'anthropic-cdx-grok-grok-4.7' }] },
+    wait: async () => true,
+    restart: async () => { restarts += 1; }
+  });
+  assert.equal(ready, true);
+  assert.equal(restarts, 0);
 });

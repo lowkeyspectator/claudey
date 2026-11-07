@@ -1,4 +1,4 @@
-import { spawn, spawnSync } from 'node:child_process';
+import { execFile, spawn, spawnSync } from 'node:child_process';
 import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import net from 'node:net';
@@ -387,6 +387,97 @@ async function startGatewayProcess(installed) {
   throw failure('GATEWAY_UNHEALTHY', 'The managed gateway did not become healthy.');
 }
 
+function execText(file, args) {
+  return new Promise((resolve, reject) => {
+    execFile(file, args, { windowsHide: true, timeout: 5_000, shell: false, maxBuffer: 262_144 }, (error, stdout) => {
+      if (error) reject(error);
+      else resolve(String(stdout ?? ''));
+    });
+  });
+}
+
+function listeningPid(text, port) {
+  const pattern = new RegExp(String.raw`127\.0\.0\.1:${port}\s+\S+\s+LISTENING\s+(\d+)`, 'iu');
+  const match = pattern.exec(text);
+  if (!match) return null;
+  const pid = Number(match[1]);
+  return Number.isSafeInteger(pid) && pid > 0 ? pid : null;
+}
+
+async function windowsExecutablePath(pid) {
+  const text = await execText('C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe', [
+    '-NoLogo', '-NoProfile', '-NonInteractive', '-Command',
+    `$p = Get-CimInstance Win32_Process -Filter 'ProcessId=${pid}'; if ($p) { $p.ExecutablePath }`
+  ]);
+  const line = text.split(/\r?\n/u).map((item) => item.trim()).filter(Boolean).at(-1) ?? '';
+  return line.length > 0 ? line : null;
+}
+
+async function sameExecutable(left, right) {
+  if (typeof left !== 'string' || typeof right !== 'string' || left.length === 0 || right.length === 0) return false;
+  const normalize = (value) => path.win32.normalize(value).replace(/[\\/]+$/u, '').toLowerCase();
+  if (normalize(left) === normalize(right)) return true;
+  try {
+    const [realLeft, realRight] = await Promise.all([fs.realpath(left), fs.realpath(right)]);
+    return normalize(realLeft) === normalize(realRight);
+  } catch {
+    return false;
+  }
+}
+
+async function killStaleManagedListener(installed) {
+  if (process.platform !== 'win32' || await portFree(installed.port)) return true;
+  let listing;
+  try {
+    listing = await execText('C:\\Windows\\System32\\netstat.exe', ['-ano', '-p', 'tcp']);
+  } catch {
+    return false;
+  }
+  const pid = listeningPid(listing, installed.port);
+  if (!pid) return false;
+  let image;
+  try { image = await windowsExecutablePath(pid); } catch { return false; }
+  if (await sameExecutable(image, installed.executable) !== true) return false;
+  try { process.kill(pid, 'SIGKILL'); } catch { /* already gone */ }
+  for (let attempt = 0; attempt < 20 && !(await portFree(installed.port)); attempt += 1) await delay(100);
+  return portFree(installed.port);
+}
+
+async function restartGatewayProcess(environment = process.env) {
+  const installed = await loadInstallation(environment);
+  await stopGatewayProcess(environment);
+  if (!(await portFree(installed.port))) {
+    const freed = await killStaleManagedListener(installed);
+    if (!freed && !(await portFree(installed.port))) {
+      throw failure('PORT_IN_USE', 'The managed gateway port is occupied by an unrelated listener.');
+    }
+  }
+  try { await fs.unlink(pidFile(installed.paths)); } catch { /* already cleared */ }
+  await startGatewayProcess(installed);
+}
+
+export async function ensureManagedAliasesVisible({
+  gateway,
+  aliases,
+  wait = waitForManagedAliases,
+  restart,
+  firstTimeoutMs = 1_500,
+  secondTimeoutMs = 8_000
+} = {}) {
+  const probe = (timeoutMs) => wait({
+    host: gateway?.host,
+    port: gateway?.port,
+    token: gateway?.token,
+    aliases,
+    timeoutMs,
+    delayMs: 100
+  });
+  if (await probe(firstTimeoutMs) === true) return true;
+  if (typeof restart !== 'function') return false;
+  await restart();
+  return await probe(secondTimeoutMs) === true;
+}
+
 async function stopGatewayProcess(environment = process.env) {
   const paths = managedPaths(environment);
   const pid = await readPid(paths);
@@ -427,11 +518,10 @@ function createLauncherContext(environment) {
         models
       });
     },
-    waitForAliasReady: async ({ gateway, aliases }) => waitForManagedAliases({
-      host: gateway.host,
-      port: gateway.port,
-      token: gateway.token,
-      aliases
+    waitForAliasReady: async ({ gateway, aliases }) => ensureManagedAliasesVisible({
+      gateway,
+      aliases,
+      restart: () => restartGatewayProcess(environment)
     }),
     selectModel: async ({ models }) => models[0]?.id
   };
