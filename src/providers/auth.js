@@ -12,7 +12,7 @@ const PRIVATE_DESCRIPTORS = new WeakMap();
 const REVIEWED_AUTH_VERSION = '7.2.130';
 const DEFAULT_CALLBACK_PORTS = Object.freeze({ codex: 1455, antigravity: 51121, grok: 1456 });
 const REQUIRED_FLAGS = Object.freeze(['antigravity-login', 'codex-login', 'config', 'no-browser', 'oauth-callback-port']);
-const KNOWN_LOGIN_FLAGS = new Set(['login', 'antigravity-login', 'claude-login', 'codex-device-login', 'codex-login', 'grok-login', 'kimi-login', 'xai-login']);
+const KNOWN_LOGIN_FLAGS = new Set(['login', 'antigravity-login', 'claude-login', 'codex-device-login', 'codex-login', 'devin-login', 'grok-login', 'kimi-ai-login', 'kimi-login', 'meta-login', 'xai-login']);
 const SAFE_ENVIRONMENT = new Map([
   ['PATH', 'PATH'], ['SYSTEMROOT', 'SystemRoot'], ['WINDIR', 'WINDIR'], ['COMSPEC', 'ComSpec'],
   ['PATHEXT', 'PATHEXT'], ['TEMP', 'TEMP'], ['TMP', 'TMP'], ['HOME', 'HOME'],

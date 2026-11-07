@@ -36,12 +36,12 @@ const CLI = await resolveVerifiedExecutable({
 });
 const HELP = `Usage of CLIProxyAPI\n  -antigravity-login\n  -codex-device-login\n  -codex-login\n  -config string\n  -grok-login\n  -no-browser\n  -oauth-callback-port int\n  -xai-login\n`;
 
-async function capabilities(calls = [], version = '7.2.130') {
+async function capabilities(calls = [], version = '7.2.130', help = HELP) {
   return probeAuthCapabilities({
     cliProxy: CLI,
     run: async (invocation) => {
       calls.push(invocation);
-      return { code: 0, stdout: invocation.args.at(-1) === '--version' ? `CLIProxyAPI ${version}\n` : HELP, stderr: '', cleanupConfirmed: true };
+      return { code: 0, stdout: invocation.args.at(-1) === '--version' ? `CLIProxyAPI ${version}\n` : help, stderr: '', cleanupConfirmed: true };
     }
   });
 }
@@ -123,6 +123,40 @@ test('newer reviewed-help versions keep documented callback defaults when the fl
   assert.equal(descriptor.providers.grok.defaultCallbackPort, 1456);
   const result = await authenticateProvider(authOptions(descriptor));
   assert.equal(result.authenticated, true);
+});
+
+test('accepts CLIProxyAPI 8.0.58 help with xai-login and newer login flags and authenticates grok through xai-login', async () => {
+  const help = [
+    'Usage of CLIProxyAPI',
+    'CLIProxyAPI Version: 8.0.58',
+    '  -antigravity-login',
+    '  -codex-login',
+    '  -config string',
+    '  -debug',
+    '  -devin-login',
+    '  -kimi-ai-login',
+    '  -meta-login',
+    '  -no-browser',
+    '  -oauth-callback-port int',
+    '  -port int',
+    '  -xai-login',
+    ''
+  ].join('\n');
+  const descriptor = await capabilities([], '8.0.58', help);
+  assert.equal(descriptor.providers.grok.browser, true);
+  assert.equal(descriptor.providers.grok.deviceCode, false);
+  assert.equal(descriptor.providers.grok.preferGrokLogin, false);
+  assert.equal(descriptor.providers.grok.defaultCallbackPort, 1456);
+  let invocation;
+  const result = await authenticateProvider(authOptions(descriptor, {
+    provider: 'grok',
+    mode: 'browser',
+    isTTY: true,
+    runInteractive: async (value) => { invocation = value; return { code: 0, signal: null }; }
+  }));
+  assert.equal(result.authenticated, true);
+  assert.equal(invocation.args.at(-1), '--xai-login');
+  assert.equal(invocation.args.includes('--grok-login'), false);
 });
 
 test('constructs only fixed supported provider argv and checks effective callback ports before spawn', async () => {
